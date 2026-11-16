@@ -22,23 +22,27 @@ body that explains why when it is not obvious.
 ## Build and test
 
 Once the workspace exists, the Rust toolchain is pinned in `rust-toolchain.toml` (`rustup`
-installs it on first use) and the other tools the gate needs are pinned in `tools/versions.toml`:
+installs it on first use) and the other tools the gate needs are pinned in `mise.toml` and
+`mise.lock` ([mise](https://github.com/jdx/mise)):
 
 ```text
-cargo xtask doctor          # checks every pinned tool; run it first when local and CI disagree
-cargo xtask install-tools   # installs the ones xtask can install
-cargo xtask quick           # fmt check, architecture, clippy, fast tests: while working
-cargo xtask check           # the full blocking gate: before every commit
+mise install --locked       # installs every pinned tool
+just doctor                 # checks them; run it first when local and CI disagree
+just quick                  # fmt check, architecture, clippy, fast tests: while working
+just check                  # the full blocking gate: before every commit
+just bench                  # benchmarks on the pinned corpus (`just bench-corpus` fetches it)
 ```
 
-`quick` is not `check`; a pull request says which stages it ran. `cargo xtask check --only
-<stages>` runs named stages through the same code CI runs.
+`quick` is not `check`; a pull request says which stages it ran. `just check-only <stage>...`
+runs named stages through the same recipes CI runs. Speed is the product's main value: a change
+to indexing or queries reports what it does to the benchmarks.
 
 ## Architecture and decisions
 
 Read [doc/plan.md](doc/plan.md) (crates and the dependency law are §6). Crate boundaries, the
 purity of the domain crates and which crates may spawn processes or open sockets are enforced by
-`cargo xtask architecture`; fix the structure instead of loosening a lint or a test. A change
+the compiler (`#![no_std]` domain crates), `cargo-deny`, clippy and an architecture test
+(`just check-only architecture`); fix the structure instead of loosening a lint or a test. A change
 that adds or reverses an architectural decision adds an ADR or amends or supersedes one, in the
 same change, together with the tests that pin it.
 

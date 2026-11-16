@@ -7,23 +7,27 @@ is a stdio language server and whose other subcommands are a JSON CLI. Both are 
 one daemon per user (Unix socket, single owner by lock) that indexes the Java sources of many Git
 worktrees of a large Gradle repository at once. Every navigation answer is an envelope with
 `exact`, `possible` and `complete`, and **`complete=true` is never wrong** (ADR 0014). No JVM and no
-build on the request path (ADR 0015). Status: **pre-alpha, planning**; phase 0 measurements decide
-go/no-go (DEC-02). Public, open source (`MIT OR Apache-2.0`).
+build on the request path (ADR 0015). **Speed is the primary value**: every change is measured on
+a pinned real-repository corpus (plan §1.7, ADR 0031). Reuse before building (ADR 0019). Status:
+**pre-alpha, planning**; phase 0 measurements decide go/no-go (DEC-02). Public, open source
+(`MIT OR Apache-2.0`, ADR 0005 Proposed).
 
 ## Docs
 
 | File | What it holds |
 |:--|:--|
-| `doc/plan.md` | Product and architecture: goal and kill criterion (§1), the agent contract and envelope (§2), diagnostics (§3), worktrees, views and freshness (§4), runtime (§5), crates and dependency law (§6), Quint models (§7), phase 0 (§9), milestones (§10), security (§11), open decisions (§14) |
+| `doc/plan.md` | Product and architecture: goal, kill criterion and speed budget (§1, §1.7), the agent contract and envelope (§2), diagnostics (§3), worktrees, views and freshness (§4), runtime (§5), crates and dependency law (§6), Quint models (§7), phase 0 (§9), milestones (§10), security (§11), open decisions (§14), reuse and dependencies (§16) |
+| `doc/bench-corpus.md` | The pinned benchmark repositories and the E1 spike's numbers |
 | `doc/foundation.md` | Engineering rules: dependency law and authority (§2), enforcement (§3), language and lints (§4), logging (§5), persistent state (§6), CI (§7), tool pins (§8), commands (§9), commits (§10), agent contract (§11) |
 | `doc/verification.md` | Test levels (§2), determinism (§3), goldens (§4), contract suites (§5), formal models (§6), oracles (§7), fuzz (§8), benchmarks (§10), agent evaluation (§11) |
 | `doc/sdlc.md` | Ready, procedure, Done, the gate, integration, checkpoints, owner decisions |
-| `doc/required-checks.md` | The CI jobs and the `Required` aggregate (planned until FND-07) |
+| `doc/required-checks.md` | The CI jobs and the `Required` aggregate (planned until FND-05) |
 | `doc/tasks.md` | Decisions (ADR numbers), rules for every task, the live gate, lanes and task cards, ⛳ checkpoints |
 | `doc/adr/` | Decisions, Nygard style; the ADR number is the decision id; index in `doc/adr/README.md` |
 
 Citations read "plan §4.3", "fnd §3", "ver §6"; read the sections a task cites, not whole
-documents. Decisions in `doc/tasks.md` and Accepted ADRs override earlier plan text.
+documents. Decisions in `doc/tasks.md` and Accepted ADRs override earlier plan text. Only ADRs
+0001–0004 are the owner's; the rest are defaults the owner confirms at the FND checkpoint (DEC-07).
 
 ## Workflow
 
@@ -44,37 +48,37 @@ documents. Decisions in `doc/tasks.md` and Accepted ADRs override earlier plan t
 cargo fmt --all --check && cargo clippy --workspace --all-targets --locked -- -D warnings && cargo test --workspace --locked
 ```
 
-From FND-02 on (each command exists once the task named in fnd §9 has landed):
+From FND-02 on (each command exists once the task named in fnd §9 has landed; ADR 0030):
 
 ```bash
-cargo xtask quick                    # fmt check, architecture, clippy, fast tests: while working
-cargo xtask check                    # the full blocking gate: before every commit
-cargo xtask check --only <stages>    # named stages through the same code (what each CI job runs)
-cargo xtask architecture             # crate policy, authority, semantic rules, negative fixtures (FND-04, FND-05)
-cargo xtask list-checks              # every check, machine-readable
-cargo xtask doctor [--all]           # pinned tools; run it first when local and CI disagree
-cargo xtask adr new "<title>" [--number N]   # and `cargo xtask adr index --fix` (FND-03)
-cargo xtask land <sha> --push origin main    # orchestrator only (ADR 0002; FND-03)
+mise install --locked                # every pinned tool from mise.lock (FND-01); `just doctor` checks them
+just quick                           # fmt check, architecture, clippy, fast tests: while working
+just check                           # the full blocking gate: before every commit
+just check-only <stage>...           # named stages through the same recipes (what each CI job runs)
+just bench [suite] [corpus=small]    # benchmarks on the pinned corpus (BENCH-02); `just bench-corpus` fetches it
+adrs new "<title>"                   # a new ADR (FND-03); `just adr-index` checks the index
+scripts/land.sh <sha>                # orchestrator only (ADR 0002; FND-03)
 ```
 
 `quick` is not `check`; never report one as the other. A missing tool fails, never a
 skipped-but-green check. Run the gate in the foreground with `set -o pipefail` semantics (no
-`| tail` in an `&&` chain); commit only on green. A repeatable job becomes an `xtask`
-subcommand. **Never prefix a command with inline `JFL_*`, `QUINT_SEED` or `PROPTEST_*`
-variables**; a scenario that needs one becomes an `xtask` flag. Until FND-03, landing is by hand:
+`| tail` in an `&&` chain); commit only on green. A repeatable job becomes a `just` recipe.
+**Never prefix a command with inline `JFL_*`, `QUINT_SEED` or `PROPTEST_*` variables**; a
+scenario that needs one becomes a recipe parameter. Until FND-03, landing is by hand:
 cherry-pick onto a clean `main`, the gate on the merged tree, push only on green (`doc/sdlc.md`).
 
 ## Enforced rules
 
 - **Dependency law** (plan §6.3, fnd §2): cli → composition → adapters → application → pure
   crates. Adapters never name a sibling adapter, composition or the CLI. Production crates never
-  depend on `jfl-testkit` or `jfl-conformance`; `jfl-oracle` and `jfl-eval` import no production
-  crate. A new crate gets its `members` entry, `architecture.toml` entry and external allowlist in
-  the same commit. Fix an architecture failure in the structure, never by loosening the policy.
-- **Authority** (plan §6.5): pure crates (`jfl-domain`, `jfl-protocol`) use no
-  `std::{fs,net,process,env}`, clock, randomness, threads or Tokio. Children only through
-  `jfl-process` (argv only, never `sh -c`; cleared environment plus an allowlist; deadline; own
-  process group; bounded output) or composition's launcher. Sockets only in `jfl-adapter-ipc`,
+  depend on test-only crates; `jfl-oracle`, `jfl-eval`, `jfl-jdtls` and `jfl-bench` import no
+  production crate. A new crate gets its `members`, `architecture.toml`, `deny.toml` and
+  `clippy.toml` entries in the same commit. Fix an architecture failure in the structure, never by
+  loosening the policy.
+- **Authority** (plan §6.5, fnd §2.3–§2.4): pure crates (`jfl-domain`, `jfl-protocol`) are
+  `#![no_std]` + `alloc`. Children only through `jfl-process` (argv only, never `sh -c`; cleared
+  environment plus an allowlist; deadline; own process group; bounded output), the daemon
+  launcher and the JVM helpers included. Sockets only in `jfl-adapter-ipc`,
   Unix domain, `0600` in a `0700` state dir, peer uid checked; never TCP.
 - **The envelope** (plan §2.1): `exact` only with evidence; `possible` a sound superset with
   reasons; `complete=true` only when every module that can see the target is indexed and fresh at
@@ -103,8 +107,11 @@ cherry-pick onto a clean `main`, the gate on the merged tree, push only on green
   (`/// Pinned by: <path>::<name>`); a performance claim names its benchmark and machine.
 - **Logging** (fnd §5): `tracing`, fixed `snake_case` event names, data in fields; no INFO per
   request; never source text.
-- **Dependencies**: `cargo add`, reason in the commit; `Cargo.lock` committed, builds `--locked`;
-  licences per `deny.toml`; GitHub Actions pinned by commit SHA.
+- **Dependencies**: reuse first; a card's `Reuse considered:` line says what was weighed (ADR
+  0019, plan §16). `cargo add`, reason in the commit; `Cargo.lock` committed, builds `--locked`;
+  licences per `deny.toml`; tools pinned in `mise.toml`; GitHub Actions pinned by commit SHA.
+- **Speed** (ADR 0031): a product task runs on the bench corpus (small at least) and reports the
+  metrics it changes; from M1 a >10 % regression fails. Never loosen a budget.
 - **Decisions** (`doc/adr/README.md`): a change that adds or reverses an architectural decision
   adds or supersedes an ADR in the same commit, with the rules and tests that pin it. Only the
   owner flips Proposed to Accepted or decides a `DEC-` task.
@@ -114,7 +121,8 @@ cherry-pick onto a clean `main`, the gate on the merged tree, push only on green
 - Direct on `main` (ADR 0002): one DCO-signed commit per task, reviewed and landed by the
   orchestrator; implementing agents commit on their lane and never push or tag.
 - Author and `Signed-off-by`: `Patryk Żmigrodzki <pzmi@users.noreply.github.com>` (pass
-  `--author`); the committer stays the environment's identity, which signs (ADR 0003).
+  `--author`); the committer stays the environment's identity (`Claude <noreply@anthropic.com>`),
+  which signs (ADR 0003).
 - Subject `<ID>: summary`, imperative, under 72 chars; a body that says why, names each new
   dependency, and carries an `Impact:` line.
 - Trailer block last, written by hand: `Signed-off-by`, `Co-Authored-By`, `Claude-Session`, the
@@ -132,10 +140,11 @@ cherry-pick onto a clean `main`, the gate on the merged tree, push only on green
   under `setpriv --reuid=<uid> --regid=<gid> --clear-groups` before committing.
 - Node (Quint) and the JDK (Apalache, the javac worker, Java fixtures) are dev-time only; `jfl`
   never needs them to start. Never run Gradle or a build on a target Java repository; use the
-  synthetic fixtures. `gh` may be absent: use the GitHub MCP tools.
+  synthetic fixtures. The bench corpus is read from its cache, never committed; building it runs
+  only in `bench.yml` or owner-side. `gh` may be absent: use the GitHub MCP tools.
 - Hooks (each a no-op until its prerequisite exists): SessionStart installs the pinned toolchain
-  and reports tools; every edited `*.rs` is rustfmt'ed; Stop runs the fast gate when code,
-  manifests, the policy, a model or a fixture changed.
+  and `mise install --locked`; every edited `*.rs` is rustfmt'ed; Stop runs `just quick` (or the
+  fallback) when code, manifests, the policy, tool pins, a model or a fixture changed.
 - Temporary files go in the session scratchpad, never `/tmp` or the repo. Kill only PIDs you
   started, never by pattern. Never end a turn with the gate, a daemon or a JVM still running.
 
@@ -169,6 +178,6 @@ Never commit secrets, tokens, credentials, internal hostnames, personal paths, m
 content of a private repository. **Never name or allude to a private project** of the owner's
 anywhere (code, docs, ADRs, fixtures, evaluation reports, commit messages), and never hint that a
 design came from an unnamed elsewhere (ADR 0004). The public repositories site-preview and mayfly
-may be cited where a design is ported. Nothing from a private target Java repository enters this
+may be cited where a design is borrowed. Nothing from a private target Java repository enters this
 repository: harnesses and runbooks here, runs on the owner's machine, aggregates only. Fixtures are
 synthetic.

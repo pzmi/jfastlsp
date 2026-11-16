@@ -4,7 +4,7 @@ Date: 2026-11-16
 
 ## Status
 
-Accepted (owner, 2026-11-16).
+Proposed (orchestrator default; owner confirms at the FND checkpoint, DEC-07); amended 2026-11-16.
 
 ## Context
 
@@ -30,3 +30,10 @@ not spend the owner's Claude Code budget on evaluation runs unasked.
 Phase 0's progress depends on the owner's time; the orchestrator batches the `(owner)` items into
 checkpoint reports. Evaluation results from a private repository enter this repository only as
 aggregates (ADR 0004).
+
+## Amended 2026-11-16 (planner): M6 folded into M4; two new decision tasks
+
+The reuse survey (ADR 0019) makes the SCIP baseline import a small step once `scip-java` is the
+oracle, so M6 and its decision task are folded into M4 (SEM-08, decided with the resolver at
+DEC-04). DEC-07 now asks the owner to confirm the Proposed defaults at the FND checkpoint
+(this record included); DEC-08 asks whether the agent skills move to a shared plugin.

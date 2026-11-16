@@ -4,7 +4,7 @@ Date: 2026-11-16
 
 ## Status
 
-Accepted (owner, 2026-11-16).
+Accepted (owner, 2026-11-16); amendment proposed 2026-11-16 (ADR 0030).
 
 ## Context
 
@@ -40,3 +40,11 @@ The reasons behind the architecture survive the session that produced them. Unti
 `cargo xtask adr new` and `adr index`, records are created by copying `template.md` and the index
 row is added by hand; from FND-03 on the `docs` stage checks the index against the files. The
 cost is one small file per decision and the discipline to write it in the commit that makes it.
+
+## Amended 2026-11-16 (planner, amendment proposed): ADR tooling is `adrs`
+
+The Consequences named `cargo xtask adr new` and `adr index`. ADR 0030 replaces the xtask port
+with maintained tools: records are created with `adrs new` (the `adrs` crate, 0.13.0) and the
+index is checked by `just adr-index` (FND-03). The format stays Nygard as decided above; `adrs`
+also offers MADR 4, which the owner may adopt by amending this record (listed in DEC-07). Until
+the owner accepts this amendment, the decision above stands and only the tool names change.

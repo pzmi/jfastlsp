@@ -4,7 +4,7 @@ Date: 2026-11-16
 
 ## Status
 
-Proposed.
+Proposed; amended 2026-11-16.
 
 ## Context
 
@@ -35,3 +35,13 @@ resolver's crate is added by SEM-01 per DEC-04.
 - One crate with modules: no compiler-enforced boundaries; `pub(crate)` leaks everything.
 - A process-authority grant per adapter: three places to get argv, environment and process
   groups right instead of one.
+
+## Amended 2026-11-16 (planner): enforcement by tools, not a ported checker
+
+ADR 0030 replaces `cargo xtask architecture`. `architecture.toml` keeps the crate categories,
+the layer matrix and the external allowlist; they are enforced by the compiler (`#![no_std]` on
+pure crates), `cargo-deny` bans with `wrappers`, per-crate clippy `disallowed-*` lists and one
+test crate, `jfl-architecture` (`tools/jfl-architecture`, test only, about 200 lines over
+`cargo_metadata`), which replaces the `xtask` crate in the map. FND-02 lands all of it. Plan §6.1
+also gains `jfl-jdtls` (phase 0 baseline, ADR 0028) and two JVM helpers outside the workspace
+(`java/javac-worker/`, `java/gradle-model/`), both started through `jfl-process`.

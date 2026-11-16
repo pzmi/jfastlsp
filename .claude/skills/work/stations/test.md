@@ -20,11 +20,12 @@ Verify test coverage and run the gate for the working-tree diff. Read `CLAUDE.md
    - **LSP conformance** (ver §2): scripted JSON-RPC transcripts against the built `jfl lsp`: framing, lifecycle, UTF-16 positions, cancellation, unknown methods, malformed frames
    - **integration**: real files in tempdirs, real `git` worktrees, real Unix sockets in a tempdir, real child processes through `jfl-process`
    - **e2e** (`assert_cmd`): the built `jfl` against fixture Java projects copied to a tempdir; stdout, `--json` goldens, stderr and exit codes
-   - **architecture**: `cargo xtask architecture` and its negative fixtures; a new rule has a negative case
+   - **architecture**: `just check-only architecture deny clippy` and their negative cases; a new rule has a negative case
    - **conformance** (ver §6): Quint traces replayed against the real code, plus the negative control
    - **differential and oracle** (ver §7): the completeness oracle (an inserted caller appears in `exact ∪ possible` or `complete=false`) and the envelope-honesty mutation (a flipped resolver rule makes a wrong `exact` fail the suite)
 3. Conventions: `should_<outcome>_when_<condition>`, `// given / when / then`, real objects over fakes, no mocking frameworks, no `#[ignore]`, no sleeps (fake clock, `tokio::time::pause`; real-OS waits only via the testkit `poll` helper), tempdir sockets, `tempfile` dirs. Never assert on log lines. Never the network or a target Java repository.
-4. Run the gate (`cargo xtask check`, or the fallback `doc/tasks.md` names) in the foreground with the lane's `CARGO_TARGET_DIR`, never in the background. Iterate to green. A missing tool is installed at its pinned version or reported; a skipped check is never green. Kill any daemon, JVM worker or child you started, by its PID.
+4. Run the gate (`just check`, or the fallback `doc/tasks.md` names) in the foreground with the lane's `CARGO_TARGET_DIR`, never in the background. Iterate to green. A missing tool is installed at its pinned version or reported; a skipped check is never green. Kill any daemon, JVM worker or child you started, by its PID.
+5. A product task: `just bench <suite>` on the corpus (small at least) and the real-corpus cases (BENCH-05) where they apply; record the metrics it changes, with corpus and machine, for the report.
 5. Failures outside your diff (someone else's WIP): report them, do not fix or hide them.
 
 ## Output

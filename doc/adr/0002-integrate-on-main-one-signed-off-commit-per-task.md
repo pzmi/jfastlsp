@@ -4,7 +4,7 @@ Date: 2026-11-16
 
 ## Status
 
-Accepted (owner, 2026-11-16).
+Accepted (owner, 2026-11-16); amendment proposed 2026-11-16 (ADR 0030).
 
 ## Context
 
@@ -37,3 +37,11 @@ from FND-03, `land`'s refusals of a dirty or stale `main`.
 
 - Pull request per task, owner squash-merges: an owner action per task; slower; no stronger gate.
 - Agents push directly: no review before landing, and interleaved pushes hide which commit broke CI.
+
+## Amended 2026-11-16 (planner, amendment proposed): `land` is a script
+
+The decision is unchanged: one signed-off commit per task, gated on the merged tree, pushed only
+on green. Only the tool changes (ADR 0030): from FND-03 on, the orchestrator lands with
+`scripts/land.sh <sha>` (about 150 lines of shell: fetch, a worktree at `origin/main`,
+cherry-pick, `just check`, push, one retry on a non-fast-forward), not `cargo xtask land`. CI
+adds a DCO check on every pushed commit.

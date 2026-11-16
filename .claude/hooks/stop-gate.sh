@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Stop: refuse to finish a turn that leaves the fast gate red. Runs only when
-# Rust code, manifests, the lockfile, the architecture policy, a pinned-tool
-# file, a Quint model, a golden Java fixture or an LSP transcript changed; a
+# Rust code, manifests, the lockfile, the architecture policy, `deny.toml`, a `clippy.toml`, the
+# justfile, the tool pins, a Quint model, a golden Java fixture or an LSP transcript changed; a
 # clean tree or a docs-only change stops at once, and so does a repository
 # with no Cargo.toml yet (before FND-01) or a machine without cargo or git.
 # `stop_hook_active` is true when Claude is already continuing because of this
@@ -25,15 +25,14 @@ command -v git >/dev/null 2>&1 || exit 0
 git rev-parse --is-inside-work-tree >/dev/null 2>&1 || exit 0
 
 changed="$(git status --porcelain --untracked-files=all 2>/dev/null | awk '{print $NF}' \
-  | grep -E '\.rs$|(^|/)Cargo\.toml$|^Cargo\.lock$|^architecture\.toml$|^tools/versions\.toml$|\.qnt$|^rust-toolchain(\.toml)?$|^\.cargo/config\.toml$|^fixtures/java/|^fixtures/lsp/|\.java$' || true)"
+  | grep -E '\.rs$|(^|/)Cargo\.toml$|^Cargo\.lock$|^architecture\.toml$|^deny\.toml$|(^|/)clippy\.toml$|^justfile$|^mise\.(toml|lock)$|\.qnt$|^rust-toolchain(\.toml)?$|^\.cargo/config\.toml$|^fixtures/|\.java$' || true)"
 [ -z "$changed" ] && exit 0
 
-# `cargo xtask quick` once the alias and the subcommand exist (FND-02); the
-# plain fallback before that (CLAUDE.md, "The gate").
-if grep -qsE '^[[:space:]]*xtask[[:space:]]*=' .cargo/config.toml \
-  && [ -d tools/xtask/src ] && grep -rqs '"quick"' tools/xtask/src; then
-  gate="cargo xtask quick"
-  run() { cargo xtask quick; }
+# `just quick` once the justfile has the recipe (FND-02); the plain fallback
+# before that (CLAUDE.md, "The gate").
+if [ -f justfile ] && command -v just >/dev/null 2>&1 && grep -qsE '^quick([[:space:]]|:)' justfile; then
+  gate="just quick"
+  run() { just quick; }
 else
   gate="cargo fmt --all --check && cargo clippy --workspace --all-targets --locked -- -D warnings && cargo test --workspace --locked"
   run() {

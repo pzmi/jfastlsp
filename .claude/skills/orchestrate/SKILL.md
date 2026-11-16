@@ -5,7 +5,7 @@ description: >
   "work through the task list", "do IDX-01 to IDX-04", "run lane X", "spawn agents for ...", or
   hands over a batch of tasks or a CI failure to drive to green. Runs several `/work`
   tasks through background subagents in git worktrees, reviews each commit, lands it onto
-  `main` with `cargo xtask land` (gate on the merged tree, then push), watches CI through the
+  `main` with `scripts/land.sh` (gate on the merged tree, then push), watches CI through the
   GitHub MCP tools, and stops at ⛳ checkpoints for the owner. One task alone: use `/work`
   directly instead.
 ---
@@ -26,7 +26,7 @@ GitHub Actions run or job URL (a failure to fix), or nothing (the next ready tas
 ## Startup
 
 1. Read `CLAUDE.md`, the top of `doc/tasks.md` (Decisions, Rules for every task, the live gate:
-   the fallback before FND-02, then `cargo xtask check`) and the overview rows of the tasks in
+   the fallback before FND-02, then `just check`) and the overview rows of the tasks in
    scope with their dependencies, model, size, ⛳ mark and "Parallel with" column.
 2. A task is **ready** when every dependency has a commit and the task has none yet. Subjects
    are `<ID>: summary`, so: `git log --oneline main | grep " <dep>:"`. A `DEC-` task is the
@@ -38,8 +38,8 @@ GitHub Actions run or job URL (a failure to fix), or nothing (the next ready tas
    `origin/main`, never from a stale local `main`.
 4. Toolchain: the SessionStart hook installs the pinned toolchain and fetches crates. If it
    reported a missing tool the gate needs (cargo-nextest, cargo-deny, cargo-llvm-cov, quint,
-   the pinned JDK), install it once now at the version `tools/versions.toml` pins (`cargo xtask
-   doctor` says what is missing or wrong; `npm ci --prefix formal` for Quint), not per agent.
+   the pinned JDK), install it once now with `mise install --locked` (`just doctor` says what is missing or
+   wrong), not per agent.
 5. Resources: the sandbox has 4 CPUs and about 15 GB RAM. **At most two lanes run at once**,
    each with `CARGO_BUILD_JOBS=2` and `CARGO_INCREMENTAL=0`. `df -h /` and `free -g` before every
    dispatch round; start fewer lanes, or delete finished lanes' target dirs, rather than fill the
@@ -65,14 +65,14 @@ Shared files that serialise tasks (run them one after another, or expect a rebas
 |:--|:--|:--|
 | `Cargo.toml` (workspace `members`, `[workspace.dependencies]`) | every new crate or shared dep | merge both lists by hand, keep order |
 | `Cargo.lock` | every dependency change | never hand-merge: take the integration side (`git checkout --ours Cargo.lock` in a cherry-pick), then `cargo update -w` to re-resolve; `cargo generate-lockfile` only as a last resort, since it bumps everything |
-| `architecture.toml` (crate lists, edges, external allowlists, authority, exceptions) | every new crate, edge, dependency or rule exception | merge both entries; `cargo xtask architecture` must pass; never loosen to resolve |
-| `tools/xtask/`, `.cargo/config.toml`, `tools/versions.toml` | the gate itself and its pinned tools | serialise: never two lanes on the gate |
-| `MODELS` registry in `tools/xtask/`, `formal/traces/regression/manifest.toml`, `.github/workflows/formal.yml` | every new Quint model or regression trace | one lane owns them per dispatch round |
+| `architecture.toml` (crate lists, edges, external allowlists, authority, exceptions) | every new crate, edge, dependency or rule exception | merge both entries; `just check-only architecture deny` must pass; never loosen to resolve |
+| `justfile`, `mise.toml`, `mise.lock`, `deny.toml`, the `clippy.toml` lists, `tools/jfl-architecture/`, `scripts/` | the gate itself and its pinned tools | serialise: never two lanes on the gate |
+| `formal/models.toml` (the `MODELS` registry), `formal/traces/regression/manifest.toml`, `.github/workflows/formal.yml` | every new Quint model or regression trace | one lane owns them per dispatch round |
 | `jfl-testkit` contract suites and fakes | every adapter that runs a suite | one lane changes a suite at a time; an adapter lane consumes it, never edits it |
 | `jfl-protocol` messages and their goldens | every protocol change | one lane per round; additive only; never rewrite an existing golden |
 | `fixtures/java/` corpus, `fixtures/lsp/` transcripts, `fixtures.lock` | every golden case | add files, never edit another lane's; regenerate the lock after the merge |
 | `doc/tasks.md`, `doc/plan.md` | status notes, minimal corrections | keep both edits |
-| `doc/adr/README.md` | every new ADR | reserve the numbers when dispatching (pass `--number N`); `cargo xtask adr index --fix` regenerates the index; `land` resolves it |
+| `doc/adr/README.md` | every new ADR | reserve the numbers when dispatching; the agent copies the template to its number; `just adr-index` checks the index; `land.sh` resolves it |
 
 ## Model per task
 
@@ -81,7 +81,7 @@ tool's strongest, middle and fastest model. When a row has none:
 
 | Work | Model |
 |:--|:--|
-| Design, protocols, the envelope, views and concurrency, the daemon lifecycle, the resolver, Quint models, the architecture checker, untrusted-input parsers, anything a ⛳ guards | deep |
+| Design, protocols, the envelope, views and concurrency, the daemon lifecycle, the resolver, Quint models, the architecture test, untrusted-input parsers, anything a ⛳ guards | deep |
 | A well-specified implementation with clear `Accept:` | standard |
 | Mechanical: ADR files, doc pointers, a pinned version bump, a lint fix | light |
 | Final multi-aspect review, an incident with unclear cause | the strongest model available |
@@ -103,8 +103,9 @@ Context the task card does not carry: <facts from this session: what CI or the o
 decisions already made, files another lane is changing right now, shared registries, goldens or
 contract suites this lane owns or must not touch>.
 ADR numbers reserved for you: <NNNN, ... | none>; create them with
-`cargo xtask adr new "<title>" --number NNNN` (before FND-03: copy doc/adr/template.md).
-Gate: <`cargo xtask check` | the fallback in CLAUDE.md>, as doc/tasks.md says.
+copying doc/adr/template.md to doc/adr/NNNN-<kebab-title>.md and adding the index row.
+Gate: <`just check` | the fallback in CLAUDE.md>, as doc/tasks.md says. A product task
+also runs `just bench` on the corpus (small at least) and reports the metrics it changed.
 Run it in the foreground with CARGO_TARGET_DIR=<lane target dir>, CARGO_BUILD_JOBS=2 and
 CARGO_INCREMENTAL=0, keeping its exit code (set -o pipefail; no `| tail` in an && chain);
 commit only on green; never end your turn with anything still running; kill only PIDs you
@@ -140,10 +141,11 @@ resetting the worktree"; never discard its uncommitted change without reading it
    For the socket, the lock, `jfl-process`, the Gradle model (trusted code) and every parser of
    untrusted input, the review finishes before `land` starts, never alongside it.
 3. Land **one commit at a time**, and the next only after the previous commit's CI run is
-   green: `cargo xtask land <sha> --push origin main` (`--no-push` lands on the local `main`
-   only). It refuses a dirty or stale `main`, cherry-picks, resolves only `Cargo.lock` and the
-   ADR index, aborts on any other conflict, runs `check` on the merged tree and pushes only when
-   it is green. Integration is direct on `main` (ADR 0002); there is no PR phase. Never land on
+   green: `scripts/land.sh <sha>` (`--no-push` for a dry run). It refuses a dirty checkout,
+   fetches, works in a temporary worktree at `origin/main`, cherry-picks, resolves only
+   `Cargo.lock` and the ADR index, aborts on any other conflict, runs `just check` and
+   `just private-names` on the merged tree and pushes only when it is green. Integration is
+   direct on `main` (ADR 0002); there is no PR phase. Never land on
    red CI. Before FND-03 lands `land` does not exist: cherry-pick onto a clean `main`, run the
    gate (the fallback before FND-02) on the merged tree in the foreground, and push with
    `git push origin main` only on green.
@@ -153,7 +155,7 @@ resetting the worktree"; never discard its uncommitted change without reading it
    later task's agent, never "fix" it here.
 5. A rejected push: `git fetch`, then `land` again. Never force. Then delete the lane's target
    dir if the lane has no next task.
-6. When several commits are ready, land a change to how CI runs (a workflow, an xtask stage, a
+6. When several commits are ready, land a change to how CI runs (a workflow, a `just` recipe, a
    toolchain pin) first, so every later run has it.
 7. Never edit a worktree while its gate or `land` runs in it: a change made under a running
    gate makes its result meaningless; stop the run and start again.
@@ -183,16 +185,18 @@ resetting the worktree"; never discard its uncommitted change without reading it
 
 ## Checkpoints and the owner
 
-- ⛳ tasks: **FND-07, FORMAL-05, DEC-02, IDX-15, LSP-06, SEM-07, REL-06**. A ⛳ task stops its
+- ⛳ tasks: **FND-05, FORMAL-05, DEC-02, IDX-15, LSP-06, SEM-07, REL-06**. A ⛳ task stops its
   lane after its commit is landed and green: run `/review` over `<newest checkpoint-* tag>..HEAD`
   in a subagent (it reads `.claude/skills/review/SKILL.md`), then a **second, adversarial
   subagent** that tries to refute each HIGH and MEDIUM finding and to find what the first
-  missed, aimed at this checkpoint's risks: the gate and the checker's bypasses at FND-07;
-  model invariants that are vacuous or unreachable, and drivers that would pass a broken
-  implementation, at FORMAL-05; numbers in the go/no-go memo that do not follow from the
-  recorded runs at DEC-02; `complete=true` being wrong, cross-view leaks and stale answers after
-  shell edits at IDX-15; UTF-16 positions, cancellation and framing at LSP-06; wrong `exact`
-  answers and false compile errors at SEM-07; provenance, resource limits and crash recovery at
+  missed, aimed at this checkpoint's risks: the gate's bypasses (preflight, clippy lists,
+  `cargo-deny` wrappers, the architecture test) at FND-05, where the owner also decides DEC-07
+  and DEC-08; model invariants that are vacuous or unreachable, and drivers that would pass a
+  broken implementation, at FORMAL-05; numbers in the go/no-go memo or the speed baseline that do
+  not follow from the recorded runs at DEC-02; `complete=true` being wrong, cross-view leaks,
+  stale answers after shell edits and a bench gate that cannot fail at IDX-15; UTF-16 positions,
+  cancellation and framing at LSP-06; wrong `exact` answers and false compile errors at SEM-07;
+  provenance, resource limits and crash recovery at
   REL-06. Hand the surviving findings to a work agent as a fix task, land it, then create the
   local annotated tag `checkpoint-<ID>` (never pushed), report to the owner and wait for a go.
 - At each ⛳, batch the open owner decisions (Proposed ADRs to accept or override, `(owner)`
@@ -212,7 +216,7 @@ resetting the worktree"; never discard its uncommitted change without reading it
 
 | Situation | Do |
 |:--|:--|
-| CI unavailable | Run `cargo xtask check --only <stages>` locally for each CI job's stages, report it as local, and land nothing more until CI confirms. |
+| CI unavailable | Run `just check-only <stages>` locally for each CI job's stages, report it as local, and land nothing more until CI confirms. |
 | Usage limit or session end | Agents' findings and state live in files (`.work/<ID>/`, the scratchpad). Resume each agent by `SendMessage` ("continue WITHOUT resetting"), never by a new spawn. |
 | A long run near the harness's limit (1 to 2 hours for a background command) | Split it (one stage, one model, one shard per run), each with its own explicit timeout. |
 | Disk or memory pressure | Delete finished lanes' target dirs; drop to one lane; never `cargo clean` a lane that is building. |

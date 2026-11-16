@@ -45,14 +45,14 @@ that enforce structure, and [`tasks.md`](tasks.md) owns order. A citation "ver �
 | **Integration** | `crates/jfl-adapter-*/tests/`, `crates/jfl-composition/tests/` | real files and Git repositories in tempdirs, real Unix sockets, real children through `jfl-process`, the pinned JDK | `integration-tests` | the reason is an OS or library fact: `flock`, socket modes, peer credentials, `git` behaviour, `javac` output |
 | **E2E** | `crates/jfl-cli/tests/e2e_*.rs` | the built `jfl`, fixture projects copied to tempdirs, `assert_cmd` | `e2e-tests` | the promise is a process boundary: CLI output, exit codes, spawn on demand, restart |
 | **LSP conformance** | `crates/jfl-cli/tests/lsp_*.rs` + `fixtures/lsp/*.jsonl` | the built `jfl lsp` over stdio, scripted transcripts | `lsp-conformance` | the promise is LSP 3.17 behaviour: framing, lifecycle, encodings, cancellation, errors, every advertised method |
-| **Architecture** | `tools/xtask` + fixtures (fnd §3) | `cargo metadata`, `syn` | `architecture` | the rule is structural: edges, purity, authority, naming |
-| **Conformance** | `formal/` + `crates/jfl-conformance` (§6) | Quint (pinned), ITF traces, real code behind drivers | `formal-*`, `conformance-replay` | a model step must equal what production does |
-| **Formal verify** | `cargo xtask formal-verify` (§6.3) | Apalache (pinned) | weekly, by hand | an invariant must hold for every behaviour to a bound |
-| **Differential and oracles** | `tools/jfl-oracle` (§7) | the built `jfl`, SCIP indexes, the golden corpus | `integration-tests` (corpus), owner-run (target repository) | an answer must agree with an independent indexer, or completeness must survive an inserted caller |
+| **Architecture** | `tools/jfl-architecture` + cases and fixtures (fnd §3) | `cargo_metadata`, the source tree, `cargo-deny`, clippy | `architecture`, `deny`, `clippy` | the rule is structural: edges, purity, authority, naming |
+| **Conformance** | `formal/` + `crates/jfl-conformance` (§6) | Quint (pinned), `quint-connect`, `itf`, real code behind drivers | `formal-*`, `conformance-replay` | a model step must equal what production does |
+| **Formal verify** | `just formal-verify` (§6.3) | Apalache (pinned) | weekly, by hand | an invariant must hold for every behaviour to a bound |
+| **Differential and oracles** | `tools/jfl-oracle` (§7) | the built `jfl`, SCIP indexes, the golden corpus, the real-corpus cases | `integration-tests` (golden corpus), `bench.yml` (real corpus), owner-run (target repository) | an answer must agree with an independent indexer, or completeness must survive an inserted caller |
 | **Fuzz** | `fuzz/` (§8) | `cargo-fuzz` on the pinned nightly | nightly | a parser must survive hostile input |
-| **Mutation** | `cargo xtask mutation` (§9) | `cargo-mutants` | weekly | the question is whether the tests can fail |
-| **Benchmark** | `crates/*/benches/`, `cargo xtask bench` (§10) | Criterion, recorded machine facts | by hand, release | a latency, memory or throughput claim |
-| **Agent evaluation** | `tools/jfl-eval` (§11) | Claude Code transcripts, the target repository | owner-run per milestone | the claim is about agents finishing tasks |
+| **Mutation** | `just mutants-diff`, `just mutation` (§9) | `cargo-mutants` | `mutants-diff` every push; full weekly | the question is whether the tests can fail |
+| **Benchmark** | `crates/*/benches/`, `tools/jfl-bench`, `just bench` (§10) | divan or criterion, hyperfine, the pinned real corpus, recorded machine facts | `bench.yml` on every push to `main`; `bench-gate` from M1 | a latency, memory or throughput claim |
+| **Agent evaluation** | `tools/jfl-eval` over Harbor (§11) | Claude Code trajectories, the target repository, the Multi-SWE-bench control | owner-run per milestone | the claim is about agents finishing tasks |
 
 Rules across levels:
 
@@ -64,7 +64,7 @@ Rules across levels:
    projects copied, never used in place; no fixed paths, no network.
 4. **nextest.** Profiles `default`, `ci` (no fail-fast, JUnit) and `serial`; `retries = 0` in
    every profile; slow-timeout 30 s, terminated after four periods. Tests that start the daemon
-   or a JVM share a test group bounded to the lane's parallelism (FND-08).
+   or a JVM share a test group bounded to the lane's parallelism (FND-02).
 5. **Nothing skips.** A test that cannot find its environment (the pinned JDK, `git`) fails. Tests
    that need the target repository or a Claude Code run live in owner-run harnesses, never in the
    gate.
@@ -111,9 +111,12 @@ the schema. `fixtures.lock` holds each fixture's SHA-256 (`ARCH-fixtures-lock`, 
 | Java summaries | `fixtures/java/summaries/` | the expected `FileSummary` of each corpus file |
 | Resolution cases | `fixtures/java/resolution/` | 200+ cases by construct (static call, field or parameter receiver, chain, `var`, lambda, stream, method reference, overload, inheritance, generics, Lombok member, inner and anonymous classes, static imports) with the expected `exact` target or the expected `possible` reason (EVAL-07) |
 | Class files and JARs | `fixtures/jars/` | built from committed Java sources by a test, never committed as opaque binaries, except malformed inputs for refusal tests |
+| Real-corpus cases | `fixtures/corpus/` | expectations only, keyed by repository, commit, file and position over the pinned corpus of `doc/bench-corpus.md` (definitions, references by construct, symbols), with `scip-java` as the oracle; the corpus code is fetched, never committed (BENCH-05) |
 
 Every Java fixture compiles with the pinned JDK (`java-fixtures` stage, EVAL-07), except files in
-`fixtures/java/broken/` which exist to fail and say so in a header comment.
+`fixtures/java/broken/` which exist to fail and say so in a header comment. Toy fixtures pin
+shapes; **the real corpus pins scale**: every query and index task also runs its correctness
+tests against the real-corpus cases (small corpus in the gate, medium and large in `bench.yml`).
 
 ---
 
@@ -159,12 +162,19 @@ invariant within the simulation bound, so an invariant that can never fail is ca
 
 ### 6.2 Trace replay
 
+Drivers implement [`quint-connect`](https://github.com/informalsystems/quint-connect)'s `Driver`
+trait (0.1.2, Apache-2.0: `step` dispatches Quint actions with its `switch!` macro, the state is
+deserialised with `itf` 0.4); `#[quint_run]` generates and replays random traces and
+`#[quint_test]` runs named Quint tests. quint-connect replays only traces it generates, so the
+replay of committed traces is ours (about 200 lines).
+
 1. `formal/traces/regression/` holds committed ITF traces listed in `manifest.toml` (model, main,
-   init, step, max steps, seed, invariant); `formal-freshness` regenerates each and compares byte
-   for byte (excluding metadata). `formal/traces/generated/` is ignored by Git.
-2. `conformance-replay` generates seeded traces with `quint run --mbt` (a budget per model,
-   starting at 10 traces × 25 steps, measured and ratcheted) and replays them with the committed
-   ones through `jfl-conformance`.
+   init, step, max steps, seed, invariant); `formal-freshness` regenerates each with
+   `quint run --mbt --seed` and compares byte for byte (excluding metadata).
+   `formal/traces/generated/` is ignored by Git.
+2. `conformance-replay` runs the `#[quint_run]` tests with a seed the recipe prints (a budget per
+   model, starting at 10 traces × 25 steps, measured and ratcheted) and replays the committed
+   traces through the same drivers.
 3. A driver decodes each step's action and nondeterministic picks, applies it to the **real** code
    (never a re-implementation of the transition), observes the real state through a canonical
    observation, and compares it with the model's projected state **after every step**, the
@@ -177,7 +187,7 @@ invariant within the simulation bound, so an invariant that can never fail is ca
 
 ### 6.3 Apalache verification lane
 
-`cargo xtask formal-verify [--model M]` runs Apalache (pinned, SHA-256-checked) bounded
+`just formal-verify [model]` runs Apalache (0.62.1, pinned and checksum-verified by mise) bounded
 verification of each model's `allInvariants` plus a long multi-seed simulation. It runs weekly
 and by hand (`formal.yml`, one job per model), not in `check`. A counterexample becomes a
 regression trace.
@@ -224,38 +234,59 @@ test.
 
 ## 9. Mutation testing
 
-`cargo-mutants` over `jfl-domain`, `jfl-protocol`, `jfl-application` and the resolver (REL-05),
-weekly and by hand; survivors are triaged (equivalent, or a missing test added). The curated
-envelope mutants of §7.3 are separate and gate on every push.
+`cargo-mutants` (27.1.0) runs in two places. **In the diff** (`just mutants-diff`, FND-06): every
+push mutates only the changed lines (`--in-diff` against the parent); a missed mutant in
+`jfl-domain`, `jfl-protocol`, `jfl-application` or the resolver fails, elsewhere it is reported.
+**In full** (REL-05), weekly and by hand over the same crates; survivors are triaged (equivalent,
+or a missing test added). The curated envelope mutants of §7.3 are separate and gate on every
+push.
 
 ---
 
 ## 10. Benchmarks and performance claims
 
+Speed is the product's primary value (plan §1.1), so benchmarking starts with the workspace, not
+at the end (ADR 0031, BENCH lane).
+
 1. A latency, memory or throughput claim (in a doc, an ADR, a commit body or a report) names the
-   benchmark or measurement, the machine (CPU, RAM, OS, disk), the input (fixture or target
-   repository, aggregated) and the numbers.
-2. Benchmarks (REL-05): cold and warm full-worktree index; per-request latency for def, hover,
-   refs at 1, 3 and 10 worktrees; `initialize` against a warm daemon; RSS per view and per
-   worker; reconcile after a checkout. Criterion for in-process benches, `cargo xtask bench` for
-   process-level ones, results saved with machine facts.
-3. Budgets in plan §2.5 and §2.7 (`initialize` < 200 ms warm, 300 ms and 2 s deadlines) are
-   promises measured by the benchmark suite; a budget is changed only by the owner, never
-   loosened to make a test pass. A test that times something against a fixed bound runs in the
-   `serial` nextest profile, after the others.
+   benchmark or measurement, the machine (CPU, RAM, OS, disk), the input (corpus size and
+   commit, fixture or target repository, aggregated) and the numbers.
+2. **Corpus:** public Gradle Java repositories, small, medium and large, at fixed commits
+   (`doc/bench-corpus.md`), fetched by `just bench-corpus` into a cache directory outside the
+   repository, never committed.
+3. **Harness** (`tools/jfl-bench`, BENCH-02): hyperfine for the CLI end to end, divan or
+   criterion for in-process benches; JSON results with machine facts. **Metrics:** cold and warm
+   index time, files per second, RSS, the marginal cost of each extra worktree (1, 3, 10), query
+   p50 and p95 per operation, freshness lag after an edit, `initialize` against a warm daemon,
+   reconcile after a checkout. **Arms:** `rg` as the floor, jdtls behind our proxy, kmp-lsp at a
+   pinned commit (BENCH-03).
+4. **Every product task** runs its suites on the corpus (small at least) and reports the metrics
+   it changes in its report and commit body.
+5. **Budgets** are plan §1.7's table. History is kept by github-action-benchmark in the
+   `gh-pages` branch. From M1 on, `bench-gate` fails a push to `main` when a tracked metric
+   regresses by more than 10 % against that history (medians of several runs; a regression must
+   reproduce once, ver §1), and each milestone gate checks the absolute targets on the recorded
+   reference machine. A budget is changed only by the owner, never loosened to make a run pass.
+   A test that times something against a fixed bound runs in the `serial` nextest profile, after
+   the others.
 
 ---
 
 ## 11. Agent evaluation
 
-1. **Harness** (`tools/jfl-eval`, EVAL-01): a task set format (task id, starting commit, prompt,
-   test command, known-good diff reference), arm definitions (plugin set, settings, environment),
-   and a transcript reader that extracts per run: success (the test command after the run),
+1. **Harness** (ADR 0029): [Harbor](https://github.com/harbor-framework/harbor) runs the tasks
+   in Docker with its built-in Claude Code agent, one image per arm with a pre-warmed Gradle
+   cache. `tools/jfl-eval` (EVAL-01) converts a task set (task id, starting commit, prompt, test
+   command, known-good diff reference) into Harbor tasks, defines the arms, and reads the
+   trajectories and transcripts to extract per run: success (the test command after the run),
    tool calls by kind, tokens, edits that broke compilation and whether pushed diagnostics caught
-   them, the LSP operation histogram, and the reaction to empty references.
+   them, the LSP operation histogram, and the reaction to empty references. A smoke task first
+   proves language servers start under `claude -p`; otherwise a thin `stream-json` runner
+   replaces Harbor. `claude plugin eval` is used only for skill-trigger regressions.
 2. **Runs** are owner-run (Claude Code sessions cost money and need the target repository): 3
-   runs per task per arm. The harness produces an aggregated report; if the target repository
-   is private, only the report enters this repository (plan §9.1).
+   runs per task per arm, on the target's tasks and on 10 to 20 Multi-SWE-bench Java (Gradle)
+   instances as an external control (EVAL-12). The harness produces an aggregated report; if the
+   target repository is private, only the report enters this repository (plan §9.1).
 3. **Regression use:** a fixed task subset reruns at each milestone gate (IDX-15, LSP-06,
    SEM-07, REL-06); results are stored with the `jfl` version and the Claude Code version.
 
@@ -266,6 +297,7 @@ envelope mutants of §7.3 are separate and gate on every push.
 | Lane | Runs | Where |
 |:--|:--|:--|
 | `check` | every stage of fnd §9 | every push (CI jobs), before every commit (local) |
+| `bench.yml` | the corpus benchmarks and real-corpus cases; the >10 % gate from M1 | every push to `main`, by hand |
 | `formal.yml` | Apalache per model, fresh-seed conformance | weekly, by hand |
 | `fuzz.yml` | each target for a time budget | nightly, by hand |
 | `mutation.yml` | `cargo-mutants` | weekly, by hand |
@@ -279,7 +311,7 @@ lane that outgrows its budget is split, never silently trimmed.
 
 ## 13. Evidence and reporting
 
-Every run leaves: the command, tool versions (`cargo xtask doctor --json`), seeds, verdicts per
+Every run leaves: the command, tool versions (`mise ls --current`), seeds, verdicts per
 stage, and for owner-run lanes the aggregated report with the `jfl` and Claude Code versions. A
 task report (fnd §11.4) maps each acceptance item to the test or command that proves it. A claim
 without evidence is written as planned or as a limitation.

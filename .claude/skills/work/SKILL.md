@@ -23,15 +23,15 @@ Every station that says "the gate" means the command `doc/tasks.md` names as liv
 
 | Stage of the repo | Gate |
 |:--|:--|
-| Before FND-02 (no `cargo xtask check`) | `cargo fmt --all --check && cargo clippy --workspace --all-targets --locked -- -D warnings && cargo test --workspace --locked` |
-| FND-02 landed | `cargo xtask quick` while iterating, `cargo xtask check` before commit |
+| Before FND-02 (no `just check`) | `cargo fmt --all --check && cargo clippy --workspace --all-targets --locked -- -D warnings && cargo test --workspace --locked` |
+| FND-02 landed | `just quick` while iterating, `just check` before commit (tools from `mise install --locked`) |
 
 `quick` is not `check` (fnd §9). Never report `quick` as the full gate.
 
 Run the gate in the foreground, with the lane's own `CARGO_TARGET_DIR` when the caller names one
 (else one under the session scratchpad), `CARGO_BUILD_JOBS=2` and `CARGO_INCREMENTAL=0` (the
 sandbox has 4 CPUs and at most two lanes), and delete that dir when the task ends. Local green but
-CI red, or the reverse: `cargo xtask doctor` first. Keep the gate's exit code: no `| tail` or
+CI red, or the reverse: `just doctor` first. Keep the gate's exit code: no `| tail` or
 `| head` inside an `&&` chain without `set -o pipefail`.
 
 ## Tooling without `gh`
@@ -51,7 +51,7 @@ Never:
 
 - Ask "shall I proceed?" or confirm commits or checklists. A question is for a real ambiguity only, phrased so one short reply answers it
 - Skip a station, or implement without a plan checklist
-- Run a repeatable job as a bare ad-hoc command once an `xtask` subcommand covers it (`cargo xtask architecture`, not a hand-rolled `cargo metadata | jq`); a missing repeatable job becomes an `xtask` subcommand
+- Run a repeatable job as a bare ad-hoc command once a `just` recipe covers it (`just check-only architecture`, not a hand-rolled `cargo metadata | jq`); a missing repeatable job becomes a recipe
 - Loosen `architecture.toml`, `[workspace.lints]`, `deny.toml`, a Quint invariant, a performance budget or a test to get green, unless the task says so; rewrite a golden fixture (a Java corpus file, an LSP transcript, a `--json` golden); add `#[allow]`/`#[expect]` without an `architecture.toml` exception citing an ADR, `#[ignore]`, or a sleep in a test
 - Add a dependency other than with `cargo add` (name it and why in the commit message)
 - Commit without polish, without a green gate on the exact tree, or without a sign-off
@@ -71,8 +71,10 @@ Always:
 - Commit with the subject `<ID>: <summary>`, a body with why and an `Impact:` line, `--author "Patryk Żmigrodzki <pzmi@users.noreply.github.com>"`, and a trailer block last, in the order `Signed-off-by`, `Co-Authored-By`, `Claude-Session` (ADR 0003). `git commit -s` appends `Signed-off-by` after an existing trailer block, so write every line by hand and drop `-s`
 - Use the `Co-Authored-By` and `Claude-Session` lines the caller's (or session's) attribution instructions give; add none of your own
 - Stage only files you changed (never `git add -A` or `git add .`)
-- Record an architectural decision as an ADR: a change that adds or reverses one adds a new record with `cargo xtask adr new "<title>"` (`--number N` when the caller reserved one; Nygard format: Status, Context, Decision, Consequences; `cargo xtask adr index --fix` updates `doc/adr/README.md`) or supersedes an existing one, in the same commit. Before FND-03 lands, copy `doc/adr/template.md` by hand and add the index row
-- Stop at every checkpoint task (⛳ in `doc/tasks.md`: FND-07, FORMAL-05, DEC-02, IDX-15, LSP-06, SEM-07, REL-06) after the commit: report that a `/review` range is due, and do not start the next task
+- Record an architectural decision as an ADR: a change that adds or reverses one adds a new record with `adrs new "<title>"` (a number the caller reserved: copy `doc/adr/template.md` to `NNNN-title.md`; Nygard format: Status, Context, Decision, Consequences; add the row to `doc/adr/README.md` and run `just adr-index`) or supersedes an existing one, in the same commit. Before FND-03 lands, copy `doc/adr/template.md` by hand and add the index row
+- Reuse before building (ADR 0019): before adding a subsystem, read the card's `Reuse considered:` line and plan §16; a hand-built subsystem with a maintained alternative needs an ADR
+- Measure speed (ADR 0031): a product task runs its benchmarks on the bench corpus (small at least, `just bench`) and reports the metrics it changes; never loosen a budget in plan §1.7
+- Stop at every checkpoint task (⛳ in `doc/tasks.md`: FND-05, FORMAL-05, DEC-02, IDX-15, LSP-06, SEM-07, REL-06) after the commit: report that a `/review` range is due, and do not start the next task
 - Deliver everything up to an `(owner)` criterion and report it as pending
 
 ## Input
@@ -122,7 +124,7 @@ Prompt section. A subagent crash counts as a failed sensor. Subagents work in th
 | Sensor fails twice | Stop. Report station, sensor, output. |
 | No gate passes | Stop. Report station, output, gates. |
 | Gate red for a reason outside the diff | Stop. Report; do not "fix" other people's WIP. |
-| A required tool is missing (nextest, deny, quint, Apalache, the pinned JDK) | Install it at the version `tools/versions.toml` pins (`cargo xtask doctor` says how; `npm ci --prefix formal`) or stop and report; never treat a skipped check as green. |
+| A required tool is missing (nextest, deny, quint, Apalache, the pinned JDK) | Install it with `mise install --locked` (`just doctor` says what is missing) or stop and report; never treat a skipped check as green. |
 | The task needs the target Java repository, a Claude Code run or the owner's machine | Build and test everything against the synthetic fixtures; leave the owner-run step documented and runnable; report the `(owner)` part as pending. |
 | CI red 3 times | Stop at babysit. Report the failing job and step. |
 | Force-push needed | Stop at ship. Ask the owner. |

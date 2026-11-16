@@ -4,7 +4,7 @@ Date: 2026-11-16
 
 ## Status
 
-Proposed.
+Superseded by [0030](0030-foundation-from-maintained-tools.md) (2026-11-16).
 
 ## Context
 

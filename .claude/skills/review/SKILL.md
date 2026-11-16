@@ -29,17 +29,17 @@ range and stop.
    Read those sections, and the ADRs in `doc/adr/` that touch the changed crates. Decisions in
    `doc/tasks.md` and later ADRs override earlier plan text.
 3. Read every changed file in full (not just the hunks), plus the tests beside it.
-4. Run the live gate (`cargo xtask check`, or the fallback in `CLAUDE.md` before FND-02) in the
+4. Run the live gate (`just check`, or the fallback in `CLAUDE.md` before FND-02) in the
    foreground and record pass/fail and the test count. If it rewrites tracked files, report
    which as a finding; do not revert or keep them yourself.
 5. Walk the checklist below. Only report what you verified in the code; cite `file:line`.
 
 ## Checklist
 
-**Enforced architecture** (`architecture.toml`, `cargo xtask architecture`; plan §6, fnd §2,
+**Enforced architecture** (`architecture.toml`, `deny.toml`, the `clippy.toml` lists, `just check-only architecture deny`; plan §6, fnd §2,
 §3): cli → composition → adapters → application → pure crates; adapters never reference sibling
 adapters or composition; `jfl-process` reaches no adapter; production crates never depend on
-`jfl-testkit` or `jfl-conformance`; tool crates (`jfl-oracle`, `jfl-eval`) import no production
+`jfl-testkit` or `jfl-conformance`; tool crates (`jfl-oracle`, `jfl-eval`, `jfl-jdtls`, `jfl-bench`) import no production
 crate; a new crate has its `members` entry, `architecture.toml` entry and external allowlist in
 the same commit, and each new rule has a negative fixture. A change that loosens
 `architecture.toml`, `[workspace.lints]`, `deny.toml` or a test without an ADR is HIGH.
@@ -47,9 +47,13 @@ the same commit, and each new rule has a negative fixture. A change that loosens
 **Authority** (plan §6.5): pure crates use no `std::{fs,net,process,env}`, clock, randomness,
 threads or Tokio; a child process is started only through `jfl-process` (argv only, never
 `sh -c` or a string built from input; cleared environment plus an allowlist; a deadline; its own
-process group, killed as a group; bounded captured output) or composition's daemon launcher;
+process group, killed as a group; bounded captured output), the daemon launcher and the JVM
+helpers included;
 sockets only in `jfl-adapter-ipc`, Unix domain only, never TCP. A spawn, a socket or a
-filesystem write outside the crates plan §6.5 grants it to is HIGH.
+filesystem write outside the crates plan §6.5 grants it to is HIGH. Rules no tool enforces
+(fnd §3.3) are checked here: application command code naming query modules or the reverse, a
+`tracing` value reaching a branch, a hidden seam into composition, a non-literal event name,
+arithmetic on LSP `Position` fields outside `jfl-domain`.
 
 **No JVM on the request path** (ADR 0015, plan §3): a query handler never awaits a `javac`
 worker, a Gradle run or any build; diagnostics are pushed, not requested; `jfl diag` waits with a
@@ -119,7 +123,10 @@ passes by sharing production code is MEDIUM.
 the benchmark or measurement that supports it (ver §10), with the machine and the numbers; an
 "exact" or "complete" claim in a doc or report names the test or oracle run; "seen failing",
 "refused" or "never" in a commit body or report is checked against a test. An unsupported claim
-is MEDIUM; a budget set or loosened without a measurement is HIGH.
+is MEDIUM; a budget set or loosened without a measurement is HIGH. **Speed** (plan §1.7,
+ADR 0031): a product task that changes indexing, queries, storage or the daemon reports its
+metrics on the bench corpus (small at least); a missing report is MEDIUM, a regression over 10 %
+accepted without the owner is HIGH.
 
 **Logging** (fnd §5): `tracing`, fixed `snake_case` event names, data in fields, no INFO on the
 healthy path, no source text, file contents or absolute home paths at INFO or above.
@@ -148,7 +155,11 @@ Missing tests for a new branch is MEDIUM.
 message, in the crate's external allowlist, licence accepted by `deny.toml`, no git or foreign
 registry source without an ADR; a dependency with C code (tree-sitter grammars) named as such;
 `Cargo.lock` consistent (`--locked` passes); Actions pinned by full commit SHA with minimal
-`permissions`; no `pull_request_target` with checkout of untrusted code.
+`permissions`; no `pull_request_target` with checkout of untrusted code. **Reuse** (ADR 0019,
+plan §16): a new subsystem built by hand where a maintained crate or tool fits, without an ADR
+saying why, is MEDIUM; GPL code linked into the binary, EPL code outside a separate process, or
+code, fixtures or positions taken from a non-permissive corpus repository (elasticsearch) is
+HIGH; a tool not pinned in `mise.toml` is MEDIUM.
 
 **Public repository** (ADR 0004): flag any name or path of a private project of the owner's, any
 wording that hints a design came from an unnamed elsewhere ("an earlier project", "the same

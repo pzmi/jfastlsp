@@ -3,10 +3,9 @@
 # gate with no manual setup. Local sessions already have their toolchain, so
 # the hook does nothing outside a remote session. Every step is a no-op while
 # its prerequisite does not exist yet (no rust-toolchain.toml, no Cargo.toml,
-# no Cargo.lock, no tools/versions.toml, no formal/package-lock.json), so the
-# repository works before FND-01, FND-02 and FORMAL-01 land. It never installs
-# heavy optional tools (it prints how instead): not the JDK, not Gradle, not
-# jdtls, not a target Java repository.
+# no Cargo.lock, no mise.toml), so the repository works before FND-01 lands.
+# It installs only what mise.lock pins (the JDK once FORMAL-01 pins it); it
+# never fetches Gradle, jdtls, the bench corpus or a target Java repository.
 set -uo pipefail
 
 if [ "${CLAUDE_CODE_REMOTE:-}" != "true" ]; then
@@ -44,43 +43,37 @@ else
   echo "crates: no Cargo.toml yet; nothing to fetch"
 fi
 
-# Optional tools: report, never fail, never install the heavy ones here.
-# `cargo xtask doctor` is the authority once tools/versions.toml exists.
-if [ -f tools/versions.toml ]; then
-  for tool in cargo-nextest cargo-deny cargo-llvm-cov cargo-mutants; do
-    if grep -qs "^\[tools\.${tool}\]" tools/versions.toml; then
-      if command -v "$tool" >/dev/null 2>&1; then
-        echo "$tool: present"
-      else
-        echo "$tool: missing; \`cargo xtask doctor\` names the pinned version to install"
-      fi
+# Pinned tools (ADR 0030): mise installs everything in mise.lock once mise.toml
+# exists (FND-01), Quint, Apalache and the JDK included once FORMAL-01 adds
+# them. A failed install is reported, never fatal: `just doctor` names what is
+# missing.
+if [ -f mise.toml ]; then
+  if command -v mise >/dev/null 2>&1; then
+    if log="$(mise install --locked 2>&1)"; then
+      echo "tools: installed from mise.lock"
+    else
+      printf 'tools: `mise install --locked` failed (run `just doctor`):\n%s\n' "$(printf '%s\n' "$log" | tail -n 20)"
     fi
-  done
+  else
+    echo "tools: mise missing; install it from https://mise.jdx.dev, then run \`mise install --locked\`"
+  fi
 else
-  echo "tools: no tools/versions.toml yet (FND-02); nothing pinned to check"
-fi
-if [ -x formal/node_modules/.bin/quint ]; then
-  echo "quint: present"
-elif [ -f formal/package-lock.json ]; then
-  echo "quint: missing; run \`npm ci --prefix formal\` (dev-time only; Node $(node --version 2>/dev/null || echo missing))"
-else
-  echo "quint: not needed yet (no formal/package-lock.json; FORMAL-01)"
+  echo "tools: no mise.toml yet (FND-01); nothing pinned to install"
 fi
 
 # The JDK: the javac worker tests, the Gradle model tests and Apalache need
-# one at the major version tools/versions.toml pins. Report only.
+# one at the version mise.toml pins (FORMAL-01). Report only.
 if command -v java >/dev/null 2>&1; then
   echo "java: $(java -version 2>&1 | grep -v '^Picked up' | head -n 1)"
 else
-  echo "java: missing; only the JVM-backed stages need it (\`cargo xtask doctor --all\` names the pin)"
+  echo "java: missing; only the JVM-backed stages need it (\`just doctor\` names the pin)"
 fi
 
 if [ -f Cargo.toml ]; then
-  if grep -qsE '^[[:space:]]*xtask[[:space:]]*=' .cargo/config.toml \
-    && [ -d tools/xtask/src ] && grep -rqs '"check"' tools/xtask/src; then
-    echo "jfastlsp ready: run \`cargo xtask quick\` while working, \`cargo xtask check\` before commit (see doc/tasks.md)"
+  if [ -f justfile ] && grep -qsE '^check([[:space:]]|:)' justfile; then
+    echo "jfastlsp ready: run \`just quick\` while working, \`just check\` before commit (see doc/tasks.md)"
   else
-    echo "jfastlsp ready: the gate is the fallback in CLAUDE.md until xtask exists (FND-02)"
+    echo "jfastlsp ready: the gate is the fallback in CLAUDE.md until the justfile has it (FND-02)"
   fi
 else
   echo "jfastlsp: no code yet; see doc/tasks.md for the first task (FND-01)"

@@ -4,7 +4,7 @@ Date: 2026-11-16
 
 ## Status
 
-Proposed.
+Proposed; amended 2026-11-16.
 
 ## Context
 
@@ -31,3 +31,9 @@ lane's work; a missing tool silently skipped makes a red tree look green.
 
 `CLAUDE.md` and `.claude/` belong to the orchestrator; a task agent reports a needed change.
 Changing the deny list is an ADR amendment.
+
+## Amended 2026-11-16 (planner): the gate's commands changed
+
+With ADR 0030 the allow list names `just`, `mise`, `adrs` and `scripts/land.sh` instead of
+`cargo xtask`; SessionStart runs `mise install --locked` once `mise.toml` exists, and Stop runs
+`just quick` once the justfile has it. The deny list is unchanged.

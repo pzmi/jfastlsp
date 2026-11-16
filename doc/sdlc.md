@@ -34,23 +34,25 @@ are the real procedure; this section summarises it.
 1. **Orchestrate.** The orchestrator never implements. It picks the ready tasks, creates one git
    worktree per lane under the session scratchpad from a fetched `origin/main`, and starts one
    background agent per task, at most two at a time. Tasks that change the same shared file
-   (`Cargo.toml`, `Cargo.lock`, `architecture.toml`, `tools/xtask/`, `doc/tasks.md`, the model
-   registry, protocol goldens) run one after another.
+   (`Cargo.toml`, `Cargo.lock`, `architecture.toml`, `deny.toml`, the `clippy.toml` lists, the
+   `justfile`, `mise.toml` and `mise.lock`, `tools/jfl-architecture/`, `doc/tasks.md`, the model
+   registry, protocol goldens, `doc/bench-corpus.md`) run one after another.
 2. **Work.** The agent runs the stations `intake`, `plan`, `implement`, `test`, `polish`,
    `review`, `qa`, `ship`, writing its state to `.work/<ID>/` (ignored by git). It updates the
    architecture policy or an ADR first when a new dependency or authority is needed; the Quint
    model first for a change to views, the daemon lifecycle or diagnostics publication; the golden
    first for a protocol, `--json` or LSP change; writes failing tests before the smallest
-   implementation; runs `cargo xtask quick` while working and the full gate before the commit;
-   and reports exactly which gates ran.
+   implementation; runs `just quick` while working and the full gate (`just check`) before the
+   commit; runs a product task's benchmarks on the corpus (small at least) and reports the metrics
+   it changed (ADR 0031); and reports exactly which gates ran.
 3. **Commit.** Exactly one commit on its lane branch: subject `<ID>: <summary>`, a body that says
    why, an `Impact:` line, then the trailer block (`Signed-off-by`, `Co-Authored-By`,
    `Claude-Session`, in that order, written by hand). Only its own files are staged. The agent
    does not push, tag or touch `main`.
 4. **Review.** The orchestrator runs a read-only `/review` over every task commit before landing
    it; HIGH and MEDIUM findings go back to the task's agent.
-5. **Land.** `cargo xtask land <sha> --push origin main`: one commit at a time, the next only
-   after the previous commit's CI is green; `check` on the merged tree; push only on green.
+5. **Land.** `scripts/land.sh <sha>`: one commit at a time, the next only after the previous
+   commit's CI is green; `just check` on the merged tree; push only on green (ADR 0002, ADR 0030).
    **Until FND-03 lands `land`**, the orchestrator does it by hand: `git fetch`, a clean `main`
    equal to `origin/main`, `git cherry-pick <sha>`, the live gate on the merged tree in the
    foreground (the fallback until FND-02), `git push origin main` only on green.
@@ -70,7 +72,7 @@ A task is done when:
 - the live gate exits 0 on the merged tree (`quick` is never reported as `check`);
 - the architecture rules and their negative fixtures pass;
 - the commit is signed off, has the task's subject, and states its impact;
-- it is on `main` and `Required` is green for that commit (once FND-07 has landed);
+- it is on `main` and `Required` is green for that commit (once FND-05 has landed);
 - the report names the gates that ran, their versions and seeds, the `(owner)` items left
   pending, and anything that did not run.
 
@@ -82,10 +84,12 @@ reported as green. A ⛳ task is done only after the checkpoint review below.
 | Stage of the repository | Gate |
 |:--|:--|
 | Before FND-02 | the fallback: `cargo fmt --all --check && cargo clippy --workspace --all-targets --locked -- -D warnings && cargo test --workspace --locked` |
-| From FND-02 | `cargo xtask quick` while working; `cargo xtask check` before every commit and in `land` |
+| From FND-02 | `just quick` while working; `just check` before every commit and in `scripts/land.sh` |
 
-The stages of `check` are listed in fnd §9 and printed by `cargo xtask list-checks`; each CI job
-runs `cargo xtask check --only <stages>` ([`required-checks.md`](required-checks.md)).
+Tools come from `mise install --locked`. The stages of `check` are listed in fnd §9 and by
+`just --list`; each CI job runs `just check-only <stage>…`
+([`required-checks.md`](required-checks.md)). From M1 on the `bench-gate` stage fails a tracked
+metric that regresses by more than 10 % (plan §1.7).
 
 ## 5. Integration procedure
 
@@ -110,7 +114,10 @@ runs `cargo xtask check --only <stages>` ([`required-checks.md`](required-checks
   aimed at the checkpoint's named risks, has HIGH and MEDIUM findings fixed as a follow-up commit,
   tags `checkpoint-<ID>` locally, reports to the owner and waits for a go.
 - Owner decisions are batched into each checkpoint report: Proposed ADRs to accept or override,
-  `(owner)` acceptance items pending, `DEC-` tasks ready for a decision.
+  `(owner)` acceptance items pending, `DEC-` tasks ready for a decision. Only ADRs 0001–0004 are
+  Accepted; every other record, including the licence (0005), the platforms (0006), Quint (0007),
+  no event sourcing (0008), phase 0 (0009) and the reuse decisions (0019–0031), is an orchestrator
+  default the owner confirms at the FND checkpoint (DEC-07).
 - **`DEC-` tasks** record an owner decision as an ADR. An agent may prepare the inputs (a
   criteria sheet, a memo with the numbers, a draft ADR marked Proposed); only the owner decides,
   and the ADR's status says so.

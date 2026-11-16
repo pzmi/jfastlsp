@@ -1,15 +1,16 @@
 # Required checks
 
 > **Status: planned.** Nothing here runs yet: `.github/workflows/ci.yml` does not exist until
-> FND-07 lands. Until then CI is absent and the orchestrator runs the live gate locally on the
-> merged tree before every push ([`sdlc.md`](sdlc.md) §2). This page lists the jobs FND-07
-> creates; FND-07 rewrites it from the real workflow and adds the test that keeps the two in step.
+> FND-05 lands. Until then CI is absent and the orchestrator runs the live gate locally on the
+> merged tree before every push ([`sdlc.md`](sdlc.md) §2). This page lists the jobs FND-05
+> creates; FND-05 rewrites it from the real workflow, and the architecture test's lockstep rule
+> (`ARCH-ci-lockstep`) keeps the two in step.
 
 The CI result that must be green on `main` will be the `required` job of
 `.github/workflows/ci.yml`. It is an aggregate: it needs every other job of the workflow and fails
 when any of them failed, was cancelled or was skipped, so a job cannot drop out of the gate by not
-running (fnd §7.2). Each job runs `cargo xtask check --only <stages>`, so the same stages run on a
-laptop with `cargo xtask check`.
+running (fnd §7.2). Each job runs `mise install --locked`, then `just check-only <stage>…`, so the
+same recipes run on a laptop with `just check`.
 
 ## Branch protection
 
@@ -21,19 +22,21 @@ editing the ruleset.
 
 ## The planned checks
 
-| Job id | Display name | Runs (`cargo xtask ...`) | Arrives with |
+| Job id | Display name | Runs (`just ...`) | Arrives with |
 |:--|:--|:--|:--|
-| `architecture` | Architecture and policy | `check --only architecture` | FND-07 |
-| `static` | Static quality | `doctor`, then `check --only fmt-check,clippy,docs` | FND-07 |
-| `tests` | Tests (Linux x86-64) | `check --only unit-tests,integration-tests,doctests` | FND-07 |
-| `linux-arm` | Linux (arm64) | `test --only platform-tests` on `ubuntu-24.04-arm` | FND-07 |
-| `macos` | macOS (arm64) | `test --only platform-tests` on `macos-15` | FND-07 |
-| `security` | Security | `check --only deny,secrets,workflows,action-pins` | FND-07 |
-| `coverage` | Coverage | `check --only coverage,changed-lines` (full history) | FND-08 |
-| `formal` | Formal models (Quint) | `check --only formal-typecheck,formal-test,formal-freshness,conformance-replay` | FORMAL-01, FORMAL-02 |
-| `fixtures` | Java fixtures | `check --only java-fixtures` (pinned JDK) | EVAL-07 |
-| `e2e` | End to end | `check --only e2e-tests,lsp-conformance` | IDX-13, LSP-01 |
-| `required` | Required | the aggregate; needs all of the above | FND-07 |
+| `architecture` | Architecture and policy | `check-only architecture deny` | FND-05 |
+| `static` | Static quality | `doctor`, then `check-only fmt-check clippy docs` | FND-05 |
+| `tests` | Tests (Linux x86-64) | `check-only unit-tests integration-tests doctests` | FND-05 |
+| `linux-arm` | Linux (arm64) | `check-only platform-tests` on `ubuntu-24.04-arm` | FND-05 |
+| `macos` | macOS (arm64) | `check-only platform-tests` on `macos-15` | FND-05 |
+| `security` | Security | `check-only secrets workflows` | FND-05 |
+| `dco` | DCO | every pushed commit signed off by its author | FND-05 |
+| `coverage` | Coverage | `check-only coverage changed-lines mutants-diff` (full history) | FND-06 |
+| `formal` | Formal models (Quint) | `check-only formal-typecheck formal-test formal-freshness conformance-replay` | FORMAL-01, FORMAL-02 |
+| `fixtures` | Java fixtures | `check-only java-fixtures` (pinned JDK) | EVAL-07 |
+| `e2e` | End to end | `check-only e2e-tests lsp-conformance` | IDX-13, LSP-01 |
+| `bench-gate` | Benchmarks (small corpus) | `check-only bench-gate`: >10 % regression against the history fails | BENCH-04, active from IDX-15 |
+| `required` | Required | the aggregate; needs all of the above | FND-05 |
 
 Every stage of `check` will be in exactly one job; a test fails when a stage is in none or in two,
 and when a gating step has `continue-on-error` or an `if:`. Runs on `main` are never cancelled or
@@ -41,7 +44,9 @@ replaced by a newer push: each commit there has its own concurrency group.
 
 ## Other workflows
 
-Not in `required`: `security.yml` (weekly: new advisories can fail an unchanged tree),
+Not in `required`: `security.yml` (weekly: new advisories can fail an unchanged tree; zizmor's
+online audits; the `private-names` grep, which needs a secret fork pull requests lack),
+`bench.yml` (medium and large corpus, history upload),
 `codeql.yml`, `scorecard.yml`, `formal.yml` (Apalache, weekly and by hand), `fuzz.yml` (nightly),
 `mutation.yml` (weekly), `release.yml` (tags). A red run of any of them is reported to the owner
 and fixed as a task (fnd §7.1).
@@ -49,8 +54,8 @@ and fixed as a task (fnd §7.1).
 ## When a check goes red
 
 Read the failed job's log, name the failing line, and fix it on `main`. Locally,
-`cargo xtask check --only <stage>` reruns one stage through the same code, and
-`cargo xtask doctor` comes first when local and CI disagree.
+`just check-only <stage>` reruns one stage through the same recipe, and `just doctor` comes first
+when local and CI disagree.
 
 - **Re-run at most once**, and only when the job died before any test body ran or to prove the
   failure is not the commit's (red on the previous commit too). Before the re-run, name the job,

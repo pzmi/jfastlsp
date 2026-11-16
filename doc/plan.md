@@ -1,6 +1,7 @@
 # jfastlsp: product and architecture plan
 
-**Status:** plan v3, 2026-11-16, pre-alpha (no code yet). Owner: Patryk Żmigrodzki.
+**Status:** plan v3.1, 2026-11-16 (v3 with the reuse survey and early benchmarks applied, BOOT-01),
+pre-alpha (no code yet). Owner: Patryk Żmigrodzki.
 **What:** agent-centric Java code intelligence in Rust. One binary, `jfl`: `jfl lsp` is a stdio
 language server, every other subcommand is a JSON CLI. Both talk to one shared daemon that
 indexes the Java sources of many Git worktrees of a large Gradle repository at once.
@@ -23,6 +24,12 @@ An agent working in any of N concurrent worktrees finishes Java tasks with fewer
 fewer tokens and fewer broken builds than with grep alone or with a tuned `jdtls`. The marginal
 cost of the Nth worktree is small.
 
+**Speed is the product's primary value** (owner, 2026-11-16). An answer an agent waits for is an
+answer it replaces with grep; a server that takes minutes to import a Gradle build per worktree is
+one an agent never gets to use. Every design choice is judged first by what it costs in latency,
+time to first answer and memory at 10 worktrees, measured on real repositories from the first
+weeks (§1.7, ADR 0031), not at the end.
+
 ### 1.2 Success metrics
 
 Success is measured on agent tasks first and machine economics second.
@@ -33,14 +40,20 @@ Success is measured on agent tasks first and machine economics second.
 | 2 | Tool calls and tokens per successful task | E0 |
 | 3 | Edits that broke compilation and were caught by pushed diagnostics, not by a later build | E0 |
 | 4 | Coverage: share of real call sites resolved `exact`, and the precision of those | E2, SEM-06 |
-| 5 | Aggregate RSS, CPU-seconds and time to first useful answer for 1, 3 and 10 worktrees | E1, E4, REL-05 |
+| 5 | Aggregate RSS, CPU-seconds and time to first useful answer for 1, 3 and 10 worktrees; the budgets of §1.7 | E1, E4, BENCH lane |
 
 ### 1.3 Kill criterion
 
-If a tuned `jdtls-lsp` (shared library indexes, warm Gradle) scores within noise of this design on
-rows 1 to 3 at 10 worktrees, and its memory fits the target machines, the deliverable becomes a
-`jdtls` launcher with worktree-aware workspace directories instead of a new engine. The owner
-decides at DEC-02 (ADR 0009).
+The baseline is **jdtls behind our multiplexing proxy** (ADR 0028), built in phase 0 as
+`jfl-jdtls` (EVAL-11): one jdtls per worktree root shared by every client in it, `-data` keyed on
+the full worktree path, a shared library index (`-Djdt.core.sharedIndexLocation`), a heap cap and
+a warm Gradle. The stock `jdtls-lsp` plugin is not a fair baseline: every subagent starts its own
+jdtls of 2–3 GB ([claude-code#64536](https://github.com/anthropics/claude-code/issues/64536)) and
+worktrees with the same basename share one workspace directory
+([claude-code#67182](https://github.com/anthropics/claude-code/issues/67182)). If that baseline
+scores within noise of this design on rows 1 to 3 at 10 worktrees, and its memory fits the target
+machines, the deliverable becomes `jfl-jdtls` itself instead of a new engine. The owner decides at
+DEC-02 (ADR 0009).
 
 ### 1.4 Non-goals (v1)
 
@@ -67,6 +80,43 @@ remote or multi-user daemons; Windows (ADR 0006); telemetry of any kind (§12).
 Linux x86-64 and arm64, macOS arm64 (ADR 0006). Windows is out of scope; Unix sockets, `flock`
 and process groups are used freely. Every platform-specific path is a `#[cfg]` item, tested on its
 native CI runner.
+
+### 1.7 Speed targets and the performance budget
+
+Measured by the BENCH lane (ADR 0031) on the pinned corpus of
+[`bench-corpus.md`](bench-corpus.md) (small junit-framework, medium spring-framework and kafka,
+large elasticsearch, all public Gradle Java repositories at fixed commits) and on the target
+repository (owner-run). The "measured" column is the E1 spike, **measured 2026-11-16 on a 4 vCPU
+Xeon 2.3 GHz VM** (15 GB RAM, virtio disk; tree-sitter 0.27.2 with tree-sitter-java-orchard
+0.5.25, 4 threads; warm is the median of three runs, cold follows a page-cache drop). Its budgets
+leave about 1.5× headroom. Rows marked *v3* come from plan v3's deadlines; rows marked
+*proposed* are planner targets that BENCH-03's baseline confirms or corrects. The owner confirms
+the table at DEC-02; a target is changed only by the owner, never loosened to make a run pass.
+
+| Metric (corpus) | Budget | Measured 2026-11-16 | Arm to beat |
+|:--|:--|:--|:--|
+| Full syntax index, cold, 4 cores (large: elasticsearch, 33.9k files, 334 MB) | ≤ 13 s | 8.7 s cold, 7.2 s warm (about 48 MB/s) | kmp-lsp; jdtls import |
+| Full syntax index, cold, 4 cores (medium: spring-framework, 9.3k files) | ≤ 2.5 s | 1.42 s cold, 1.04 s warm (kafka 1.76 s / 1.59 s) | kmp-lsp; jdtls import |
+| Parse and declaration extract per file | p95 ≤ 5 ms, max ≤ 200 ms | p95 ≤ 3.4 ms everywhere; max 138 ms (kafka's 1.6 MB test file) | — |
+| Unchanged-file check: warm re-hash of the large repository | ≤ 0.2 s | about 0.1 s (blake3 with the walk) | — |
+| Peak RSS of the syntax tier (large) | ≤ 250 MB | 153 MB with 1.2 M declarations and imports | jdtls behind proxy (2–3 GB per worktree) |
+| Marginal extra worktree at a nearby commit (medium) | < 50 MB RSS and < 2 s (*proposed*) | spring-framework, 150 commits apart: blob-id diff 20–30 ms, re-hash 0.05–0.08 s warm, about 270 of 9.3k files to re-parse | jdtls behind proxy (one JVM and import per worktree) |
+| `initialize` against a warm daemon | < 200 ms (*v3*) | — | — |
+| `jfl def` / `jfl hover`, CLI end to end, warm (medium) | p50 < 20 ms, p95 < 50 ms (*proposed*); internal deadline 300 ms (*v3*) | — | jdtls behind proxy |
+| `jfl refs`, warm, a widely used method (medium) | p50 < 100 ms, p95 < 300 ms (*proposed*); deadline 2 s (*v3*) | `rg` floor: 0.04 s warm on spring-framework, 0.18 s on elasticsearch | `rg` floor; jdtls behind proxy |
+| `jfl sym` prefix query, warm (large) | p95 < 50 ms (*proposed*) | — | jdtls behind proxy |
+| Time to first useful answer on a fresh worktree (medium) | < 2 s (*proposed*; syntax answers that say how complete they are) | — | jdtls behind proxy |
+| Warm reopen of an indexed worktree (large) | < 1 s (*proposed*) | walk and hash alone: 0.1 s warm, about 1.5 s cold | — |
+| Freshness lag: a disk edit seen by the next request | the request's own stat (§4.3); p95 < 100 ms to a published generation (*proposed*) | — | — |
+| Single-file semantic diagnostics (E3) | p95 < 3 s (*v3*, §9.3) | — | ECJ arm |
+
+For scale: a full syntax index costs about 40 times a warm `rg` scan on elasticsearch and about
+25 times on spring-framework, so the index pays for itself only when it is built once and shared
+across worktrees and agents (§5.1), and kept fresh by re-hashing, not re-parsing.
+
+**From M1 on the table is a blocking gate**: a tracked metric that regresses by more than 10 %
+against the stored history fails the `bench-gate` job, and each milestone gate checks the budgets
+on the recorded reference machine (ver §10).
 
 ---
 
@@ -219,10 +269,14 @@ mid-task on the first `.java` touch, so index loading continues in the backgroun
 One long-lived JVM per `EnvironmentKey` (§5.4), shared by every worktree with that environment.
 It runs `javac` through the `JavacTask` API with `-proc:none` by default and `-implicit:none`,
 compiling the edited file with the worktree's source roots as `-sourcepath` and the module's
-classpath. The worker is a small Java program in this repository (`java/javac-worker/`) speaking
-length-prefixed JSON over stdin and stdout; `jfl-adapter-javac` owns the pool and starts workers
-through `jfl-process` (§6.5). How the worker is built and shipped (source-file launch or a
-prebuilt jar) is decided in SEM-04's ADR.
+classpath. The worker (`java/javac-worker/`) is **forked from the compiler core of
+[georgewfraser/java-language-server](https://github.com/georgewfraser/java-language-server)**
+(MIT): a long-lived `JavacTask`, file-level incremental recompiles and erasure of irrelevant
+method bodies (ADR 0027). It loads **scip-java's javac plugin** (Apache-2.0), so a compiled file
+can also yield compiler-exact occurrences for the resolver (§5.6). It speaks length-prefixed JSON
+over stdin and stdout; `jfl-adapter-javac` owns the pool and starts workers through `jfl-process`
+(§6.5). How the worker is built and shipped (source-file launch or a prebuilt jar) is decided in
+SEM-04's ADR.
 
 ### 3.2 Publication and staleness
 
@@ -314,13 +368,17 @@ Claude (Bash)     ─────────▶ jfl refs ─┴─unix socket�
                                                      ├─ syntax index (tree-sitter, per file)
                                                      ├─ resolver (choice from E2)
                                                      ├─ JAR/JDK API index (shared, by checksum)
-                                                     ├─ project model (Gradle, opt-in, cached)
-                                                     └─ javac workers (per EnvironmentKey) ──▶ JVMs
+                                                     ├─ project model (Gradle, opt-in, cached) ──▶ gradle-model JVM
+                                                     └─ javac workers (per EnvironmentKey) ──▶ javac-worker JVMs
 ```
 
 The daemon is where the expensive shared things live (JAR and JDK indexes, the Gradle model,
 `javac` workers), and it lets several agents share one copy. `jfl lsp` and the CLI subcommands
-are thin proxies: they own no index (ADR 0016).
+are thin proxies: they own no index (ADR 0016). This topology is essential, not an optimisation:
+Claude Code starts one language-server process per subagent
+([claude-code#64536](https://github.com/anthropics/claude-code/issues/64536)), so anything that
+owns an index per process pays for it once per agent. Biome's `lsp-proxy` and Plumb's shared
+daemon are the closest published shapes (§16).
 
 ### 5.2 Daemon lifecycle and the single owner
 
@@ -328,8 +386,9 @@ are thin proxies: they own no index (ADR 0016).
   an exclusive lock on `<state-dir>/daemon.lock` for its whole life; a second daemon on the same
   state directory exits with a clear error.
 - **Spawn on demand.** A proxy that finds no daemon takes a short spawn lock, starts
-  `jfl daemon` detached (its own session), and waits for readiness with a bounded budget; two
-  proxies racing start one daemon.
+  `jfl daemon` detached (its own session) through `jfl-process`, and waits for readiness with a
+  bounded budget through sccache's notify-socket handshake; two proxies racing start one daemon.
+  The lock is std `File::try_lock`; a pid file is never trusted (ADR 0021).
 - **Reconnect.** A proxy that loses its daemon (crash, upgrade, idle exit) reconnects, spawning
   if needed, and re-sends its open documents; a request in flight is answered with an error the
   client can retry, never silently dropped.
@@ -346,8 +405,11 @@ are thin proxies: they own no index (ADR 0016).
   peer uid (`SO_PEERCRED` on Linux, `getpeereid` on macOS) must equal the daemon's.
 - Socket paths are limited to about 104 bytes on macOS and 108 on Linux: a state directory whose
   socket path would be longer is refused with the limit named, never truncated.
-- Frames are length-prefixed `jfl-protocol` messages with a maximum size checked before
-  allocation, and a version handshake (§6.6).
+- Frames are JSON-RPC 2.0 with the LSP base protocol's `Content-Length` framing, reusing
+  `lsp_server::Message`, so the CLI, the LSP proxy and the daemon share one parser and one trace
+  format (ADR 0021). `jfl-protocol` defines the methods, payloads and limits; the declared length
+  is checked against the maximum size before allocation; a version handshake opens every
+  connection (§6.6). The daemon side is Tokio; the CLI client is std only, so it starts fast.
 
 ### 5.4 Cache keys
 
@@ -368,18 +430,37 @@ of the target repository; DEC-03 picks the tier:
 | ~3 to 30 s | add a shared baseline manifest per commit plus per-view deltas |
 | over 30 s | full generational store with tombstones and reachability GC |
 
-The default, until DEC-03 says otherwise, is the first row. Whatever the tier, the store is a
-cache: deleting the state directory loses time, never correctness (§5.10).
+**E1 outcome (spike, measured 2026-11-16, [`bench-corpus.md`](bench-corpus.md)):** small and
+medium repositories rebuild in memory at start (spring-framework 1.4 s cold on 4 cores, ≤ 2 s
+everywhere at that size), so the first row fits them. A large repository does not (elasticsearch
+8.7 s cold): above about 10–15k files or 50 MB of Java, per-file summaries are persisted, keyed by
+blake3 with Git blob ids as a free pre-filter, so a restart costs a walk and a re-hash (0.1 s
+warm, about 1.5 s cold) plus re-parsing only changed files. That is the "persisted per-file
+summary" store of the first two rows, not the third. Re-hashing is the source of truth: blob ids
+describe the index, not a dirty working tree. DEC-03 records the tier; EVAL-05 re-runs E1 on CI
+hardware and the target.
+
+The default, until DEC-03 says otherwise, is the first row for small and medium repositories and
+persisted per-file summaries for large ones. Whatever the tier, the store uses the
+same crates (ADR 0025): `blake3` content keys, `postcard` summary blobs in a content-addressed
+directory of our own, `fst` for name lookup and, from the second row, `rusqlite` (WAL) for
+manifests and postings. The store is a cache: deleting the state directory loses time, never
+correctness (§5.10).
 
 ### 5.6 Resolver
 
-Name and type resolution for `exact` answers. Candidates (E2, §9.2): a resolver of our own, the
-`ktcore` resolver, the `kmp-lsp` resolver, and Stack Graphs for Java, compared on 200+ golden
-cases and on the target repository against a SCIP index, by precision, **coverage by construct**
-(static call, call on a field or parameter, chain, `var`, lambda, stream, method reference,
-Lombok member) and cost. DEC-04 records the choice; if it is our own, it is a pure crate
-`jfl-resolve` (SEM-01). Expected weak spots: inferred receivers and generated members, which fall
-to `possible` with their reason.
+Name and type resolution for `exact` answers. Candidates (E2, §9.2): a tree-sitter resolver of
+our own, the `ktcore` resolver, the `kmp-lsp` resolver at a pinned commit, and a
+**javac-attributed** arm (scip-java's plugin in the warm worker of §3.1, ADR 0027), compared on
+200+ golden cases, on the real-corpus golden cases (BENCH-05) and on the target repository
+against a SCIP index, by precision, **coverage by construct** (static call, call on a field or
+parameter, chain, `var`, lambda, stream, method reference, Lombok member), latency and cost.
+Stack Graphs is dropped: [github/stack-graphs](https://github.com/github/stack-graphs) was
+archived in September 2025. The likely outcome is a hybrid: javac for `exact` where the classpath
+is known and the file compiled, the tree-sitter index for `possible` and for files with no known
+classpath. DEC-04 records the choice; a resolver of our own is a pure crate `jfl-resolve`
+(SEM-01). Expected weak spots: inferred receivers and generated members, which fall to `possible`
+with their reason.
 
 ### 5.7 Project model (Gradle)
 
@@ -389,16 +470,21 @@ flag on `jfl sync --project-model`). The model (modules, source sets, dependenci
 processor path, JDK, `--release`) is computed by `jfl-adapter-gradle` through `jfl-process`,
 cached per **build-file fingerprint** (digest of `settings.gradle*`, every `build.gradle*`,
 `gradle.properties`, the wrapper properties and version catalogs) and shared across worktrees
-with the same fingerprint. The mechanism (Tooling API helper or an init script) is decided in
-PROJ-01's ADR. Without the model: syntax-only answers, the whole worktree as one module, and
-`status` says so.
+with the same fingerprint. The mechanism wraps
+[microsoft/build-server-for-gradle](https://github.com/microsoft/build-server-for-gradle) (MIT,
+ADR 0026): a small JVM helper (`java/gradle-model/`) runs its `GetSourceSetsAction`, whose
+`GradleSourceSet` already carries source and generated-source roots, the compile classpath, module
+dependencies, the Java home and version and `compilerArgs`, and prints JSON. Without the model:
+syntax-only answers, the whole worktree as one module, and `status` says so.
 
 ### 5.8 Library and JDK index
 
 Class files from JARs and from the JDK (`ct.sym` for `--release`, or `jmods`) are summarised into
 API summaries (types, members, signatures, generics, annotations) by `jfl-adapter-classfile`,
-shared by content checksum across every view, multi-release aware. JARs are untrusted input
-(§11).
+shared by content checksum across every view, multi-release aware. The parser is `cafebabe`
+(0BSD, forbid-unsafe) over `zip`; the generic-signature parser and multi-release selection are our
+own; `$JAVA_HOME/lib/ct.sym` gives any `--release` API without a JVM (ADR 0023). JARs are
+untrusted input (§11).
 
 ### 5.9 Resource limits
 
@@ -427,26 +513,31 @@ migrated, when its version changes.
 | `jfl-protocol` | pure | the daemon wire protocol and the `--json` schema: versioned messages, handshake, frame limits (§6.6) |
 | `jfl-application` | application | use cases and queries (def, refs, hover, sym, impls, calls, status, sync), the view registry and generations (§4), the diagnostics coordinator (§3.2), the port traits (§6.4) |
 | `jfl-process` | support | the only child-process runner: argv only, cleared environment plus an allowlist, deadline, own process group, bounded output (§6.5) |
-| `jfl-adapter-fs` | adapter | `SourceTree`: scanning with nested-worktree exclusion, reading, stat, watcher hints (notify) |
-| `jfl-adapter-git` | adapter | `RepoProbe`: worktree roots, common directory, `HEAD` and index stat, changed files |
-| `jfl-adapter-java` | adapter | `SyntaxIndexer`: tree-sitter Java parsing into file summaries and syntax diagnostics |
-| `jfl-adapter-classfile` | adapter | `LibraryIndexer`: class files, JARs, `ct.sym` and `jmods` into API summaries |
-| `jfl-adapter-store` | adapter | `SummaryStore`, `LibraryStore`, `ProjectModelCache`: the on-disk caches at the DEC-03 tier |
-| `jfl-adapter-ipc` | adapter | the Unix socket endpoint (server and client), the state-directory lock, peer checks, framing |
-| `jfl-adapter-lsp` | adapter | JSON-RPC and LSP 3.17 ↔ `jfl-protocol` translation for the `jfl lsp` proxy |
-| `jfl-adapter-javac` | adapter | `Compiler`: the `javac` worker pool per `EnvironmentKey` (§3) |
-| `jfl-adapter-gradle` | adapter | `ProjectModelSource`: the opt-in Gradle model (§5.7) |
+| `jfl-adapter-fs` | adapter | `SourceTree`: scanning with nested-worktree exclusion (`ignore`), reading, stat, watcher hints (`notify`) |
+| `jfl-adapter-git` | adapter | `RepoProbe`: worktree roots, common directory, `HEAD` and index stat, changed files (the `git` CLI, ADR 0024) |
+| `jfl-adapter-java` | adapter | `SyntaxIndexer`: tree-sitter Java parsing (ADR 0022) into file summaries and syntax diagnostics |
+| `jfl-adapter-classfile` | adapter | `LibraryIndexer`: class files, JARs, `ct.sym` and `jmods` into API summaries (ADR 0023) |
+| `jfl-adapter-store` | adapter | `SummaryStore`, `LibraryStore`, `ProjectModelCache`: the on-disk caches at the DEC-03 tier (ADR 0025) |
+| `jfl-adapter-ipc` | adapter | the Unix socket endpoint (server and client), the state-directory lock, peer checks, framing (ADR 0021) |
+| `jfl-adapter-lsp` | adapter | LSP 3.17 ↔ `jfl-protocol` translation for the `jfl lsp` proxy (`lsp-server`, `gen-lsp-types`, ADR 0020) |
+| `jfl-adapter-javac` | adapter | `Compiler`: the `javac` worker pool per `EnvironmentKey` (§3), workers from `java/javac-worker/` |
+| `jfl-adapter-gradle` | adapter | `ProjectModelSource`: the opt-in Gradle model (§5.7) through the `java/gradle-model/` helper |
 | `jfl-composition` | root | wiring for the daemon and the proxies, runtime and task supervision, the daemon launcher |
 | `jfl-cli` | root | the `jfl` binary: argument parsing, output formatting, exit codes; delegates to composition |
 | `jfl-testkit` | test only | fakes for every port, the contract suites, fixture builders, the `poll` helper |
 | `jfl-conformance` | test only | the Quint ITF replay harness and the drivers (§7) |
-| `xtask` (`tools/xtask`) | tool only | the gate, architecture checker, ADR and land tooling (ADR 0012) |
+| `jfl-architecture` (`tools/jfl-architecture`) | test only | the architecture test over `cargo_metadata`, the source scan and the CI lockstep (ADR 0030; there is no `xtask`) |
+| `jfl-jdtls` (`tools/jfl-jdtls`) | tool only, independent | phase 0: jdtls behind our multiplexing proxy, the kill-criterion baseline and the fallback product (ADR 0028) |
+| `jfl-bench` (`tools/jfl-bench`) | tool only, independent | the benchmark harness over the pinned corpus and the comparison arms (ADR 0031) |
 | `jfl-oracle` (`tools/jfl-oracle`) | tool only, independent | SCIP reader, differential and completeness oracles (ver §7); imports no production crate |
 | `jfl-eval` (`tools/jfl-eval`) | tool only, independent | the agent-evaluation harness and phase 0 measurements (§9) |
 | `jfl-fuzz` (`fuzz/`) | fuzz only | fuzz targets on the pinned nightly, its own workspace (REL-03) |
 
-`jfl-resolve` (pure) joins the map if DEC-04 picks our own resolver (SEM-01). A Java program,
-`java/javac-worker/`, is part of the repository but not of the Cargo workspace (§3.1).
+`jfl-resolve` (pure) joins the map if DEC-04 picks our own resolver (SEM-01). Two JVM helpers
+are part of the repository but not of the Cargo workspace: `java/javac-worker/` (§3.1, forked)
+and `java/gradle-model/` (§5.7, wrapping the build server). Both are started only through
+`jfl-process` by their adapter, so the authority table (§6.5) is unchanged. Pure crates are
+`#![no_std]` + `alloc` (fnd §2.3).
 
 ### 6.2 Why this cut
 
@@ -486,12 +577,14 @@ between workspace crates (`[dependencies.normal]` in `architecture.toml`, ADR 00
 | `jfl-cli` | `jfl-composition` |
 | `jfl-testkit` | `jfl-domain`, `jfl-protocol`, `jfl-application` |
 | `jfl-conformance` | `jfl-testkit`, the pure and application crates, `jfl-adapter-ipc`, `jfl-composition` |
-| `xtask`, `jfl-oracle`, `jfl-eval` | — (no workspace crate) |
+| `jfl-architecture` | — (reads `cargo metadata`; no workspace crate) |
+| `jfl-oracle`, `jfl-eval`, `jfl-jdtls`, `jfl-bench` | — (no workspace crate) |
 
 Rules: acyclic; explicit `members`; adapters never name a sibling adapter, composition or the CLI;
 production crates never reach a test-only or tool-only crate; a dev edge targets a test-only crate
 or a crate already in the dependent's normal list; edges are evaluated for each target of §1.6.
-Enforced by `cargo xtask architecture` (fnd §2, §3).
+Enforced by the architecture test and `cargo-deny` bans (`just check-only architecture deny`;
+fnd §2, §3).
 
 ### 6.4 Ports
 
@@ -516,12 +609,13 @@ proxies (`jfl lsp`, CLI) speak `jfl-protocol` through the IPC client.
 
 | Authority | Granted to | Everything else |
 |---|---|---|
-| Child processes | `jfl-process` (and through it git, javac, Gradle adapters); `jfl-composition`'s daemon launcher | names no `std::process` (`ARCH-process-authority`) |
+| Child processes | `jfl-process` (and through it the git, javac and Gradle adapters, and `jfl-composition`'s daemon launcher) | names no `std::process` (`ARCH-process-authority`) |
 | Sockets | `jfl-adapter-ipc` (Unix domain only) | names no `std::net` or `std::os::unix::net`; no TCP anywhere |
 | Filesystem | `jfl-adapter-fs`, `-git`, `-store`, `-ipc`, `-classfile`, `-javac`, `-gradle`, `jfl-composition` | pure and application crates name no `std::fs` |
 | Clock, randomness, environment | `jfl-composition` (provides `Clock`), adapters for their own needs | pure crates name none |
 
-Enforced by the semantic rules of fnd §3 (FND-05).
+Enforced by `#![no_std]` on the pure crates, per-crate clippy `disallowed-*` lists and
+`cargo-deny` wrappers, kept in step by the architecture test (fnd §2.3, §2.4, §3; FND-02).
 
 ### 6.6 Protocol and compatibility
 
@@ -540,7 +634,9 @@ Quint models are required (ADR 0007). Each lives in `formal/`, is registered in 
 registry, has named scenarios, invariants, a broken-model negative control (an action variant
 that must violate an invariant within the bound), committed regression traces, and a conformance
 driver that replays traces against the real Rust code and compares observations after every step
-(ver §6). The model lands first (FORMAL lane); the driver lands with the code it drives.
+(ver §6). The model lands first (FORMAL lane); the driver lands with the code it drives. Drivers
+implement `quint-connect`'s `Driver` trait and decode traces with `itf`; only the replay of
+committed regression traces is ours (ADR 0007, ADR 0030).
 
 ### 7.1 `views.qnt`: views, generations and freshness
 
@@ -598,7 +694,11 @@ possible` or `complete=false`), the **envelope-honesty mutation suite**, fuzzing
 testing, benchmarks, and the **agent evaluation** rerun per milestone. The **golden Java
 fixture corpus** (`fixtures/java/`) holds small projects (single module, multi-module Gradle,
 nested worktrees, Lombok, generated sources, multi-release JARs) and per-construct resolution
-cases with expected answers.
+cases with expected answers. Toy fixtures are not enough for a speed product: correctness tests
+also run against the **pinned real corpus** (`doc/bench-corpus.md`), whose golden cases are
+expectations keyed by repository, commit, file and position with `scip-java` as the oracle, taken
+from the Apache-2.0 repositories only; the corpus code is fetched, never committed (BENCH-05,
+ADR 0031).
 
 ---
 
@@ -615,30 +715,37 @@ owner's machine, and only aggregated numbers come back (ADR 0004, ADR 0009).
 
 | Id | Experiment | Output | Decision it drives |
 |---|---|---|---|
-| **E0** | **Agent eval.** 15 to 20 real tasks from the target repository's history (bug fixes, signature changes, cross-module features, a rename). Three arms: grep only, tuned `jdtls-lsp` (shared indexes, warm Gradle), `kmp-lsp` as is. 3 runs per task per arm | success, tool calls, tokens, broken-build edits, a histogram of the LSP operations Claude actually calls, its reaction to empty references, diagnostics wait time, whether subagents share a server, whether the server starts on the first `.java` touch | kill criterion (§1.3); operation priority; `referencesMode` default (DEC-06) |
-| **E1** | Absolute parse + summarise time for a full worktree (cold and warm file cache), and RSS of the in-memory summary index | seconds, MB | storage tier (DEC-03) |
-| **E2** | **Resolver bake-off** (§5.6) on 200+ golden cases and on the target repository against a SCIP index | precision, coverage by construct, cost | resolver (DEC-04) |
-| **E3** | `javac` worker spike: single-file compile latency with `-sourcepath`, per module | p50, p95, RSS, `EnvironmentKey` count across 10 worktrees | diagnostics in v1 (DEC-05) |
-| **E4** | `jdtls` at 10 worktrees | RSS, time to first useful answer, import count | kill criterion |
+| **E0** | **Agent eval** on [Harbor](https://github.com/harbor-framework/harbor) (ADR 0029). 15 to 20 real tasks from the target repository's history (bug fixes, signature changes, cross-module features, a rename) plus 10 to 20 Gradle instances from [Multi-SWE-bench](https://github.com/multi-swe-bench/multi-swe-bench)'s Java set as an external control. Arms: grep only; the stock `jdtls-lsp` plugin; jdtls behind our proxy (§1.3, EVAL-11); `kmp-lsp` at a pinned commit. 3 runs per task per arm | success, tool calls, tokens, broken-build edits, a histogram of the LSP operations Claude actually calls, its reaction to empty references, diagnostics wait time, whether the server starts on the first `.java` touch | kill criterion (§1.3); operation priority; `referencesMode` default (DEC-06) |
+| **E1** | Absolute parse + summarise time for a full worktree (cold and warm file cache), RSS of the in-memory summary index, and the parse-error rate of both Java grammars (ADR 0022), on the bench corpus and the target. **Spike done 2026-11-16** (§1.7, §5.5); EVAL-05 re-runs it in the harness | seconds, files per second, MB, error rate | storage tier (DEC-03) |
+| **E2** | **Resolver bake-off** (§5.6) on 200+ golden cases, the real-corpus cases and the target repository against a SCIP index from `scip-java` | precision, coverage by construct, latency, cost | resolver (DEC-04) |
+| **E3** | `javac` worker spike, starting from the forked compiler core (ADR 0027): single-file compile latency with `-sourcepath`, per module; ECJ batch (`-proceedOnError`) as a comparison arm; the scip-java plugin's attribution cost | p50, p95, RSS, false errors, `EnvironmentKey` count across 10 worktrees | diagnostics in v1 (DEC-05) |
+| **E4** | jdtls at 1, 3 and 10 worktrees, stock and behind our proxy, on the bench corpus and the target | RSS, time to first useful answer, import count | kill criterion |
 
-Unverified facts E0 settles: whether subagents share the parent's language server; how long
-Claude Code waits for diagnostics after an edit; whether the server starts on the first `.java`
-touch or at session start.
+**Already answered** (2026-11-16): subagents do **not** share the parent's language server;
+Claude Code starts one per process subtree with no plugin setting to change it
+([claude-code#64536](https://github.com/anthropics/claude-code/issues/64536), closed by the stale
+bot without a maintainer reply). E0 re-checks it on the current Claude Code release, but the design
+assumes one LSP process per subagent. **Still unverified**, settled by E0: how long Claude Code
+waits for diagnostics after an edit; whether the server starts on the first `.java` touch or at
+session start; whether `claude -p` (and so Harbor and `claude plugin eval`) starts plugin language
+servers at all; whether `${CLAUDE_PROJECT_DIR}` is substituted inside `.lsp.json` arguments.
 
 ### 9.3 Go/no-go
 
-Proceed (DEC-02, owner) if (a) E0 shows a gap the design can close (an LSP or CLI arm beats grep
-on rows 1 to 3 of §1.2, and `jdtls` does not already win at 10 worktrees on memory and latency),
-(b) E2 shows a path to ≥ 70 % `exact` coverage of call sites with ≥ 99.5 % precision, the rest
-covered soundly by `possible`, and (c) E3's single-file p95 is under 3 s (otherwise diagnostics
-fall back per DEC-05, which does not by itself stop the project).
+Proceed (DEC-02, owner) if (a) E0 shows a gap the design can close (an LSP or CLI arm beats grep on
+rows 1 to 3 of §1.2, and jdtls behind our proxy does not already win at 10 worktrees on memory and
+latency), (b) E2 shows a path to ≥ 70 % `exact` coverage of call sites with ≥ 99.5 % precision, the
+rest covered soundly by `possible`, and (c) E3's single-file p95 is under 3 s (otherwise diagnostics
+fall back per DEC-05, which does not by itself stop the project), and (d) the BENCH baseline
+(BENCH-03) shows the §1.7 targets are reachable on the corpus.
 
 ---
 
 ## 10. Milestones
 
 Each milestone ends with an E0-style eval rerun on a subset of tasks (owner-run), so progress is
-measured in agent terms.
+measured in agent terms, and with the §1.7 budget checked on the bench corpus: from M1 on, a
+tracked metric that regresses by more than 10 % fails the gate (ADR 0031).
 
 ### 10.1 M1: CLI vertical slice (syntax + envelope)
 
@@ -648,7 +755,9 @@ stat; tree-sitter syntax index at DEC-03's tier; `sym`, `def` (lexical, imports,
 `status`, `sync`; the plugin with `bin/` and the skill. Tasks IDX-01..IDX-15.
 **Gate:** works in a cloud session through the setup script; the envelope on 50 golden cases;
 `complete=true` never wrong in a mutation test that adds a caller in each module; 10 concurrent
-worktrees without cross-view results; freshness under shell edits.
+worktrees without cross-view results; freshness under shell edits; the §1.7 rows M1 touches
+(index time, RSS, `def`/`hover`/`refs`/`sym` latency, marginal worktree, freshness lag) within
+budget on the corpus, and the >10 % regression gate blocking from here on.
 
 ### 10.2 M2: LSP carrier
 
@@ -661,16 +770,18 @@ they cannot coexist; the LSP conformance suite green.
 
 ### 10.3 M3: project model and library APIs
 
-The opt-in Gradle model (§5.7) cached per build fingerprint and shared; `EnvironmentKey`; the JAR
-and JDK class-file index shared by checksum, multi-release aware. Tasks PROJ-01..PROJ-05.
+The opt-in Gradle model (§5.7), by wrapping microsoft/build-server-for-gradle (ADR 0026), cached
+per build fingerprint and shared; `EnvironmentKey`; the JAR and JDK class-file index shared by
+checksum, multi-release aware. Tasks PROJ-01..PROJ-05.
 **Gate:** classpath divergence isolates environments; no test-to-main leaks (a main source set
 never sees test-only types); malformed-JAR fuzzing clean; hover and definition resolve into
 library types.
 
 ### 10.4 M4: resolver and semantic diagnostics
 
-The resolver chosen by DEC-04, classpath-aware; `javac` workers with processor handling. Tasks
-SEM-01..SEM-07.
+The resolver chosen by DEC-04, classpath-aware; `javac` workers (forked core, scip-java plugin)
+with processor handling; the SCIP baseline import formerly planned as M6, if DEC-04 keeps it
+(SEM-08), with `scip-java` as the oracle throughout. Tasks SEM-01..SEM-08.
 **Gates:**
 - **Precision** ≥ 99.5 % of `exact` answers agree with SCIP on the target repository.
 - **Coverage** ≥ the DEC-04 share of call sites resolve `exact`, reported per construct; no
@@ -683,13 +794,14 @@ SEM-01..SEM-07.
 ### 10.5 M5: call hierarchy and release preview
 
 Incoming and outgoing calls with dispatch marking; resource limits, watcher recovery, crash and
-restart soak; fuzz, mutation and benchmark lanes; release workflow; the final agent eval against
-all baselines. Tasks REL-01..REL-06.
+restart soak; fuzz and mutation lanes (the benchmark lane runs from FND-01 on); release workflow;
+the final agent eval against all baselines. Tasks REL-01..REL-06.
 **Gate:** E0 metrics beat both baselines on the full task set at 10 concurrent worktrees.
 
-### 10.6 M6 (optional): SCIP baseline import
+### 10.6 M6: folded into M4
 
-Only if M4's coverage gap is large and agents' tasks would gain (DEC-07). Tasks SCIP-01..SCIP-02.
+The SCIP baseline import is a small step once `scip-java` is the oracle and the scip-java plugin
+runs in the javac worker, so it is SEM-08 in M4, kept or dropped by DEC-04 (ADR 0009, as amended).
 
 ---
 
@@ -725,10 +837,14 @@ update check, no crash upload.
 | Agents ignore the skill and keep grepping | E0 measures it; tune the skill text; hover status nudges through LSP |
 | `javac` false errors from processors erode trust | `-proc:none` + generated-source roots + suppression; zero-false-error gate |
 | `javac` workers eat memory with many environments | cap workers, LRU-evict, share by `EnvironmentKey` |
-| Subagents start their own LSP proxies | proxies are thin and the daemon is shared: the cost is per process, not per index |
+| Subagents start their own LSP proxies (confirmed: claude-code#64536) | proxies are thin and the daemon is shared: the cost is per process, not per index |
 | The server starts mid-task and the first answers are slow | fast `initialize`, partial answers with `complete=false`, a SessionStart hook can warm the daemon |
-| `jdtls` is good enough | kill criterion §1.3; a worktree-aware `jdtls` launcher is then the deliverable |
-| Facts about Claude Code drift (operations, `bin/` policy, cloud LSP, `.lsp.json` keys) | re-check at each milestone gate; smoke test on the current release |
+| `jdtls` is good enough | kill criterion §1.3 against jdtls behind our proxy; `jfl-jdtls` is then the deliverable |
+| JetBrains ships a headless, agent-licensed IntelliJ LSP ([IDEA-393669](https://youtrack.jetbrains.com/projects/IDEA/issues/IDEA-393669)) | keep the proxy's backend pluggable (ADR 0028), so it could front that server as it fronts jdtls; recheck at each milestone |
+| `kmp-lsp` (MIT, active) converges on the same niche | it is an E0 arm and a bench arm; forking its resolver or JAR cache is the mitigation |
+| A reused upstream stalls (tree-sitter-java-orchard, java-language-server and build-server-for-gradle have small teams; `quint-connect` and `gen-lsp-types` are 0.x) | pin exact versions or commits, keep forks' diffs small, name a runner-up in each ADR (§16) |
+| A speed regression lands unnoticed | the BENCH lane from FND-01 on; the >10 % gate from M1 (§1.7) |
+| Facts about Claude Code drift (operations, `bin/` policy, cloud LSP, `.lsp.json` keys, one server per subagent) | re-check at each milestone gate; smoke test on the current release |
 | tree-sitter grammar gaps on new Java syntax | the grammar version is part of `SyntaxKey`; parse errors are diagnostics, never crashes; corpus cases per Java release |
 | The target repository is private | harnesses public, runs owner-side, aggregates only (§9.1) |
 
@@ -746,10 +862,14 @@ Each open choice is a task that records an ADR; nothing here is decided by an im
 | Resolver | DEC-04 | E2 |
 | Semantic diagnostics in v1 | DEC-05 | E3 |
 | `referencesMode` default and operation priority | DEC-06 | E0 |
-| Build M6 or not | DEC-07 (owner) | M4's coverage report |
-| Git access: the `git` CLI or `gix` | IDX-05 (ADR) | cost and fidelity on the fixtures |
+| Confirm the Proposed defaults (ADRs 0005–0010, 0013–0031) | DEC-07 (owner, at the FND-05 ⛳) | this plan and the survey evidence |
+| The §1.7 speed targets | DEC-02 ⛳ (owner) | the BENCH-03 baseline |
+| Shared skills plugin or repo-local skills | DEC-08 (owner) | the plugin-marketplace option of §16 |
+| Keep the SCIP baseline import (SEM-08) | DEC-04 | E2 and M4's coverage gap |
 | javac worker build and launch | SEM-04 (ADR) | startup cost |
-| Gradle model mechanism | PROJ-01 (ADR) | fidelity on the fixtures |
+
+Settled by the reuse survey (Proposed, owner confirms at DEC-07): Git access is the `git` CLI
+(ADR 0024); the Gradle model wraps the build server (ADR 0026); M6 is folded into M4.
 
 ---
 
@@ -771,3 +891,89 @@ Plan v3 replaced the design half of v2 (2026-11-11). The changes and their reaso
 Kept from v2: no builds or JVM on the request path; filesystem watching as hints, not truth;
 the three-key cache split; differential tests against SCIP; a single daemon owner; Gradle as
 opt-in trusted code; the golden corpus and fault injection.
+
+v3.1 (BOOT-01) applied the reuse survey (§16, ADR 0019) and the owner's direction to benchmark
+early (§1.7, ADR 0031): the jdtls baseline is multiplexed, the Gradle model and the javac worker
+are reused, E0 runs on Harbor, Stack Graphs and M6 are gone, and the foundation is maintained
+tools instead of a ported `xtask`.
+
+---
+
+## 16. Reuse and dependencies
+
+The owner's rule: don't reinvent the wheel (ADR 0019). A survey on 2026-11-16 read crates.io, the
+projects' repositories and their release pages; versions and dates below are from that day and
+are re-checked by the task that adds each dependency (a version is never invented). Every task
+that adds a subsystem says on its card what reuse it considered.
+
+### 16.1 Build or reuse
+
+| Subsystem | Verdict | ADR |
+|:--|:--|:--|
+| Shared daemon, thin proxies, per-worktree views, freshness, envelope, storage layout | **build**: nothing published shares indexes across worktrees | 0016, 0017 |
+| LSP protocol and types | reuse `lsp-server`, `gen-lsp-types`, `line-index` | 0020 |
+| Daemon IPC and single instance | reuse LSP framing, std `File::try_lock`, `rustix`; copy sccache's handshake, Biome's proxy | 0021 |
+| Java syntax | reuse `tree-sitter` + `tree-sitter-java-orchard`; own queries | 0022 |
+| Class files and the JDK API | reuse `cafebabe` + `zip`; `ct.sym`; own signature parser | 0023 |
+| Git | reuse the `git` CLI; stat-only hot path | 0024 |
+| Watching and walking | reuse `notify` 8.2 + `notify-debouncer-mini`, `ignore` 0.4; turborepo's cookie file for `jfl sync` | 0019 |
+| Storage | reuse `rusqlite`, `fst`, `postcard`, `blake3`; own CAS directory | 0025 |
+| Gradle model | **wrap** microsoft/build-server-for-gradle | 0026 |
+| javac worker | **fork** java-language-server's compiler core; scip-java plugin | 0027 |
+| Resolver | E2 decides; javac-attributed arm added, Stack Graphs dropped | DEC-04 |
+| SCIP oracle and baseline | reuse `scip-java`, the `scip` crate | 0009 |
+| Baseline and fallback product | **wrap** jdtls behind our multiplexing proxy | 0028 |
+| Agent evaluation | **wrap** Harbor; Multi-SWE-bench Java control | 0029 |
+| Benchmarks | reuse hyperfine, divan or criterion, github-action-benchmark; a pinned real corpus | 0031 |
+| Engineering foundation | reuse just, mise, cargo-deny, `no_std`, adrs, zizmor, pinact, actionlint, gitleaks, diff-cover, cargo-mutants, quint-connect, dist, release-plz | 0030 |
+
+### 16.2 Product crates
+
+| Crate | Version (date) | Licence | Used by | Note |
+|:--|:--|:--|:--|:--|
+| `lsp-server` | 0.10.0 (2026-07-16) | MIT OR Apache-2.0 | `jfl-adapter-lsp`, `-ipc` | rust-analyzer's; `Connection::memory()` for tests |
+| `gen-lsp-types` | 0.11.0 (2026-07-28) | MIT | `jfl-adapter-lsp` | LSP 3.18 metamodel; exact pin |
+| `line-index` | 0.1.2 | MIT OR Apache-2.0 | `jfl-domain` or its tests | UTF-8 ↔ UTF-16 |
+| `tokio`, `tokio-util` | 1.54, 0.7.20 | MIT | daemon side only | `peer_cred()`, `CancellationToken` |
+| `rustix` | 1.1.6 | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT | `jfl-adapter-ipc`, daemon start | safe `setsid`, uid and mode checks |
+| `tree-sitter`, `tree-sitter-java-orchard` | 0.27.2, 0.5.25 (2026-11-15) | MIT | `jfl-adapter-java` | C via `cc` |
+| `cafebabe`, `zip` | 0.9.0, 9.6.1 | 0BSD, MIT | `jfl-adapter-classfile` | `zip` without default features, `deflate` on |
+| `notify`, `notify-debouncer-mini`, `ignore` | 8.2.2, 0.7.0, 0.4.34 | CC0-1.0, MIT OR Apache-2.0, Unlicense OR MIT | `jfl-adapter-fs` | `notify` 9 when final |
+| `rusqlite` (bundled), `fst`, `postcard`, `blake3` | 0.43.0, 0.4.7, 1.1.3, 1.8.7 | MIT, Unlicense OR MIT, MIT OR Apache-2.0, CC0-1.0 OR Apache-2.0 | `jfl-adapter-store` | tier by DEC-03 |
+| `scip` | 0.10.0 | Apache-2.0 | `jfl-oracle`, SEM-08 | pins `protobuf` =3.7.2 exactly |
+| `clap`, `serde`, `serde_json`, `schemars`, `camino`, `thiserror`, `anyhow` | 4.6, 1, 1, 1.2, 1.2, 2, 1 | MIT OR Apache-2.0 (schemars MIT) | CLI, protocol | `anyhow` only in binaries and tools |
+| `tracing`, `tracing-subscriber`, `tracing-appender` | 0.1.44, 0.3.23, 0.2.5 | MIT | composition | the LSP proxy never logs to stdout |
+| `insta`, `expect-test`, `assert_cmd`, `trycmd`, `proptest`, `jsonschema` | 1.49, 1.5, 2.2, 1.2, 1.12, 0.61 | Apache-2.0 or MIT | tests only | `insta` JSON redactions for generations and times |
+
+`deny.toml` therefore allows MIT, Apache-2.0, Apache-2.0 WITH LLVM-exception, 0BSD, CC0-1.0,
+Unlicense, BSD-3-Clause and Unicode-3.0 (transitive); anything else needs an ADR (ADR 0005).
+Runtime-optional JVM pieces (not linked): java-language-server's compiler core (MIT), scip-java's
+plugin (Apache-2.0), build-server-for-gradle (MIT), and jdtls (EPL-2.0, a separate process only,
+in `jfl-jdtls`).
+
+### 16.3 Rejected, and why
+
+| Option | Why not |
+|:--|:--|
+| `lsp-types` 0.97, `tower-lsp` 0.20 | stalled (2024) and unmaintained (2023); runner-up `tower-lsp-server` 0.24 when final |
+| `async-lsp` | pinned to `lsp-types` 0.95; its design is copied |
+| `jsonrpsee`, `tarpc` | heavy, or a second protocol no LSP tool can read |
+| `fs2`, `fd-lock`, `fs4`, `daemonize`, `single-instance` | std file locks since Rust 1.89; `fork()` in a threaded process |
+| upstream `tree-sitter-java` 0.23.5 | dormant since 2024-12; no Java 25 `import module`; runner-up |
+| `java-lang` | too new (1.4k downloads), no incremental reparse |
+| `ristretto_classfile`, `noak`, `classfile-parser`, `jimage` | heavy and MSRV 1.99; `unsafe`; incomplete; Windows FFI |
+| `gix`, `git2` | linked-worktree gap; C build |
+| `bincode`, `bitcode`, `tantivy`, `salsa` | unmaintained (RUSTSEC-2025-0141); no format stability; overkill; experimental persistence |
+| Stack Graphs | archived 2025-09 |
+| Serena's application | GPL-3.0; ideas only |
+| the IntelliJ LSP | proprietary, no headless launcher yet (plan §13) |
+| mayfly's `xtask` port, `cargo-make`, `cargo-bylaw` | 16k lines to own; stale; too young (ADR 0030) |
+
+### 16.4 Agent workflow
+
+The `/work`, `/orchestrate` and `/review` skills stay in this repository's `.claude/` for now.
+The alternative is one personal marketplace (`pzmi/claude-plugins`) with one `sdlc` plugin
+holding the three skills, parameterised by each repository's `CLAUDE.md` and `doc/`, added with
+`claude plugin marketplace add … --scope project` and pinned by `ref`/`sha`, with
+`claude plugin eval` cases for "never pushes without the gate", "review cites file:line" and
+"stops at ⛳". The owner decides at DEC-08.

@@ -2,7 +2,13 @@
   "$schema": "https://json.schemastore.org/claude-code-settings.json",
   "permissions": {
     "allow": [
-      "Bash(cargo xtask *)",
+      "Bash(just *)",
+      "Bash(mise install*)",
+      "Bash(mise ls*)",
+      "Bash(mise doctor*)",
+      "Bash(mise exec *)",
+      "Bash(adrs *)",
+      "Bash(scripts/land.sh *)",
       "Bash(cargo fmt*)",
       "Bash(cargo clippy *)",
       "Bash(cargo test*)",
@@ -16,6 +22,7 @@
       "Bash(cargo metadata*)",
       "Bash(cargo deny *)",
       "Bash(cargo llvm-cov*)",
+      "Bash(cargo mutants*)",
       "Bash(cargo update -w*)",
       "Bash(cargo update --workspace*)",
       "Bash(rustfmt *)",

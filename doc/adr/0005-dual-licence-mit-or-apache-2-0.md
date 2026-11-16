@@ -4,7 +4,7 @@ Date: 2026-11-16
 
 ## Status
 
-Accepted (owner, 2026-11-16).
+Proposed (orchestrator default; owner confirms at the FND checkpoint, DEC-07).
 
 ## Context
 
@@ -22,5 +22,5 @@ off under the DCO (`CONTRIBUTING.md`). Dependencies are limited to permissive li
 
 ## Consequences
 
-`cargo-deny`'s licence check (FND-06) refuses a copyleft dependency without an ADR. The javac
+`cargo-deny`'s licence check (FND-02) refuses a copyleft dependency without an ADR. The javac
 worker (Java source in `java/`) and the Quint models are under the same licence.
