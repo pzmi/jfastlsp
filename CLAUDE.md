@@ -1,0 +1,174 @@
+# CLAUDE.md
+
+## Project
+
+jfastlsp is **agent-centric Java code intelligence in Rust**: one binary, `jfl`, whose `jfl lsp`
+is a stdio language server and whose other subcommands are a JSON CLI. Both are thin proxies over
+one daemon per user (Unix socket, single owner by lock) that indexes the Java sources of many Git
+worktrees of a large Gradle repository at once. Every navigation answer is an envelope with
+`exact`, `possible` and `complete`, and **`complete=true` is never wrong** (ADR 0014). No JVM and no
+build on the request path (ADR 0015). Status: **pre-alpha, planning**; phase 0 measurements decide
+go/no-go (DEC-02). Public, open source (`MIT OR Apache-2.0`).
+
+## Docs
+
+| File | What it holds |
+|:--|:--|
+| `doc/plan.md` | Product and architecture: goal and kill criterion (§1), the agent contract and envelope (§2), diagnostics (§3), worktrees, views and freshness (§4), runtime (§5), crates and dependency law (§6), Quint models (§7), phase 0 (§9), milestones (§10), security (§11), open decisions (§14) |
+| `doc/foundation.md` | Engineering rules: dependency law and authority (§2), enforcement (§3), language and lints (§4), logging (§5), persistent state (§6), CI (§7), tool pins (§8), commands (§9), commits (§10), agent contract (§11) |
+| `doc/verification.md` | Test levels (§2), determinism (§3), goldens (§4), contract suites (§5), formal models (§6), oracles (§7), fuzz (§8), benchmarks (§10), agent evaluation (§11) |
+| `doc/sdlc.md` | Ready, procedure, Done, the gate, integration, checkpoints, owner decisions |
+| `doc/required-checks.md` | The CI jobs and the `Required` aggregate (planned until FND-07) |
+| `doc/tasks.md` | Decisions (ADR numbers), rules for every task, the live gate, lanes and task cards, ⛳ checkpoints |
+| `doc/adr/` | Decisions, Nygard style; the ADR number is the decision id; index in `doc/adr/README.md` |
+
+Citations read "plan §4.3", "fnd §3", "ver §6"; read the sections a task cites, not whole
+documents. Decisions in `doc/tasks.md` and Accepted ADRs override earlier plan text.
+
+## Workflow
+
+- `/orchestrate [ids|lane]`: run ready tasks through background agents in worktrees, review each
+  commit, land it on `main`, watch CI, stop at ⛳ checkpoints. The orchestrator never implements.
+- `/work <ID>`: one task through intake, plan, implement, test, polish, review, qa, ship,
+  babysit. State in `.work/<ID>/` (gitignored). An agent that cannot load the skill by name reads
+  `.claude/skills/work/SKILL.md` and its station files and follows them.
+- `/review [range]`: read-only review; default range since the newest `checkpoint-*` tag.
+- `CLAUDE.md` and `.claude/` belong to the orchestrator: a task agent reports a needed change.
+- `DEC-` tasks and `(owner)` items are the owner's: agents prepare, never decide or run them.
+
+## The gate
+
+**Until FND-02 lands, the gate is this fallback** (and until FND-01 there is no workspace):
+
+```bash
+cargo fmt --all --check && cargo clippy --workspace --all-targets --locked -- -D warnings && cargo test --workspace --locked
+```
+
+From FND-02 on (each command exists once the task named in fnd §9 has landed):
+
+```bash
+cargo xtask quick                    # fmt check, architecture, clippy, fast tests: while working
+cargo xtask check                    # the full blocking gate: before every commit
+cargo xtask check --only <stages>    # named stages through the same code (what each CI job runs)
+cargo xtask architecture             # crate policy, authority, semantic rules, negative fixtures (FND-04, FND-05)
+cargo xtask list-checks              # every check, machine-readable
+cargo xtask doctor [--all]           # pinned tools; run it first when local and CI disagree
+cargo xtask adr new "<title>" [--number N]   # and `cargo xtask adr index --fix` (FND-03)
+cargo xtask land <sha> --push origin main    # orchestrator only (ADR 0002; FND-03)
+```
+
+`quick` is not `check`; never report one as the other. A missing tool fails, never a
+skipped-but-green check. Run the gate in the foreground with `set -o pipefail` semantics (no
+`| tail` in an `&&` chain); commit only on green. A repeatable job becomes an `xtask`
+subcommand. **Never prefix a command with inline `JFL_*`, `QUINT_SEED` or `PROPTEST_*`
+variables**; a scenario that needs one becomes an `xtask` flag. Until FND-03, landing is by hand:
+cherry-pick onto a clean `main`, the gate on the merged tree, push only on green (`doc/sdlc.md`).
+
+## Enforced rules
+
+- **Dependency law** (plan §6.3, fnd §2): cli → composition → adapters → application → pure
+  crates. Adapters never name a sibling adapter, composition or the CLI. Production crates never
+  depend on `jfl-testkit` or `jfl-conformance`; `jfl-oracle` and `jfl-eval` import no production
+  crate. A new crate gets its `members` entry, `architecture.toml` entry and external allowlist in
+  the same commit. Fix an architecture failure in the structure, never by loosening the policy.
+- **Authority** (plan §6.5): pure crates (`jfl-domain`, `jfl-protocol`) use no
+  `std::{fs,net,process,env}`, clock, randomness, threads or Tokio. Children only through
+  `jfl-process` (argv only, never `sh -c`; cleared environment plus an allowlist; deadline; own
+  process group; bounded output) or composition's launcher. Sockets only in `jfl-adapter-ipc`,
+  Unix domain, `0600` in a `0700` state dir, peer uid checked; never TCP.
+- **The envelope** (plan §2.1): `exact` only with evidence; `possible` a sound superset with
+  reasons; `complete=true` only when every module that can see the target is indexed and fresh at
+  the pinned generation; never an empty answer without a completeness statement.
+- **Views and freshness** (plan §4): bind per request URI to the innermost worktree; nested
+  worktrees (`.git` file or dir, `.claude/worktrees/`) never scanned by their parent; one pinned
+  generation per answer; atomic publish; a per-request stat of file, `HEAD` and index; disk wins
+  over an older overlay.
+- **LSP fidelity** (plan §2.3, §2.5): positions in the negotiated encoding (UTF-16 by default)
+  through `jfl-domain`'s conversions; framing limits checked before allocation; every request
+  answered or cancelled; `initialize` never waits on indexing; `.lsp.json` uses documented keys only.
+- **Untrusted input** (plan §11): Java sources, class files, JARs, frames and tool output are
+  bounded and never panic; no `unwrap`, `expect`, indexing or unchecked arithmetic on input.
+- **Language**: `unsafe_code` forbidden; no `todo!`, `unimplemented!`, `dbg!`, `#[ignore]`; no
+  `#[allow]`/`#[expect]` without an `architecture.toml` exception citing an ADR; zero clippy
+  warnings; `#[cfg]` items, never a `cfg!(target_os…)` branch.
+- **Tests** (ver §2): `should_<outcome>_when_<condition>` with `// given`, `// when`, `// then`,
+  at the lowest level that can fail for their reason; no sleeps (fake clock, channels, the testkit
+  `poll` helper); no mocking frameworks; tempdirs. A port with a fake and a real adapter runs one
+  contract suite against both. Never delete a failing test, weaken an invariant, loosen a budget
+  or rewrite a golden to get green.
+- **Model first** (ADR 0007): a change to views and generations, the daemon lifecycle or
+  diagnostics publication updates the Quint model, its scenarios and the conformance driver
+  before the Rust code. **Golden first** for protocol, `--json` and LSP changes.
+- **Claims need evidence**: a doc comment's behavioural claim names its test
+  (`/// Pinned by: <path>::<name>`); a performance claim names its benchmark and machine.
+- **Logging** (fnd §5): `tracing`, fixed `snake_case` event names, data in fields; no INFO per
+  request; never source text.
+- **Dependencies**: `cargo add`, reason in the commit; `Cargo.lock` committed, builds `--locked`;
+  licences per `deny.toml`; GitHub Actions pinned by commit SHA.
+- **Decisions** (`doc/adr/README.md`): a change that adds or reverses an architectural decision
+  adds or supersedes an ADR in the same commit, with the rules and tests that pin it. Only the
+  owner flips Proposed to Accepted or decides a `DEC-` task.
+
+## Commits
+
+- Direct on `main` (ADR 0002): one DCO-signed commit per task, reviewed and landed by the
+  orchestrator; implementing agents commit on their lane and never push or tag.
+- Author and `Signed-off-by`: `Patryk Żmigrodzki <pzmi@users.noreply.github.com>` (pass
+  `--author`); the committer stays the environment's identity, which signs (ADR 0003).
+- Subject `<ID>: summary`, imperative, under 72 chars; a body that says why, names each new
+  dependency, and carries an `Impact:` line.
+- Trailer block last, written by hand: `Signed-off-by`, `Co-Authored-By`, `Claude-Session`, the
+  last two exactly as the session's attribution instructions give them. Never `git commit -s`
+  with other trailers.
+- Stage only your own files (never `git add -A` or `git add .`). Never `--no-verify`, never
+  force-push, never push tags; `checkpoint-*` tags are local.
+
+## Sandbox
+
+- Linux, 4 CPUs and about 15 GB RAM: **at most two lanes**, each with `CARGO_BUILD_JOBS=2`,
+  `CARGO_INCREMENTAL=0` and its own `CARGO_TARGET_DIR` under the session scratchpad, on disk (not
+  `/dev/shm`), deleted when the lane is done. JVM-backed tests take a lane's whole budget.
+- **The sandbox runs as root; CI does not.** A test about file modes or ownership also passes
+  under `setpriv --reuid=<uid> --regid=<gid> --clear-groups` before committing.
+- Node (Quint) and the JDK (Apalache, the javac worker, Java fixtures) are dev-time only; `jfl`
+  never needs them to start. Never run Gradle or a build on a target Java repository; use the
+  synthetic fixtures. `gh` may be absent: use the GitHub MCP tools.
+- Hooks (each a no-op until its prerequisite exists): SessionStart installs the pinned toolchain
+  and reports tools; every edited `*.rs` is rustfmt'ed; Stop runs the fast gate when code,
+  manifests, the policy, a model or a fixture changed.
+- Temporary files go in the session scratchpad, never `/tmp` or the repo. Kill only PIDs you
+  started, never by pattern. Never end a turn with the gate, a daemon or a JVM still running.
+
+## Rules learned the hard way
+
+They bind every session; an incident in this repository adds a dated line here.
+
+1. **Review every task commit before landing it**, not only at ⛳; for the socket, the lock,
+   `jfl-process`, the Gradle model and parsers, the review finishes before `land` starts.
+2. **Gate commands keep their exit codes**: `set -o pipefail`, no `| tail` inside an `&&` chain.
+3. **After an agent ends, find what it left running** (`readlink /proc/<pid>/cwd` under its
+   worktree) and stop it by PID.
+4. **A background command is cut at the harness limit (1 to 2 hours)**: split long runs, each
+   with its own explicit timeout.
+5. **Resume a stopped agent by `SendMessage`** ("continue WITHOUT resetting"); never discard its
+   uncommitted change unread; never start a second agent on the same task.
+6. **An agent that changes git config, signing, hooks or harness settings beyond its brief** is
+   stopped and the change reverted.
+7. **Every CI job failing within seconds with no log** is an Actions quota or spending limit, not
+   red code: tell the owner once.
+8. **Worktrees start from a fetched `origin/main`**, never a stale local `main`.
+9. **Before cancelling a CI run, read every job's state**; re-run a red job at most once, with
+   the reason written down; a failure that passes on a rerun is a race to find.
+10. **Never edit a worktree while its gate or `land` runs in it**; stop the run and start again.
+11. **Check a commit's signature with `git cat-file -p <sha> | grep -c ^gpgsig`**, not `%G?`
+    (with no allowed-signers file it prints `N`).
+
+## Public repository
+
+Never commit secrets, tokens, credentials, internal hostnames, personal paths, model ids or
+content of a private repository. **Never name or allude to a private project** of the owner's
+anywhere (code, docs, ADRs, fixtures, evaluation reports, commit messages), and never hint that a
+design came from an unnamed elsewhere (ADR 0004). The public repositories site-preview and mayfly
+may be cited where a design is ported. Nothing from a private target Java repository enters this
+repository: harnesses and runbooks here, runs on the owner's machine, aggregates only. Fixtures are
+synthetic.
