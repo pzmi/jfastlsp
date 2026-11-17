@@ -1,0 +1,84 @@
+{
+  "schema_version": "ATIF-v1.8",
+  "session_id": "bbbbbbbb-0000-4000-8000-000000000002",
+  "agent": {
+    "name": "claude-code",
+    "version": "2.1.0",
+    "model_name": "synthetic-model"
+  },
+  "steps": [
+    {
+      "step_id": 1,
+      "timestamp": "2026-11-17T09:00:00Z",
+      "source": "user",
+      "message": "PLANTED-PROMPT: fix the rounding in Money.add so that totals match the ledger."
+    },
+    {
+      "step_id": 2,
+      "timestamp": "2026-11-17T09:00:05Z",
+      "source": "agent",
+      "message": "",
+      "tool_calls": [
+        {
+          "tool_call_id": "a1",
+          "function_name": "LSP",
+          "arguments": {
+            "operation": "findReferences",
+            "filePath": "/app/ledger-core/src/main/java/org/example/planted/PlantedPath.java",
+            "line": 12,
+            "character": 14
+          }
+        }
+      ],
+      "observation": {
+        "results": [
+          {
+            "source_call_id": "a1",
+            "content": "Found 3 references:\n/app/ledger-core/src/main/java/org/example/planted/PlantedPath.java:12:9"
+          }
+        ]
+      },
+      "metrics": {
+        "prompt_tokens": 2000,
+        "completion_tokens": 50,
+        "cached_tokens": 1500
+      }
+    },
+    {
+      "step_id": 3,
+      "timestamp": "2026-11-17T09:00:09Z",
+      "source": "agent",
+      "message": "PLANTED         long plantedSourceLine = cents * 100; // PLANTED-SOURCE",
+      "tool_calls": [
+        {
+          "tool_call_id": "a2",
+          "function_name": "Edit",
+          "arguments": {
+            "file_path": "/app/ledger-core/src/main/java/org/example/planted/PlantedPath.java",
+            "old_string": "        long plantedSourceLine = cents * 100; // PLANTED-SOURCE",
+            "new_string": "        long plantedSourceLine = cents * 1000; // PLANTED-SOURCE"
+          }
+        }
+      ],
+      "observation": {
+        "results": [
+          {
+            "source_call_id": "a2",
+            "content": "ok"
+          }
+        ]
+      },
+      "metrics": {
+        "prompt_tokens": 2100,
+        "completion_tokens": 70,
+        "cached_tokens": 1900
+      }
+    }
+  ],
+  "final_metrics": {
+    "total_prompt_tokens": 4100,
+    "total_completion_tokens": 120,
+    "total_cached_tokens": 3400,
+    "total_steps": 3
+  }
+}

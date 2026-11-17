@@ -90,6 +90,12 @@ jfl-jdtls = { rustix = ["net", "process", "std"], serde = ["default", "derive"],
 # (jfl-architecture).
 xtask = { regex = ["default"], sha2 = ["default"] }
 
+# jfl-eval (EVAL-01, ADR 0029): toml and serde read the task sets and arms strictly
+# (deny_unknown_fields); serde_json reads Harbor's result.json and ATIF trajectories and Claude
+# Code's JSONL transcripts and writes the task settings and the JSON report. All three are in the
+# graph already (jfl-bench, jfl-jdtls); MIT OR Apache-2.0, no build script.
+jfl-eval = { serde = ["default", "derive"], serde_json = ["default"], toml = ["default"] }
+
 jfl-bench = { blake3 = ["default"], ignore = ["default"], rayon = ["default"], serde = ["default", "derive"], serde_json = ["default"], toml = ["default"], tree-sitter = ["default"], tree-sitter-java-orchard = ["default"] }
 
 [external.dev]

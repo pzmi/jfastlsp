@@ -1,0 +1,1 @@
+{"task_name": "jdtls-proxy__fix-rounding", "verifier_result": PLANTED         long plantedSourceLine = cents * 100; // PLANTED-SOURCE

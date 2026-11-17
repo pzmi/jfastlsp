@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "id": "00000000-0000-4000-8000-000000003132",
+  "task_name": "jdtls-proxy__rename-entry",
+  "trial_name": "jdtls-proxy__rename-entry__bbb3",
+  "trial_uri": "file:///work/jobs/jdtls-proxy__rename-entry__bbb3/app/ledger-core/src/main/java/org/example/planted/PlantedPath.java",
+  "task_id": {
+    "path": "/work/eval/tasks/jdtls-proxy__rename-entry"
+  },
+  "source": null,
+  "task_checksum": "0000000000000000000000000000000000000000000000000000000000000000",
+  "config": {
+    "task": {
+      "path": "/work/eval/tasks/jdtls-proxy__rename-entry"
+    },
+    "instruction": "PLANTED-PROMPT: fix the rounding in Money.add so that totals match the ledger."
+  },
+  "agent_info": {
+    "name": "claude-code",
+    "version": "2.1.0",
+    "model_info": {
+      "name": "synthetic-model",
+      "provider": "anthropic"
+    }
+  },
+  "agent_result": {
+    "n_input_tokens": 1000,
+    "n_cache_tokens": 500,
+    "n_output_tokens": 100,
+    "cost_usd": null
+  },
+  "verifier_result": null,
+  "exception_info": {
+    "exception_type": "AgentTimeoutError",
+    "exception_message": "PLANTED /app/ledger-core/src/main/java/org/example/planted/PlantedPath.java",
+    "exception_traceback": "Traceback:         long plantedSourceLine = cents * 100; // PLANTED-SOURCE",
+    "occurred_at": "2026-11-17T09:30:00Z"
+  },
+  "started_at": "2026-11-17T09:00:00Z",
+  "finished_at": "2026-11-17T09:30:00Z"
+}

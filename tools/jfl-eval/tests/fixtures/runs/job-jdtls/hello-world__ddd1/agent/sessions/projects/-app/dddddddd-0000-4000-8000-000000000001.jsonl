@@ -1,0 +1,1 @@
+{"type":"user","uuid":"dddddddd-0000-4000-8000-000000000001-0001","parentUuid":null,"sessionId":"dddddddd-0000-4000-8000-000000000001","timestamp":"2026-11-17T09:00:02.000Z","cwd":"/app","version":"2.1.0","isSidechain":false,"userType":"external","message":{"role":"user","content":"PLANTED-PROMPT: fix the rounding in Money.add so that totals match the ledger."}}

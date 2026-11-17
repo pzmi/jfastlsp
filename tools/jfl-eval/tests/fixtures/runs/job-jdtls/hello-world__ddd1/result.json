@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "id": "00000000-0000-4000-8000-000000001668",
+  "task_name": "PLANTED /app/ledger-core/src/main/java/org/example/planted/PlantedPath.java",
+  "trial_name": "hello-world__ddd1",
+  "trial_uri": "file:///work/jobs/hello-world__ddd1/app/ledger-core/src/main/java/org/example/planted/PlantedPath.java",
+  "task_id": {
+    "path": "/work/eval/tasks/PLANTED /app/ledger-core/src/main/java/org/example/planted/PlantedPath.java"
+  },
+  "source": null,
+  "task_checksum": "0000000000000000000000000000000000000000000000000000000000000000",
+  "config": {
+    "task": {
+      "path": "/work/eval/tasks/PLANTED /app/ledger-core/src/main/java/org/example/planted/PlantedPath.java"
+    },
+    "instruction": "PLANTED-PROMPT: fix the rounding in Money.add so that totals match the ledger."
+  },
+  "agent_info": {
+    "name": "claude-code",
+    "version": "2.1.0",
+    "model_info": {
+      "name": "synthetic-model",
+      "provider": "anthropic"
+    }
+  },
+  "agent_result": {
+    "n_input_tokens": 1000,
+    "n_cache_tokens": 500,
+    "n_output_tokens": 100,
+    "cost_usd": null
+  },
+  "verifier_result": {
+    "rewards": {
+      "reward": 1.0
+    }
+  },
+  "exception_info": null,
+  "started_at": "2026-11-17T09:00:00Z",
+  "finished_at": "2026-11-17T09:30:00Z"
+}

@@ -910,11 +910,12 @@ target repository is private, only aggregated reports under `doc/eval/` are comm
   Claude Code agent) instead of our own runner; `claude plugin eval` only for skill regressions (two
   arms, a 120 s scaffold, no custom graders).
 - **Accept:**
-  - [ ] `cargo run --locked -p jfl-eval -- report <fixture dir>` produces the expected aggregate report (a golden)
-  - [ ] the transcript reader extracts each metric from the synthetic fixtures (one test per metric)
-  - [ ] a report never contains a prompt, path or source line from the input (a test plants one and asserts its absence)
-  - [ ] `jfl-eval` imports no production crate (`architecture.toml` lists it independent)
-- **Impact:** none (tooling).
+  - [x] `cargo run --locked -p jfl-eval -- report <fixture dir>` produces the expected aggregate report (a golden)
+  - [x] the transcript reader extracts each metric from the synthetic fixtures (one test per metric)
+  - [x] a report never contains a prompt, path or source line from the input (a test plants one and asserts its absence)
+  - [x] `jfl-eval` imports no production crate (`architecture.toml` lists it independent)
+- **Impact:** none (tooling). Matched to Harbor 0.26.0 (commit `3cb6273`); runbook
+  `doc/eval/harness.md`.
 
 #### EVAL-11: jdtls behind our multiplexing proxy (`jfl-jdtls`)
 - **Depends on:** FND-02. **Model:** deep. **Size:** M. **Parallel with:** FND-07, FND-03, FND-04.
