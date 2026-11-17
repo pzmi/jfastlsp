@@ -1,0 +1,18 @@
+[package]
+name = "jfl-testkit"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+publish = false
+description = "Fakes for every port, the contract suites, fixture builders and the `poll` helper."
+
+[dependencies]
+jfl-domain = { path = "../jfl-domain" }
+jfl-protocol = { path = "../jfl-protocol" }
+jfl-application = { path = "../jfl-application" }
+
+[lints]
+workspace = true

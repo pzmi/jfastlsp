@@ -1,0 +1,18 @@
+[package]
+name = "jfl-adapter-git"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+publish = false
+description = "`RepoProbe` over the `git` CLI: worktree roots, common directory, `HEAD` and index stat, changed files."
+
+[dependencies]
+jfl-domain = { path = "../jfl-domain" }
+jfl-application = { path = "../jfl-application" }
+jfl-process = { path = "../jfl-process" }
+
+[lints]
+workspace = true

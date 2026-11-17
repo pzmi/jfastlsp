@@ -1,0 +1,20 @@
+[package]
+name = "jfl-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+publish = false
+description = "The `jfl` binary: argument parsing, output formatting and exit codes, delegating to composition."
+
+[[bin]]
+name = "jfl"
+path = "src/main.rs"
+
+[dependencies]
+jfl-composition = { path = "../jfl-composition" }
+
+[lints]
+workspace = true

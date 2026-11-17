@@ -1,0 +1,16 @@
+[package]
+name = "jfl-application"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+publish = false
+description = "Use cases and queries, the view registry and generations, the diagnostics coordinator and the port traits."
+
+[dependencies]
+jfl-domain = { path = "../jfl-domain" }
+
+[lints]
+workspace = true

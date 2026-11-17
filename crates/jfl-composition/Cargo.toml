@@ -1,0 +1,28 @@
+[package]
+name = "jfl-composition"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+publish = false
+description = "Wiring for the daemon and the proxies: runtime and task supervision and the daemon launcher."
+
+[dependencies]
+jfl-domain = { path = "../jfl-domain" }
+jfl-protocol = { path = "../jfl-protocol" }
+jfl-application = { path = "../jfl-application" }
+jfl-process = { path = "../jfl-process" }
+jfl-adapter-fs = { path = "../jfl-adapter-fs" }
+jfl-adapter-git = { path = "../jfl-adapter-git" }
+jfl-adapter-java = { path = "../jfl-adapter-java" }
+jfl-adapter-classfile = { path = "../jfl-adapter-classfile" }
+jfl-adapter-store = { path = "../jfl-adapter-store" }
+jfl-adapter-ipc = { path = "../jfl-adapter-ipc" }
+jfl-adapter-lsp = { path = "../jfl-adapter-lsp" }
+jfl-adapter-javac = { path = "../jfl-adapter-javac" }
+jfl-adapter-gradle = { path = "../jfl-adapter-gradle" }
+
+[lints]
+workspace = true

@@ -1,0 +1,17 @@
+[package]
+name = "jfl-adapter-fs"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+publish = false
+description = "`SourceTree` over the filesystem: scanning with nested-worktree exclusion, reading, stat and watcher hints."
+
+[dependencies]
+jfl-domain = { path = "../jfl-domain" }
+jfl-application = { path = "../jfl-application" }
+
+[lints]
+workspace = true

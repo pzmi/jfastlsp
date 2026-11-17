@@ -1,0 +1,62 @@
+# The architecture policy (fnd §3.1, ADR 0010). Parsed strictly by the architecture test
+# (FND-07); FND-01 writes the tables, FND-02 and FND-07 enforce them. A crate belongs to exactly
+# one category; the edge table is plan §6.3; the grants are fnd §2.4.
+schema = 1
+
+[workspace]
+production = ["jfl-domain", "jfl-protocol", "jfl-application", "jfl-process", "jfl-adapter-fs", "jfl-adapter-git", "jfl-adapter-java", "jfl-adapter-classfile", "jfl-adapter-store", "jfl-adapter-ipc", "jfl-adapter-lsp", "jfl-adapter-javac", "jfl-adapter-gradle", "jfl-composition", "jfl-cli"]
+test_only = ["jfl-testkit", "jfl-conformance", "jfl-architecture"]
+tool_only = ["jfl-oracle", "jfl-eval", "jfl-jdtls", "jfl-bench"]
+# fuzz_only = ["jfl-fuzz"] arrives with REL-03 (its own workspace under fuzz/).
+
+[roles]
+pure = ["jfl-domain", "jfl-protocol"]
+application = ["jfl-application"]
+support = ["jfl-process"]
+adapter = ["jfl-adapter-fs", "jfl-adapter-git", "jfl-adapter-java", "jfl-adapter-classfile", "jfl-adapter-store", "jfl-adapter-ipc", "jfl-adapter-lsp", "jfl-adapter-javac", "jfl-adapter-gradle"]
+root = ["jfl-composition", "jfl-cli"]
+
+# What each crate's clippy.toml may drop from the canonical disallowed list (fnd §2.4). The
+# git, javac and gradle adapters spawn only through jfl-process, so they hold no process grant.
+[grants]
+process = ["jfl-process", "jfl-testkit", "jfl-architecture", "jfl-bench", "jfl-eval", "jfl-jdtls"]
+socket = ["jfl-adapter-ipc", "jfl-jdtls"]
+fs = ["jfl-adapter-fs", "jfl-adapter-git", "jfl-adapter-store", "jfl-adapter-classfile", "jfl-adapter-javac", "jfl-adapter-gradle", "jfl-adapter-ipc", "jfl-composition", "jfl-testkit", "jfl-conformance", "jfl-architecture", "jfl-bench", "jfl-eval", "jfl-jdtls", "jfl-oracle"]
+spawn = ["jfl-adapter-ipc", "jfl-composition", "jfl-jdtls"]
+sleep = ["jfl-testkit"]
+clock = ["jfl-process", "jfl-composition", "jfl-testkit", "jfl-bench", "jfl-eval", "jfl-jdtls"]
+env = ["jfl-process", "jfl-composition", "jfl-cli", "jfl-conformance", "jfl-architecture", "jfl-bench", "jfl-eval", "jfl-jdtls"]
+independent = ["jfl-oracle", "jfl-eval", "jfl-jdtls", "jfl-bench"]
+
+# The only legal normal edges between workspace crates (plan §6.3).
+[dependencies.normal]
+jfl-domain = []
+jfl-protocol = ["jfl-domain"]
+jfl-application = ["jfl-domain"]
+jfl-process = []
+jfl-adapter-fs = ["jfl-domain", "jfl-application"]
+jfl-adapter-git = ["jfl-domain", "jfl-application", "jfl-process"]
+jfl-adapter-java = ["jfl-domain", "jfl-application"]
+jfl-adapter-classfile = ["jfl-domain", "jfl-application"]
+jfl-adapter-store = ["jfl-domain", "jfl-application"]
+jfl-adapter-ipc = ["jfl-domain", "jfl-protocol", "jfl-application"]
+jfl-adapter-lsp = ["jfl-domain", "jfl-protocol"]
+jfl-adapter-javac = ["jfl-domain", "jfl-application", "jfl-process"]
+jfl-adapter-gradle = ["jfl-domain", "jfl-application", "jfl-process"]
+jfl-composition = ["jfl-domain", "jfl-protocol", "jfl-application", "jfl-process", "jfl-adapter-fs", "jfl-adapter-git", "jfl-adapter-java", "jfl-adapter-classfile", "jfl-adapter-store", "jfl-adapter-ipc", "jfl-adapter-lsp", "jfl-adapter-javac", "jfl-adapter-gradle"]
+jfl-cli = ["jfl-composition"]
+jfl-testkit = ["jfl-domain", "jfl-protocol", "jfl-application"]
+jfl-conformance = ["jfl-testkit", "jfl-domain", "jfl-protocol", "jfl-application", "jfl-adapter-ipc", "jfl-composition"]
+jfl-architecture = []
+jfl-oracle = []
+jfl-eval = []
+jfl-jdtls = []
+jfl-bench = []
+
+[dependencies.build]
+
+[external.normal]
+[external.dev]
+[external.build]
+
+[exceptions]

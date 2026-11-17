@@ -1,0 +1,21 @@
+[package]
+name = "jfl-conformance"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+publish = false
+description = "The Quint ITF replay harness and the conformance drivers."
+
+[dependencies]
+jfl-testkit = { path = "../jfl-testkit" }
+jfl-domain = { path = "../jfl-domain" }
+jfl-protocol = { path = "../jfl-protocol" }
+jfl-application = { path = "../jfl-application" }
+jfl-adapter-ipc = { path = "../jfl-adapter-ipc" }
+jfl-composition = { path = "../jfl-composition" }
+
+[lints]
+workspace = true

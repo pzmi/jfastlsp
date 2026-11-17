@@ -1,0 +1,7 @@
+# Pinned exactly (ADR 0030, carrying ADR 0011). `x86_64-unknown-none` has no std: the `nostd`
+# stage builds the pure crates for it (fnd §2.3).
+[toolchain]
+channel = "1.97.0"
+profile = "minimal"
+components = ["rustfmt", "clippy", "llvm-tools-preview"]
+targets = ["x86_64-unknown-none"]

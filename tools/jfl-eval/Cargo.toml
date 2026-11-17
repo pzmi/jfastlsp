@@ -1,0 +1,17 @@
+[package]
+name = "jfl-eval"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+publish = false
+description = "The agent-evaluation harness and the phase 0 measurements; imports no production crate."
+
+[[bin]]
+name = "jfl-eval"
+path = "src/main.rs"
+
+[lints]
+workspace = true

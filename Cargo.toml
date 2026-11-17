@@ -1,0 +1,59 @@
+[workspace]
+# Explicit members, never a glob (fnd §2.2); spikes/ holds the archived E1 spike, outside the
+# workspace on purpose. A new crate adds its entry, its architecture.toml rows and its deny.toml
+# and clippy.toml entries in the same commit.
+members = [
+    "crates/jfl-domain",
+    "crates/jfl-protocol",
+    "crates/jfl-application",
+    "crates/jfl-process",
+    "crates/jfl-adapter-fs",
+    "crates/jfl-adapter-git",
+    "crates/jfl-adapter-java",
+    "crates/jfl-adapter-classfile",
+    "crates/jfl-adapter-store",
+    "crates/jfl-adapter-ipc",
+    "crates/jfl-adapter-lsp",
+    "crates/jfl-adapter-javac",
+    "crates/jfl-adapter-gradle",
+    "crates/jfl-composition",
+    "crates/jfl-cli",
+    "crates/jfl-testkit",
+    "crates/jfl-conformance",
+    "tools/jfl-architecture",
+    "tools/jfl-oracle",
+    "tools/jfl-eval",
+    "tools/jfl-jdtls",
+    "tools/jfl-bench",
+]
+exclude = ["spikes"]
+resolver = "3"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.97"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/pzmi/jfastlsp"
+readme = "README.md"
+
+# fnd §4.2: exactly these lints, in every member (`[lints] workspace = true`).
+[workspace.lints.rust]
+unsafe_code = "forbid"
+unused_must_use = "deny"
+missing_docs = "warn"
+unreachable_pub = "warn"
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(coverage)"] }
+
+[workspace.lints.clippy]
+all = { level = "deny", priority = -1 }
+dbg_macro = "deny"
+todo = "deny"
+unimplemented = "deny"
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+indexing_slicing = "deny"
+arithmetic_side_effects = "deny"
+await_holding_lock = "deny"
+large_futures = "deny"

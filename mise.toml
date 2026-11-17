@@ -1,0 +1,9 @@
+# Every tool other than Rust, pinned exactly (fnd §8, ADR 0030). mise.lock records the
+# checksums and download URLs; `mise install --locked` refuses a mismatch.
+[tools]
+# The gate runner (FND-01). The version must equal JUST_VERSION in scripts/bootstrap-tools.sh;
+# `just doctor` compares them.
+just = "1.59.0"
+# The test runner (FND-01); prebuilt release asset, no compile in a fresh session.
+"aqua:nextest-rs/nextest/cargo-nextest" = "0.9.152"
+

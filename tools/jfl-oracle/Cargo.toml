@@ -1,0 +1,17 @@
+[package]
+name = "jfl-oracle"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+publish = false
+description = "SCIP reader and the differential and completeness oracles; imports no production crate."
+
+[[bin]]
+name = "jfl-oracle"
+path = "src/main.rs"
+
+[lints]
+workspace = true

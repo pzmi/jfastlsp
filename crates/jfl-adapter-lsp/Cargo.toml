@@ -1,0 +1,17 @@
+[package]
+name = "jfl-adapter-lsp"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+publish = false
+description = "Translation between LSP 3.17 and `jfl-protocol` for the `jfl lsp` proxy."
+
+[dependencies]
+jfl-domain = { path = "../jfl-domain" }
+jfl-protocol = { path = "../jfl-protocol" }
+
+[lints]
+workspace = true

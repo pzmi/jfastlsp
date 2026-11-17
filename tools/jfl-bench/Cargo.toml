@@ -1,0 +1,17 @@
+[package]
+name = "jfl-bench"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+publish = false
+description = "The benchmark harness over the pinned corpus and the comparison arms; imports no production crate."
+
+[[bin]]
+name = "jfl-bench"
+path = "src/main.rs"
+
+[lints]
+workspace = true
