@@ -1,0 +1,10 @@
+{
+  "jdtls-proxy": {
+    "command": "jfl-jdtls",
+    "args": ["lsp"],
+    "extensionToLanguage": {
+      ".java": "java"
+    },
+    "startupTimeout": 120000
+  }
+}

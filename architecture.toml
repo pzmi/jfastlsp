@@ -61,6 +61,11 @@ jfl-bench = []
 # The architecture test (FND-07): cargo_metadata reads the graph, toml and serde parse the policy
 # and the manifests strictly (`deny_unknown_fields`); ADR 0030.
 jfl-architecture = { cargo_metadata = ["default"], serde = ["default", "derive"], toml = ["default"] }
+# jfl-jdtls (EVAL-11, ADR 0028): serde_json parses only the JSON-RPC envelope and forwards params,
+# result and error as raw values (raw_value); serde derives the envelope; sha1_smol keys jdtls's
+# -data on the full worktree path; rustix gives the effective uid, the socket peer's uid and the
+# process-group kill that std lacks.
+jfl-jdtls = { rustix = ["net", "process", "std"], serde = ["default", "derive"], serde_json = ["default", "raw_value"], sha1_smol = ["default"] }
 
 [external.dev]
 # The architecture test's synthetic `cargo metadata` JSON (tests/rules.rs).

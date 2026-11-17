@@ -32,6 +32,25 @@ no production crate:
   write to disk; the last open buffer wins), cancellation forwarded, a client's exit never stops
   the jdtls others use; `lsp-server` for framing (ADR 0020).
 
+Amended 2026-11-17 (EVAL-11), as built:
+
+- Framing is the tool's own bounded `Content-Length` reader, not `lsp-server`: a proxy forwards
+  raw bodies and must refuse an oversized frame before allocating it, which `lsp-server`'s
+  `Message::read` does not, and `deny.toml` wraps `lsp-server` to the LSP and IPC adapters.
+  Messages are decoded only as far as the JSON-RPC envelope (`serde_json`, `RawValue`):
+  payloads the proxy does not rewrite are forwarded byte for byte.
+- jdtls is pinned at 1.61.0, the newest release that runs on Java 21 (1.62.0 and later need
+  Java 25).
+- Binding is per connection (the proxy's working directory), not per URI; the outer checkout's
+  jdtls excludes `**/.claude/worktrees/**` from its import so nested agent worktrees are not
+  imported twice.
+- The syntax server is a whole-session mode (`--syntax-server`); running it until the import
+  finishes and then switching to the full server is not built.
+- The socket: the `0700` state directory (created so, an existing one refused unless a real
+  directory of mode `0700` owned by the effective uid) is the access control everywhere; the
+  peer-uid check (`SO_PEERCRED`, through `rustix`) runs on Linux only. On macOS it is the
+  directory check only, as `rustix` has no `getpeereid`.
+
 It is the **kill-criterion baseline** (plan §1.3) and an E0 and E4 arm. If DEC-02 stops the
 project, it is the deliverable, promoted from tool to product by that decision.
 

@@ -15,3 +15,19 @@ path = "src/main.rs"
 
 [lints]
 workspace = true
+
+[[bin]]
+name = "jfl-jdtls-fake-lsp"
+path = "src/bin/fake_lsp.rs"
+
+[features]
+# Enables tests/real_jdtls.rs (empty without it): the pinned jdtls (scripts/jdtls-fetch.sh) on
+# a synthetic fixture. Off in the gate, which must not need a 50 MB download and a JVM; run with
+# `cargo nextest run -p jfl-jdtls --features real-jdtls --test real_jdtls`.
+real-jdtls = []
+
+[dependencies]
+rustix = { version = "1.1.6", default-features = false, features = ["std", "process", "net"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = { version = "1.0.154", features = ["raw_value"] }
+sha1_smol = "1.0.1"
