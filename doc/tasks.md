@@ -55,7 +55,7 @@ CLI carrier), **SEM-07** (M4),
 | BENCH-05 | Real-corpus golden cases | BENCH-04, EVAL-08 | deep | M |  | EVAL-10 |
 | BENCH-06 | Lombok repository in the corpus and as a second evaluation target | BENCH-01 | standard | S |  | BENCH-05 |
 | FORMAL-01 | Formal toolchain: Quint, Apalache, JDK pins, `MODELS`, formal stages | FND-05 | standard | M |  | EVAL-12, BENCH-04 |
-| FORMAL-02 | Conformance harness: quint-connect drivers, committed-trace replay, negative controls | FORMAL-01 | deep | M |  | EVAL-07, EVAL-05 |
+| FORMAL-02 | Conformance harness: ITF drivers, committed-trace replay, negative controls | FORMAL-01 | deep | M |  | EVAL-07, EVAL-05 |
 | FORMAL-03 | `views.qnt`: generations, freshness, completeness | FORMAL-02, DEC-02; started before DEC-02 by the owner's delegation (2026-11-17); DEC-02 still gates work beyond the walking skeleton | deep | M |  | IDX-01, IDX-04 |
 | FORMAL-04 | `daemon.qnt`: single owner, spawn, reconnect, no ghost buffers | FORMAL-03 | deep | M |  | IDX-02 |
 | FORMAL-05 | `diagnostics.qnt`: staleness | FORMAL-04 | deep | M | ⛳ | IDX-03 |
@@ -885,9 +885,9 @@ before LSP-04.
   - [x] `just doctor` reports Node, Quint, Apalache and the JDK
 - **Impact:** none (tooling).
 
-#### FORMAL-02: Conformance harness: quint-connect drivers, committed-trace replay, negative controls
+#### FORMAL-02: Conformance harness: ITF drivers, committed-trace replay, negative controls
 - **Depends on:** FORMAL-01. **Model:** deep. **Size:** M. **Parallel with:** EVAL-07, EVAL-05.
-- **Cites:** ver §6.2; plan §7; ADR 0007, ADR 0030.
+- **Cites:** ver §6.2; plan §7; ADR 0007, ADR 0035 (which superseded ADR 0030).
 - `jfl-conformance` (test only) on `quint-connect` 0.1 and `itf` 0.4: drivers implement
   `quint-connect`'s `Driver` (`step` dispatches actions with `switch!`; the state is compared
   after every step through `itf`'s serde types, initial state included); generated traces through
@@ -899,15 +899,46 @@ before LSP-04.
   [traces] [steps]` repeats a run). Prove the harness on `smoke.qnt` with a test-only driver over
   a counter, and a negative control where the counter skips a value and the replay fails at the
   named step.
+- **Adapted 2026-11-17 (FORMAL-02), the card predating XT-01 and ADR 0035, and quint-connect not
+  fitting:**
+  - **quint-connect 0.1.2 is not taken** (ADR 0007, amended; ADR 0019, amended): its `Step` cannot
+    be built outside the crate, so committed traces cannot go through its `Driver`; it runs
+    `quint run` on Quint's default `rust` backend, which downloads an evaluator at run time; its
+    seed and verbosity are compile-time `option_env!`s; its divergence report names no step; and
+    it depends on `anyhow`, wrapped away from libraries in deny.toml. `jfl-conformance` holds the
+    harness over `itf` 0.4 instead (with `serde`, `serde_json`, `toml` and `similar`): a `Driver`
+    of quint-connect's shape, the ITF reading (anything but a trace with Quint's `--mbt`
+    metadata is `HARNESS_ERROR`), the replay with its divergence report, the regression manifest
+    reader, the driver registry (each registered model has a driver with its negative control,
+    or is pending with the task that brings it) and a binary, `jfl-conformance replay [--model
+    M] [--seed S --generated DIR]` (exit 0, 1 divergence, 2 usage, 3 harness error). `deny.toml`
+    admits the build scripts of `dashu-int` and `rustversion` (itf's) by checksum.
+  - **The stages are xtask's** (`tools/xtask/src/conformance.rs`), rows of the catalog after
+    `formal-test` (fnd §9's order), each with its one-line just delegation; `conformance
+    [MODEL|all] [SEED] [TRACES] [STEPS]` is an xtask command and a recipe, not a stage. xtask
+    generates (it holds the process grant; `jfl-conformance` does not) and runs the binary with
+    cargo. `formal-freshness` regenerates each trace of `formal/traces/regression/manifest.toml`
+    (read in a pinned line shape by xtask and with a TOML parser by `jfl-conformance`; every
+    registered model has a trace there, plan §7) and compares outside the top-level `#meta`. `conformance-replay` draws a fresh seed, prints it
+    with the `just conformance` line that repeats the run, generates 10 traces of 25 steps per
+    model twice and fails unless they are equal (the seed reproduces the run), then replays them
+    and the committed traces, and fails unless each driver's negative control diverges on the
+    generated ones. Traces live in a private scratch directory, kept and named on failure.
+  - **CI:** only the `formal` job of ci.yml (the one with Node and Quint) runs the two stages;
+    ARCH-ci-lockstep's inputs (ci.yml, doc/required-checks.md) and the frozen catalog gained rows
+    only. `formal.yml` is unchanged: every ci.yml run is a fresh-seed run.
+  - **The smoke driver** drives a test-only `Counter`; its control skips 3 and fails at step 3 of
+    the committed trace `smoke-counts-up` (0 to 6, seed `0x2a`).
 - **Reuse considered:** `quint-connect` and `itf` replace mayfly's `conformance.rs` (trace
   generation, seeds and replay, about 2,670 lines with the formal stages); `stateright` (models in
   Rust lose Quint and Apalache) was rejected; `proptest-state-machine` serves components without a
-  model.
+  model. As built: `itf` kept, `quint-connect` not taken (the adaptation above); the harness is
+  about 1,200 lines with its unit tests, manifest reader and binary, the stages about 800 in xtask.
 - **Accept:**
-  - [ ] `check` runs both stages green; the same seed reproduces a run
-  - [ ] the negative control fails at the expected step with expected and actual state in the report
-  - [ ] a stale regression trace fails `formal-freshness`
-  - [ ] a malformed ITF file is `HARNESS_ERROR`, never a pass
+  - [x] `check` runs both stages green; the same seed reproduces a run
+  - [x] the negative control fails at the expected step with expected and actual state in the report
+  - [x] a stale regression trace fails `formal-freshness`
+  - [x] a malformed ITF file is `HARNESS_ERROR`, never a pass
 - **Impact:** none (tooling).
 
 #### FORMAL-03: `views.qnt`: generations, freshness, completeness

@@ -47,9 +47,9 @@ pub(crate) const TYPECHECK: &str =
 pub(crate) const TEST: &str = "quint test --backend typescript --main <main> <each model of formal/models.toml> (a model without a test fails)";
 
 /// The invariant, initial action and step every model declares (ver §6.1).
-const INVARIANT: &str = "allInvariants";
-const INIT: &str = "init";
-const STEP: &str = "step";
+pub(crate) const INVARIANT: &str = "allInvariants";
+pub(crate) const INIT: &str = "init";
+pub(crate) const STEP: &str = "step";
 
 /// The simulation's sample count in `formal-verify`.
 const SAMPLES: &str = "1000";
@@ -207,7 +207,7 @@ pub(crate) fn passing(output: &str) -> u32 {
 }
 
 /// Each tool of `tools` on the stages' PATH, or 1 after naming the missing ones and the fix.
-fn require(context: &Context, stage: &str, tools: &[&str]) -> Result<(), i32> {
+pub(crate) fn require(context: &Context, stage: &str, tools: &[&str]) -> Result<(), i32> {
     let missing: Vec<&str> = tools
         .iter()
         .copied()
@@ -263,7 +263,7 @@ fn require_pinned(
 /// existing entry, a planted symlink included, so the first free name is taken and nothing is
 /// reused) and made private (0700). Pinned by
 /// `should_take_a_fresh_private_directory_when_the_name_is_taken`.
-fn unique_dir(parent: &Path, prefix: &str) -> Result<PathBuf, String> {
+pub(crate) fn unique_dir(parent: &Path, prefix: &str) -> Result<PathBuf, String> {
     for n in 0..1000_u32 {
         let dir = parent.join(format!("{prefix}-{}-{n}", std::process::id()));
         match std::fs::create_dir(&dir) {
@@ -295,7 +295,7 @@ fn private(_dir: &Path) -> Result<(), String> {
 }
 
 /// The registry, checked against the `.qnt` files of `formal/`; prints what is wrong.
-fn checked_registry(stage: &str) -> Result<Vec<Model>, i32> {
+pub(crate) fn checked_registry(stage: &str) -> Result<Vec<Model>, i32> {
     let models = registry().map_err(|e| {
         eprintln!("{stage}: {e}");
         1

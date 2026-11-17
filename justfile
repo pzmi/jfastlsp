@@ -89,6 +89,22 @@ formal-typecheck:
 formal-test:
     bash {{xtask}} check-only formal-test
 
+# Every committed regression trace of formal/traces/regression regenerates byte for byte at its
+# seed outside its `#meta`; then seeded traces of every model (a fresh seed, printed) and the
+# committed ones are replayed through the conformance drivers against the real code, with each
+# driver's negative control (FORMAL-02, ver §6.2).
+formal-freshness:
+    bash {{xtask}} check-only formal-freshness
+
+conformance-replay:
+    bash {{xtask}} check-only conformance-replay
+
+# Repeat a conformance-replay run: one model (or `all`), a printed seed, a budget of traces and
+# steps (`just conformance smoke 0x2a 10 25`); not a stage of `check`.
+[positional-arguments]
+conformance *args:
+    bash {{xtask}} conformance "$@"
+
 # Apalache's bounded verification of each registered model's `allInvariants` (or the one named),
 # then a Quint simulation; not a stage of `check` (a JVM per model): `formal.yml` runs it weekly
 # and by hand, one job per model (FORMAL-01, ver §6.3). `just formal-verify smoke`. The JDK and

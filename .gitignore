@@ -1,7 +1,6 @@
 /target
 /.work/
 /formal/node_modules/
-/formal/traces/generated/
 /formal/_apalache-out/
 /_apalache-out/
 /fuzz/target/

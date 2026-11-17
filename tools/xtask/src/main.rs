@@ -17,13 +17,17 @@
 //! - `formal-verify [MODEL]`: Apalache's bounded verification and a simulation of each model of
 //!   the `MODELS` registry, or the one named, after the preflight, on the stages' PATH; not a stage
 //!   of `check` (FORMAL-01, [`formal`]).
+//! - `conformance [MODEL] [SEED] [TRACES] [STEPS]`: the `conformance-replay` stage for one model
+//!   (or `all`), at a given seed and budget, so a printed seed repeats a run (FORMAL-02,
+//!   [`conformance`]).
 //!
 //! `--root DIR` before the command names the checkout whose gate runs (default: the one this
 //! binary was built from). Exit: 0 green, 1 a refusal or a red stage (or the stage's own code), 2
 //! usage. Ported from mayfly's `tools/xtask` (`main`, `cli`): its clap surface is replaced by a
-//! hand parser for these nine commands, so the launcher's first build stays one crate (regex) deep.
+//! hand parser for these ten commands, so the launcher's first build stays one crate (regex) deep.
 
 mod catalog;
+mod conformance;
 mod formal;
 mod preflight;
 mod process;
@@ -49,7 +53,9 @@ commands:
   doctor                   every pinned tool present at its version (tools/versions.toml)
   install-tools [--archives DIR] [TOOL...]
                            install the pinned tools, checksum-verified, into the tool cache
-  formal-verify [MODEL]    Apalache and a simulation over the registered Quint models";
+  formal-verify [MODEL]    Apalache and a simulation over the registered Quint models
+  conformance [MODEL|all] [SEED] [TRACES] [STEPS]
+                           repeat a conformance-replay run (a printed seed, a budget)";
 
 /// A parsed command line.
 #[derive(Debug, PartialEq, Eq)]
@@ -68,6 +74,7 @@ enum Command {
         names: Vec<String>,
     },
     FormalVerify(Option<String>),
+    Conformance(conformance::Run),
 }
 
 /// Parses the arguments after the program name: `[--root DIR] <command> [args]`.
@@ -103,6 +110,11 @@ fn parse(args: &[String]) -> Result<(Option<PathBuf>, Command), String> {
         [c] if c == "formal-verify" => Command::FormalVerify(None),
         [c, model] if c == "formal-verify" && !model.starts_with('-') => {
             Command::FormalVerify(Some(model.clone()))
+        }
+        [c, words @ ..] if c == "conformance" && words.iter().all(|w| !w.starts_with('-')) => {
+            Command::Conformance(
+                conformance::parse_run(words).map_err(|e| format!("{e}\n{USAGE}"))?,
+            )
         }
         _ => return Err(USAGE.to_owned()),
     };
@@ -224,7 +236,7 @@ fn run(root: &Path, command: Command) -> i32 {
                 return 2;
             }
         },
-        Command::Preflight | Command::FormalVerify(_) => Vec::new(),
+        Command::Preflight | Command::FormalVerify(_) | Command::Conformance(_) => Vec::new(),
         Command::Doctor => {
             let tools = match tools::manifest(root) {
                 Ok(tools) => tools,
@@ -264,7 +276,7 @@ fn run(root: &Path, command: Command) -> i32 {
         Ok(context) => context,
         Err(code) => return code,
     };
-    if stages.is_empty() && !matches!(command, Command::FormalVerify(_)) {
+    if stages.is_empty() && !matches!(command, Command::FormalVerify(_) | Command::Conformance(_)) {
         return 0;
     }
     let tools = match tools::manifest(root) {
@@ -278,6 +290,9 @@ fn run(root: &Path, command: Command) -> i32 {
     context.path = stage_path(root, &dirs);
     if let Command::FormalVerify(model) = &command {
         return formal::verify(&context, &tools, model.as_deref());
+    }
+    if let Command::Conformance(run) = &command {
+        return conformance::conformance(&context, run);
     }
     process::run_stages(&stages, &context)
 }
@@ -340,6 +355,19 @@ mod tests {
                 vec!["formal-verify", "smoke"],
                 Command::FormalVerify(Some("smoke".to_owned())),
             ),
+            (
+                vec!["conformance"],
+                Command::Conformance(conformance::Run::default()),
+            ),
+            (
+                vec!["conformance", "smoke", "0x2a", "3", "4"],
+                Command::Conformance(conformance::Run {
+                    model: Some("smoke".to_owned()),
+                    seed: Some("0x2a".to_owned()),
+                    traces: 3,
+                    steps: 4,
+                }),
+            ),
         ];
 
         // when
@@ -370,6 +398,8 @@ mod tests {
             vec!["install-tools", "--force", "x"],
             vec!["formal-verify", "--all"],
             vec!["formal-verify", "a", "b"],
+            vec!["conformance", "--seed", "1"],
+            vec!["conformance", "smoke", "nope"],
         ];
 
         // when

@@ -747,8 +747,10 @@ registry, has named scenarios, invariants, a broken-model negative control (an a
 that must violate an invariant within the bound), committed regression traces, and a conformance
 driver that replays traces against the real Rust code and compares observations after every step
 (ver §6). The model lands first (FORMAL lane); the driver lands with the code it drives. Drivers
-implement `quint-connect`'s `Driver` trait and decode traces with `itf`; only the replay of
-committed regression traces is ours (ADR 0007, ADR 0030). Beside the models, the same components
+implement `jfl-conformance`'s `Driver` trait and decode traces with `itf`; the harness around
+them (trace reading, replay, the divergence report, the committed-trace manifest) is ours, since
+`quint-connect` cannot replay committed traces and downloads an evaluator at run time (ADR 0007,
+amended for FORMAL-02). Beside the models, the same components
 get property-based state-machine tests on `proptest-state-machine`: a Rust reference machine
 drives the real component with random command sequences and shrinks a failure (ver §6.4); the
 models state the design, the state-machine tests the implementation, and both are required (ADR
@@ -963,7 +965,7 @@ update check, no crash upload.
 | `jdtls` is good enough | kill criterion §1.3 against stock jdtls; if jfastlsp cannot beat it on speed with honest envelopes, stop or rescope (never ship jdtls) |
 | JetBrains ships a headless, agent-licensed IntelliJ LSP ([IDEA-393669](https://youtrack.jetbrains.com/projects/IDEA/issues/IDEA-393669)) | it would be one more comparison arm beside stock jdtls (ADR 0028, amended); recheck at each milestone |
 | `kmp-lsp` (MIT, active) converges on the same niche | it is an E0 arm and a bench arm; forking its resolver or JAR cache is the mitigation |
-| A reused upstream stalls (tree-sitter-java-orchard and build-server-for-gradle have small teams; `quint-connect`, `gen-lsp-types` and `ristretto_jimage` are 0.x) | pin exact versions or commits, name a runner-up in each ADR (§16); for the grammar, the switch-back boundary and both-grammar corpus tests of ADR 0022 (amended) |
+| A reused upstream stalls (tree-sitter-java-orchard and build-server-for-gradle have small teams; `itf`, `gen-lsp-types` and `ristretto_jimage` are 0.x) | pin exact versions or commits, name a runner-up in each ADR (§16); for the grammar, the switch-back boundary and both-grammar corpus tests of ADR 0022 (amended) |
 | A speed regression lands unnoticed | the BENCH lane from FND-01 on; the >10 % gate from M1 (§1.7) |
 | Facts about Claude Code drift (operations, `bin/` policy, cloud LSP, `.lsp.json` keys, one server per subagent) | re-check at each milestone gate; smoke test on the current release |
 | tree-sitter grammar gaps on new Java syntax | the grammar version is part of `SyntaxKey`; parse errors are diagnostics, never crashes; corpus cases per Java release |

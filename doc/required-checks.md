@@ -9,7 +9,10 @@ The CI result that must be green on `main` is the `Required` job (id `required`)
 mise-action's `install_args` names: the gate's tools, plus Node and Quint in the `formal` job,
 which also runs `doctor` since it holds every tool `doctor` requires; the toolchain of
 `rust-toolchain.toml`) and runs `just` recipes, so the same recipes run on a laptop with `just
-check`. The JDK and Apalache are installed only by `formal.yml` (FORMAL-01).
+check`. The JDK and Apalache are installed only by `formal.yml` (FORMAL-01). The `formal` job's
+`conformance-replay` stage draws a fresh seed on every run and prints it with the command that
+repeats the run (`just conformance <model> <seed> <traces> <steps>`), and builds the replay
+(`jfl-conformance`) with the job's Rust toolchain (FORMAL-02).
 
 `ci.yml` runs on every push to `main`, on pull requests (outside contributors and Dependabot) and
 by hand (`workflow_dispatch`). Integration is direct on `main` (ADR 0002), so the run that matters
@@ -40,7 +43,7 @@ without a row, a row without a job, or any difference fails the `architecture` s
 | `tests` | Tests (Linux x86-64) | `ubuntu-24.04` | `check-only unit-tests integration-tests doctests script-tests` |
 | `linux-arm` | Linux (arm64) | `ubuntu-24.04-arm` | `platform-tests` |
 | `macos` | macOS (arm64) | `macos-15` | `platform-tests` |
-| `formal` | Formal models (Quint) | `ubuntu-24.04` | `doctor`, then `check-only formal-typecheck formal-test` |
+| `formal` | Formal models (Quint) | `ubuntu-24.04` | `doctor`, then `check-only formal-typecheck formal-test formal-freshness conformance-replay` |
 | `security` | Security | `ubuntu-24.04` | `check-only secrets workflows`, then `workflows-verify` |
 | `dco` | DCO | `ubuntu-24.04` | `dco-event` over the commits the event brought (a push's before..after; a pull request's base..head; the commit itself on a manual run; a push from the all-zero commit or a force-push fails) |
 | `required` | Required | `ubuntu-24.04` | the aggregate of every other job's result |
@@ -87,7 +90,6 @@ to `required`'s `needs` in one commit.
 | Job id | Display name | Runs | Arrives with |
 |:--|:--|:--|:--|
 | `coverage` | Coverage | `check-only coverage changed-lines`, then `just mutants-diff` (full history; diff base `git merge-base HEAD origin/main`, 20-minute cap) | FND-06 |
-| `formal` (its other stages) | Formal models (Quint) | `check-only formal-typecheck formal-test formal-freshness conformance-replay`: FORMAL-01 added the job with the first two | FORMAL-02 |
 | `fixtures` | Java fixtures | `check-only java-fixtures` (pinned JDK) | EVAL-07 |
 | `e2e` | End to end | `check-only e2e-tests lsp-conformance` | IDX-13, LSP-01 |
 

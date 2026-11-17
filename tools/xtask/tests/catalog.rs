@@ -5,7 +5,7 @@
 //! (ADR 0035, the XT lane's rule "nothing stops running") except by the owner's order:
 //! `private-names` was removed on 2026-11-17 (FND-11). XT-08 reruns this test after just goes.
 //! Added since: `formal-typecheck` and `formal-test` (FORMAL-01), after `script-tests` (fnd §9's
-//! order).
+//! order); `formal-freshness` and `conformance-replay` (FORMAL-02), after them.
 
 use std::error::Error;
 use std::process::{Command, Output};
@@ -13,8 +13,9 @@ use std::process::{Command, Output};
 type TestResult = Result<(), Box<dyn Error>>;
 
 /// The justfile's `check_stages` before XT-01 (commit 201a4cc), word for word, less the
-/// `private-names` stage the owner had removed (FND-11), plus the stages added since (FORMAL-01).
-const CHECK_STAGES: &str = "fmt-check architecture clippy nostd docs unit-tests integration-tests doctests script-tests formal-typecheck formal-test deny secrets workflows";
+/// `private-names` stage the owner had removed (FND-11), plus the stages added since (FORMAL-01,
+/// FORMAL-02).
+const CHECK_STAGES: &str = "fmt-check architecture clippy nostd docs unit-tests integration-tests doctests script-tests formal-typecheck formal-test formal-freshness conformance-replay deny secrets workflows";
 
 /// The justfile's `quick_stages` before XT-01, word for word.
 const QUICK_STAGES: &str = "fmt-check architecture clippy unit-tests script-tests";
@@ -34,6 +35,8 @@ const FROZEN: &str = r#"[
   {"id": "script-tests", "command": "bash scripts/test-*.sh, each in name order", "quick": true, "check": true},
   {"id": "formal-typecheck", "command": "quint typecheck <each model of formal/models.toml> (an unregistered formal/**/*.qnt fails)", "quick": false, "check": true},
   {"id": "formal-test", "command": "quint test --backend typescript --main <main> <each model of formal/models.toml> (a model without a test fails)", "quick": false, "check": true},
+  {"id": "formal-freshness", "command": "quint run --backend typescript --mbt --seed <seed> <each trace of formal/traces/regression/manifest.toml>, equal byte for byte to the committed trace outside its #meta", "quick": false, "check": true},
+  {"id": "conformance-replay", "command": "quint run --backend typescript --mbt --seed <fresh seed, printed> <each model of formal/models.toml> (10 traces of 25 steps, generated twice and equal), then cargo run --locked -q -p jfl-conformance -- replay --seed <seed> --generated <dir> (and formal/traces/regression)", "quick": false, "check": true},
   {"id": "deny", "command": "cargo deny --locked check", "quick": false, "check": true},
   {"id": "secrets", "command": "bash scripts/secrets-check.sh", "quick": false, "check": true},
   {"id": "workflows", "command": "bash scripts/workflows-check.sh workflows, then bash scripts/workflows-check.sh shell", "quick": false, "check": true}

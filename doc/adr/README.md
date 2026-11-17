@@ -62,7 +62,7 @@ for the owner's decisions.
 | [0004](0004-public-repository-no-private-projects.md) | Public repository: no private projects named or alluded to | Accepted (owner, 2026-11-16); amended 2026-11-17 |
 | [0005](0005-dual-licence-mit-or-apache-2-0.md) | Dual licence MIT OR Apache-2.0 | Superseded by 0033 |
 | [0006](0006-platforms-linux-x86-64-and-arm64-macos-arm64.md) | Platforms: Linux x86-64 and arm64, macOS arm64; Windows out of scope | Accepted (owner, 2026-11-17) |
-| [0007](0007-formal-methods-required-quint-with-itf-conformance.md) | Formal methods required: Quint models with ITF conformance against the real code | Accepted (owner, 2026-11-17); amended 2026-11-16 and 2026-11-17 |
+| [0007](0007-formal-methods-required-quint-with-itf-conformance.md) | Formal methods required: Quint models with ITF conformance against the real code | Accepted (owner, 2026-11-17); amended 2026-11-16, 2026-11-17 (owner) and 2026-11-17 (FORMAL-02) |
 | [0008](0008-no-event-sourcing-the-index-is-a-rebuildable-cache.md) | No event sourcing: the index is a rebuildable cache | Accepted (owner, 2026-11-17) |
 | [0009](0009-phase-0-first-owner-run-evaluations-and-decision-tasks.md) | Phase 0 first: owner-run evaluations and a decision task per open choice | Accepted (owner, 2026-11-17); amended 2026-11-16 |
 | [0010](0010-workspace-crate-map-and-dependency-law.md) | Workspace crate map and dependency law in architecture.toml | Accepted (owner, 2026-11-17); amended 2026-11-16 (twice) and 2026-11-17 |
@@ -74,7 +74,7 @@ for the owner's decisions.
 | [0016](0016-one-daemon-per-user-with-thin-proxies.md) | One daemon per user with thin per-client proxies | Accepted (owner, 2026-11-17) |
 | [0017](0017-bind-views-per-request-uri-exclude-nested-worktrees.md) | Bind views per request URI; exclude nested worktrees | Accepted (owner, 2026-11-17) |
 | [0018](0018-agent-sandbox-and-fail-closed-tools.md) | Agent sandbox and fail-closed tools | Accepted (owner, 2026-11-17); amended 2026-11-16 (twice) and 2026-11-17 |
-| [0019](0019-build-or-reuse-per-subsystem.md) | Build or reuse, per subsystem | Accepted (owner, 2026-11-17); amended 2026-11-17 |
+| [0019](0019-build-or-reuse-per-subsystem.md) | Build or reuse, per subsystem | Accepted (owner, 2026-11-17); amended 2026-11-17 (twice) |
 | [0020](0020-lsp-stack-lsp-server-gen-lsp-types-line-index.md) | LSP stack: lsp-server, gen-lsp-types and line-index | Accepted (owner, 2026-11-17) |
 | [0021](0021-daemon-ipc-lsp-framing-over-a-unix-socket.md) | Daemon IPC: LSP framing over a Unix socket, single owner by a std file lock | Accepted (owner, 2026-11-17) |
 | [0022](0022-java-grammar-tree-sitter-java-orchard-with-own-queries.md) | Java grammar: tree-sitter-java-orchard with our own queries | Accepted (owner, 2026-11-17); amended 2026-11-17 |

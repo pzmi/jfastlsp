@@ -140,6 +140,14 @@ bypass = [
   { crate = "getrandom", build-script = "662faa06d7b2a9c5bea2c17a127a90e00b9f9b31105b0360da516e47cf816e95" },
   # num-traits: one autocfg probe (`f64::total_cmp`), cfgs only; proptest's closure.
   { crate = "num-traits", build-script = "d3969209fc1c9d201c66ed11820d0b328600d75b3971f8ceebeab04900bc0587" },
+  # FORMAL-02 (ADR 0007, amended 2026-11-17): jfl-conformance (test only) decodes ITF traces with
+  # itf 0.4, which brings two more, read at the versions pinned in Cargo.lock; neither reaches a
+  # production crate's closure.
+  # dashu-int: declares the `force_bits` check-cfg, nothing else; itf's big integers.
+  { crate = "dashu-int", build-script = "1658ee74ee7b0ec2f28116ce8bf13085174177819c274cbd311b03f3984fdac2" },
+  # rustversion: runs `$RUSTC --version` (its build/rustc.rs parses the output, read too) and
+  # writes the version into OUT_DIR, cfgs only; dashu-int's closure.
+  { crate = "rustversion", build-script = "4438b108d5b198ca43ef0a78509da89861020674abd05166addd1c3058afbfa6" },
 ]
 
 [sources]

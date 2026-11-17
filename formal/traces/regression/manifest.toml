@@ -1,0 +1,24 @@
+# The committed regression traces (FORMAL-02, ver §6.2 item 1): one `[traces.<name>]` table per
+# `<name>.itf.json` of this directory, each with the arguments `quint run --mbt` generated it with.
+# `formal-freshness` regenerates every one (`quint run --backend typescript --mbt --main <main>
+# --init <init> --step <step> --invariant <invariant> --max-steps <max_steps> --seed <seed>` on
+# the model's file) and fails unless it equals the committed file byte for byte outside its
+# top-level `#meta` (which holds a timestamp); `conformance-replay` replays every one through its
+# model's driver (crates/jfl-conformance). A trace file no table lists, or a registered model
+# with no trace here (plan §7), fails both.
+#
+# Pinned shape, read by xtask (tools/xtask/src/conformance.rs) and by crates/jfl-conformance
+# (src/manifest.rs, with a TOML parser): `model` (a name of formal/models.toml), `main`, `init`,
+# `step` and `invariant` (identifiers), `max_steps` (1..9999) and `seed` (0x and 1 to 16 lowercase
+# hex digits, or 1 to 20 decimal digits), each once.
+
+# The smoke counter counts from 0 to 6 (FORMAL-02): the harness's own regression trace, which the
+# negative control (a counter that skips 3) must fail at step 3.
+[traces.smoke-counts-up]
+model = "smoke"
+main = "smoke"
+init = "init"
+step = "step"
+invariant = "allInvariants"
+max_steps = 6
+seed = "0x2a"

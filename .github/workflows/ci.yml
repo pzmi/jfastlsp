@@ -197,7 +197,7 @@ jobs:
           key: mise-${{ hashFiles('mise.lock') }}
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: just doctor
-      - run: just check-only formal-typecheck formal-test
+      - run: just check-only formal-typecheck formal-test formal-freshness conformance-replay
 
   security:
     name: Security

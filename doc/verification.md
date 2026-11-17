@@ -46,7 +46,7 @@ that enforce structure, and [`tasks.md`](tasks.md) owns order. A citation "ver �
 | **E2E** | `crates/jfl-cli/tests/e2e_*.rs` | the built `jfl`, fixture projects copied to tempdirs, `assert_cmd` | `e2e-tests` | the promise is a process boundary: CLI output, exit codes, spawn on demand, restart |
 | **LSP conformance** | `crates/jfl-cli/tests/lsp_*.rs` + `fixtures/lsp/*.jsonl` | the built `jfl lsp` over stdio, scripted transcripts | `lsp-conformance` | the promise is LSP 3.17 behaviour: framing, lifecycle, encodings, cancellation, errors, every advertised method |
 | **Architecture** | `tools/jfl-architecture` + cases and fixtures (fnd §3) | `cargo_metadata`, the source tree, `cargo-deny`, clippy | `architecture`, `deny`, `clippy` | the rule is structural: edges, purity, authority, naming |
-| **Conformance** | `formal/` + `crates/jfl-conformance` (§6) | Quint (pinned), `quint-connect`, `itf`, real code behind drivers | `formal-*`, `conformance-replay` | a model step must equal what production does |
+| **Conformance** | `formal/` + `crates/jfl-conformance` (§6) | Quint (pinned), `itf`, real code behind drivers | `formal-*`, `conformance-replay` | a model step must equal what production does |
 | **Formal verify** | `just formal-verify` (§6.3) | Apalache (pinned) | weekly, by hand | an invariant must hold for every behaviour to a bound |
 | **Differential and oracles** | `tools/jfl-oracle` (§7) | the built `jfl`, SCIP indexes, the golden corpus, the real-corpus cases | `integration-tests` (golden corpus), `bench.yml` (real corpus), owner-run (target repository) | an answer must agree with an independent indexer, or completeness must survive an inserted caller |
 | **Fuzz** | `fuzz/` (§8) | `cargo-fuzz` on the pinned nightly | nightly | a parser must survive hostile input |
@@ -169,19 +169,31 @@ invariant within the simulation bound, so an invariant that can never fail is ca
 
 ### 6.2 Trace replay
 
-Drivers implement [`quint-connect`](https://github.com/informalsystems/quint-connect)'s `Driver`
-trait (0.1.2, Apache-2.0: `step` dispatches Quint actions with its `switch!` macro, the state is
-deserialised with `itf` 0.4); `#[quint_run]` generates and replays random traces and
-`#[quint_test]` runs named Quint tests. quint-connect replays only traces it generates, so the
-replay of committed traces is ours (about 200 lines).
+The harness is `crates/jfl-conformance` over [`itf`](https://crates.io/crates/itf) 0.4 (FORMAL-02;
+ADR 0007, amended): a driver implements its `Driver` trait (`step` dispatches a Quint action by
+name with its picks, `observe` returns the real code's canonical observation, a serde type the
+model's state decodes into through `itf`). [`quint-connect`](https://github.com/informalsystems/quint-connect)
+0.1.2, which the plan named, was weighed and not taken: its `Step` cannot be built outside the
+crate, so it cannot replay committed traces; its `quint run` uses Quint's default `rust` backend,
+which downloads an evaluator at run time (fnd §8 rule 5); its seed and verbosity are read at
+compile time; and its divergence report names no step. Its `Driver` shape is kept. xtask
+generates traces (it holds the process grant) and the `jfl-conformance` binary replays them.
 
 1. `formal/traces/regression/` holds committed ITF traces listed in `manifest.toml` (model, main,
-   init, step, max steps, seed, invariant); `formal-freshness` regenerates each with
-   `quint run --mbt --seed` and compares byte for byte (excluding metadata).
-   `formal/traces/generated/` is ignored by Git.
-2. `conformance-replay` runs the `#[quint_run]` tests with a seed the recipe prints (a budget per
-   model, starting at 10 traces × 25 steps, measured and ratcheted) and replays the committed
-   traces through the same drivers.
+   init, step, max steps, seed, invariant; every trace file listed, every registered model with
+   one at least); `formal-freshness`
+   regenerates each with `quint run --backend typescript --mbt --seed` and compares byte for byte
+   outside the top-level `#meta` (Quint's timestamp and source path), naming a stale trace and
+   the command that regenerates it.
+2. `conformance-replay` generates, per registered model, traces with `quint run --mbt` at a fresh
+   seed it prints with the command that repeats the run (`just conformance <model> <seed>
+   <traces> <steps>`; a budget per model, starting at 10 traces × 25 steps, measured and
+   ratcheted), generates them again and fails unless the seed reproduces them, then replays them
+   and the committed traces through the same drivers. Generated traces live in a private scratch
+   directory outside the repository, kept and named when the stage fails. A trace that is not an
+   ITF trace with Quint's `--mbt` metadata, a state the driver cannot decode, an action it has no
+   case for or an empty run is `HARNESS_ERROR` (exit 3), never a pass; a model registered before
+   its driver is listed as pending with the task that brings the driver.
 3. A driver decodes each step's action and nondeterministic picks, applies it to the **real** code
    (never a re-implementation of the transition), observes the real state through a canonical
    observation, and compares it with the model's projected state **after every step**, the
@@ -189,7 +201,10 @@ replay of committed traces is ours (about 200 lines).
    actual and a line diff.
 4. **Negative controls:** each driver has a test that swaps in a deliberately faulty component
    (plan §7: publish before store, release the lock before removing the socket, publish every
-   result) and asserts the replay fails at a named step.
+   result) and asserts the replay fails at a named step; `conformance-replay` also runs it over
+   the generated traces and fails unless it diverges on one of them (traces that never exercise
+   the driver are a harness error). The smoke model's control is a counter that skips 3, which
+   fails at step 3.
 5. A model change without the matching driver and behaviour change fails the gate.
 
 ### 6.3 Apalache verification lane

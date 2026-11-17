@@ -4,7 +4,7 @@ Date: 2026-11-16
 
 ## Status
 
-Accepted (owner, 2026-11-17); amended 2026-11-17.
+Accepted (owner, 2026-11-17); amended 2026-11-17 (twice).
 
 ## Context
 
@@ -69,3 +69,10 @@ decided on 2026-11-17 that it is for testing and comparison only, never a shippe
 0028, amended); the javac worker is now our own (ADR 0036, superseding 0027), and the
 foundation's tools move to a ported `cargo xtask` (ADR 0035, superseding 0030). The table is
 kept as the survey recorded it.
+
+## Amended 2026-11-17 (FORMAL-02): quint-connect not taken
+
+The engineering foundation's row names quint-connect. FORMAL-02 read it at 0.1.2 and built the
+conformance harness itself over `itf` 0.4, which it keeps: quint-connect cannot replay committed
+traces, downloads Quint's evaluator at run time and names no step in a divergence (ADR 0007,
+amended). The table is kept as the survey recorded it.

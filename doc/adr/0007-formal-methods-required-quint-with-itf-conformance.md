@@ -4,7 +4,7 @@ Date: 2026-11-16
 
 ## Status
 
-Accepted (owner, 2026-11-17); amended 2026-11-16 and 2026-11-17 (owner).
+Accepted (owner, 2026-11-17); amended 2026-11-16, 2026-11-17 (owner) and 2026-11-17 (FORMAL-02).
 
 ## Context
 
@@ -76,3 +76,36 @@ download Apalache at run time and drive it as a server on a TCP port. Quint's te
 simulations run on its TypeScript backend, since the default Rust backend downloads an evaluator
 at run time. This ADR's second half, the `proptest-state-machine` tests, needs no toolchain: they
 arrive with the components they test (ver §6.4).
+
+## Amended 2026-11-17 (FORMAL-02): the harness is ours over `itf`; quint-connect is not taken
+
+The 2026-11-16 amendment reused `quint-connect` 0.1 for the drivers and the generated runs. Read
+at 0.1.2 (the latest, Apache-2.0, released 2026-05-25), it does not fit, for reasons the crate
+cannot be configured around:
+
+- `Step`, the value its `Driver::step` receives, can be built only inside the crate, and its
+  replay loop is private: a committed regression trace cannot go through a quint-connect driver,
+  so the drivers would serve generated traces only, and the committed replay would need a second
+  driver interface.
+- Its trace generation runs `quint run` without `--backend`, so Quint's default `rust` backend
+  downloads an evaluator from GitHub at run time (fnd §8 rule 5; FORMAL-01 runs Quint on its
+  TypeScript backend for this reason), and it spawns `quint` itself, while `jfl-conformance` holds
+  no process grant.
+- Its seed (`QUINT_SEED`) and verbosity (`QUINT_VERBOSE`) are read with `option_env!` at compile
+  time, and its divergence report says "State invariant failed" with no trace, step, expected or
+  actual state unless verbosity was compiled in.
+- It depends on `anyhow`, which `deny.toml` wraps to binaries and tools (ARCH-anyhow-in-library),
+  and on a build script.
+
+Decision: `jfl-conformance` holds its own minimal harness over `itf` 0.4 (Apache-2.0, the
+crate quint-connect itself uses): a `Driver` trait of quint-connect's shape (a step dispatched by
+action name with its picks; a serde observation compared after every step, the initial state
+included), the ITF reading (fail closed: anything but a trace with Quint's `--mbt` metadata is
+`HARNESS_ERROR`), the replay and its divergence report (model, seed, trace, step, action,
+expected, actual and a line diff by `similar`), the regression manifest and a binary. xtask, which
+holds the process grant, generates traces with `quint run --backend typescript --mbt` at a printed
+seed and runs the binary: the stages `formal-freshness` and `conformance-replay` (ver §6.2). Each
+driver's negative control runs in its tests and again over every generated run, which fails
+unless the control diverges. The cost: `itf` brings `dashu-int` and `rustversion`, whose build
+scripts `deny.toml` admits by checksum. quint-connect stays the runner-up: should it expose `Step`
+construction and a backend choice, the drivers can move to it with their shape unchanged.

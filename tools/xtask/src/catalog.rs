@@ -10,6 +10,7 @@
 
 use std::fmt::Write as _;
 
+use crate::conformance;
 use crate::formal;
 use crate::process::{Call, Stage};
 use crate::stages;
@@ -163,6 +164,25 @@ pub(crate) fn rows() -> Vec<Row> {
         // Every model's Quint tests pass, on the TypeScript backend; a model without one fails.
         row(
             Stage::in_process("formal-test", formal::TEST, formal::test),
+            false,
+        ),
+        // Every committed regression trace regenerates byte for byte at its seed (FORMAL-02).
+        row(
+            Stage::in_process(
+                "formal-freshness",
+                conformance::FRESHNESS,
+                conformance::freshness,
+            ),
+            false,
+        ),
+        // Seeded traces of every model, then the committed ones, replayed through the drivers
+        // against the real code, with each driver's negative control (FORMAL-02, ver §6.2).
+        row(
+            Stage::in_process(
+                "conformance-replay",
+                conformance::REPLAY,
+                conformance::replay_stage,
+            ),
             false,
         ),
         // Advisories, licences, sources and bans (fnd §2.5, §7.4).
