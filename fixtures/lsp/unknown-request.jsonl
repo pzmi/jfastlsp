@@ -1,0 +1,7 @@
+{"comment": "An unknown request is answered with MethodNotFound (-32601) under its own id, whether the id is a number or a string, and whether or not the method starts with $/ (plan §2.5)."}
+{"send": {"jsonrpc": "2.0", "id": 1, "method": "textDocument/noSuchMethod", "params": {}}}
+{"send": {"jsonrpc": "2.0", "id": "req-α", "method": "$/noSuchRequest"}}
+{"send": {"jsonrpc": "2.0", "id": 2147483647, "method": "workspace/noSuchMethod", "params": null}}
+{"expect": {"jsonrpc": "2.0", "id": 1, "error": {"code": -32601, "message": "<any>"}}}
+{"expect": {"jsonrpc": "2.0", "id": "req-α", "error": {"code": -32601, "message": "<any>"}}}
+{"expect": {"jsonrpc": "2.0", "id": 2147483647, "error": {"code": -32601, "message": "<any>"}}}

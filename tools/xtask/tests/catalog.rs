@@ -5,7 +5,9 @@
 //! (ADR 0035, the XT lane's rule "nothing stops running") except by the owner's order:
 //! `private-names` was removed on 2026-11-17 (FND-11). XT-08 reruns this test after just goes.
 //! Added since: `formal-typecheck` and `formal-test` (FORMAL-01), after `script-tests` (fnd §9's
-//! order); `formal-freshness` and `conformance-replay` (FORMAL-02), after them.
+//! order); `formal-freshness` and `conformance-replay` (FORMAL-02), after them;
+//! `lsp-conformance` (LSP-01), between `script-tests` and `formal-typecheck` (fnd §9's order), whose
+//! target `integration-tests` leaves out (LSP-01 review).
 
 use std::error::Error;
 use std::process::{Command, Output};
@@ -14,8 +16,8 @@ type TestResult = Result<(), Box<dyn Error>>;
 
 /// The justfile's `check_stages` before XT-01 (commit 201a4cc), word for word, less the
 /// `private-names` stage the owner had removed (FND-11), plus the stages added since (FORMAL-01,
-/// FORMAL-02).
-const CHECK_STAGES: &str = "fmt-check architecture clippy nostd docs unit-tests integration-tests doctests script-tests formal-typecheck formal-test formal-freshness conformance-replay deny secrets workflows";
+/// FORMAL-02, LSP-01).
+const CHECK_STAGES: &str = "fmt-check architecture clippy nostd docs unit-tests integration-tests doctests script-tests lsp-conformance formal-typecheck formal-test formal-freshness conformance-replay deny secrets workflows";
 
 /// The justfile's `quick_stages` before XT-01, word for word.
 const QUICK_STAGES: &str = "fmt-check architecture clippy unit-tests script-tests";
@@ -30,9 +32,10 @@ const FROZEN: &str = r#"[
   {"id": "nostd", "command": "cargo build --locked -p <each pure crate of architecture.toml> --target x86_64-unknown-none", "quick": false, "check": true},
   {"id": "docs", "command": "bash scripts/adr-index.sh check doc/adr", "quick": false, "check": true},
   {"id": "unit-tests", "command": "cargo nextest run --workspace --locked --retries 0 --no-tests fail --lib --bins", "quick": true, "check": true},
-  {"id": "integration-tests", "command": "cargo nextest run --workspace --locked --retries 0 --no-tests fail --test *", "quick": false, "check": true},
+  {"id": "integration-tests", "command": "cargo nextest run --workspace --locked --retries 0 --no-tests fail --test * -E not binary_id(jfl-adapter-lsp::lsp_transcripts)", "quick": false, "check": true},
   {"id": "doctests", "command": "cargo test --workspace --locked --doc", "quick": false, "check": true},
   {"id": "script-tests", "command": "bash scripts/test-*.sh, each in name order", "quick": true, "check": true},
+  {"id": "lsp-conformance", "command": "cargo nextest run --locked --retries 0 --no-tests fail -p jfl-adapter-lsp --test lsp_transcripts", "quick": false, "check": true},
   {"id": "formal-typecheck", "command": "quint typecheck <each model of formal/models.toml> (an unregistered formal/**/*.qnt fails)", "quick": false, "check": true},
   {"id": "formal-test", "command": "quint test --backend typescript --main <main> <each model of formal/models.toml> (a model without a test fails)", "quick": false, "check": true},
   {"id": "formal-freshness", "command": "quint run --backend typescript --mbt --seed <seed> <each trace of formal/traces/regression/manifest.toml>, equal byte for byte to the committed trace outside its #meta", "quick": false, "check": true},

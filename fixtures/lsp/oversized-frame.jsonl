@@ -1,0 +1,7 @@
+{"comment": "A frame over the 16 MiB limit is skipped without being buffered and answered with InvalidRequest (-32600) under a null id (its body, and so its id, is never read), with the declared length and the limit as data; the session carries on (plan §2.5, §5.3)."}
+{"send": {"jsonrpc": "2.0", "id": 1, "method": "textDocument/noSuchMethod"}}
+{"send_oversized": 16777217}
+{"send": {"jsonrpc": "2.0", "id": 2, "method": "textDocument/noSuchMethod"}}
+{"expect": {"jsonrpc": "2.0", "id": 1, "error": {"code": -32601, "message": "<any>"}}}
+{"expect": {"jsonrpc": "2.0", "id": null, "error": {"code": -32600, "message": "<any>", "data": {"declared": 16777217, "limit": 16777216}}}}
+{"expect": {"jsonrpc": "2.0", "id": 2, "error": {"code": -32601, "message": "<any>"}}}

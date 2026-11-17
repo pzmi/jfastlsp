@@ -2,4 +2,5 @@
 //! only.
 
 pub mod contracts;
+pub mod lsp_transcript;
 pub mod poll;

@@ -1,0 +1,8 @@
+{"comment": "An unknown notification is ignored: no answer, and the session carries on (plan §2.5). So is a $/ notification and a $/cancelRequest for an id that is not in flight."}
+{"send": {"jsonrpc": "2.0", "method": "workspace/noSuchNotification", "params": {"x": 1}}}
+{"send": {"jsonrpc": "2.0", "method": "$/noSuchNotification"}}
+{"send": {"jsonrpc": "2.0", "method": "$/cancelRequest", "params": {"id": 99}}}
+{"send": {"jsonrpc": "2.0", "method": "$/cancelRequest", "params": {"id": "not-in-flight"}}}
+{"send": {"jsonrpc": "2.0", "method": "$/cancelRequest", "params": {"nothing": true}}}
+{"send": {"jsonrpc": "2.0", "id": 3, "method": "textDocument/noSuchMethod"}}
+{"expect": {"jsonrpc": "2.0", "id": 3, "error": {"code": -32601, "message": "<any>"}}}

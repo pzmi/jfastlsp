@@ -143,6 +143,7 @@ Plan §6.5's table is enforced per crate, because clippy has no module-level con
   |:--|:--|:--|
   | `jfl-process` | process, clock, env | it spawns; deadlines need `Instant`; it copies the allowlisted variables into the child |
   | `jfl-adapter-ipc` | socket, fs, spawn | the endpoint, the state directory and lock, per-connection tasks |
+  | `jfl-adapter-lsp` | spawn | the session's reader and writer threads and its bounded request pool, all scoped and joined before the session returns (LSP-01) |
   | fs adapters of plan §6.5 (`-fs`, `-git`, `-store`, `-classfile`, `-javac`, `-gradle`) | fs | their own files only |
   | `jfl-composition` | fs, spawn, clock, env | the system `Clock`, configuration, task supervision |
   | `jfl-cli` | env | `--state-dir` defaults (`XDG_*`, `HOME`) |

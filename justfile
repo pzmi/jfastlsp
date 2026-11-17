@@ -81,6 +81,11 @@ doctests:
 script-tests:
     bash {{xtask}} check-only script-tests
 
+# The LSP conformance level (ver §2, LSP-01): the transcripts of fixtures/lsp/ against a server
+# binary over stdio (the adapter's test-only jfl-lsp-stub until `jfl lsp` exists, LSP-02).
+lsp-conformance:
+    bash {{xtask}} check-only lsp-conformance
+
 # Every Quint model of formal/models.toml typechecks, and an unregistered formal/**/*.qnt fails;
 # then every model's Quint tests, on the TypeScript backend (FORMAL-01, ver §6).
 formal-typecheck:
@@ -227,6 +232,14 @@ bench-domain-envelope: _preflight
 # bytes first. Reports, never gates. `just bench-protocol`.
 bench-protocol: _preflight
     {{cargo}} bench --locked -p jfl-protocol --bench protocol
+
+# jfl-adapter-lsp's in-process benchmark (LSP-01, divan): one request's round trip through a session
+# over in-memory pipes (framing, dispatch and the writer, on the main loop and on the pool), and a
+# 1,000- and 10,000-location `jfl/references` answer turned into the LSP result, on the typed path and
+# through a `serde_json::Value`; synthetic, deterministic inputs (doc/bench/README.md). Reports, never
+# gates. `just bench-lsp`.
+bench-lsp: _preflight
+    {{cargo}} bench --locked -p jfl-adapter-lsp --bench lsp
 
 # Every tool of tools/versions.toml on the stages' PATH at its pinned version (xtask's cache first,
 # then mise's install directories), and versions.toml agreeing with mise.toml and mise.lock;

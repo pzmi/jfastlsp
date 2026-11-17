@@ -4,7 +4,8 @@ Date: 2026-11-16
 
 ## Status
 
-Accepted (owner, 2026-11-17).
+Accepted (owner, 2026-11-17); amended 2026-11-17 (LSP-01: the in-process harness runs on byte
+pipes, not `Connection::memory()`; see the amendment below).
 
 ## Context
 
@@ -46,3 +47,22 @@ type-checked against the metamodel in a test. A `gen-lsp-types` bump is its own 
 - `async-lsp` 0.2.4: the best design to copy (ordered notifications, concurrent requests), but
   pinned to `lsp-types` 0.95.
 - `lsp-types`, `tower-lsp`: stalled or unmaintained.
+
+## Amended 2026-11-17 (LSP-01, technical correction): the in-process harness runs on bytes
+
+The in-process tests do not use `lsp_server::Connection::memory()`. It carries
+`lsp_server::Message`, whose response result is a `serde_json::Value`, so a server on it could
+not keep results on the typed path that plan §5.3 requires (the orchestrator's IDX-03 decision:
+about 20 ms against 9 ms for a 10,000-location answer); it would also bypass `jfl-protocol`'s
+frame decoder, which the harness must exercise, and its channels are unbounded (fnd §4.4 rule 5).
+The harness keeps rust-analyzer's slow-tests shape (a server in process, a client that sends and
+receives messages) on a bounded in-memory byte pipe (`jfl_adapter_lsp::memory`), through the same
+reader and writer as stdio. Pinned by `crates/jfl-adapter-lsp/tests/server.rs`; the black-box
+transcripts are unchanged.
+
+`lsp-server` stays the message type (`Request`, `Notification`, `RequestId`; ADR 0021), but none
+of its I/O is called (orchestrator, LSP-01 review): `Message::write` and `read` and the
+`Connection` transports pass every message's text to `log::debug!`, so a `log` bridged into
+`tracing` at DEBUG would log source text (fnd §5). The adapter parses frames in one typed pass and
+writes them through `jfl-protocol` (errors as its `Response`, results on the typed path), and the
+root `clippy.toml` denies those calls in every crate.

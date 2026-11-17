@@ -1,0 +1,21 @@
+{"comment": "A well-framed body that is not JSON is a ParseError (-32700) under a null id; JSON that is not a JSON-RPC 2.0 message is an InvalidRequest (-32600), under the id when one can be read and a null id otherwise. A request whose id is not an i32 or a string (LSP 3.17: integer | string), and a message whose jsonrpc is not \"2.0\", are refused, never applied as a notification. The framing is intact, so the session carries on."}
+{"send_raw": "Content-Length: 9\r\n\r\n{not json"}
+{"send_raw": "Content-Length: 5\r\n\r\n[1,2]"}
+{"send_raw": "Content-Length: 24\r\n\r\n{\"jsonrpc\":\"2.0\",\"id\":7}"}
+{"send": {"jsonrpc": "2.0", "id": 4294967296, "method": "textDocument/noSuchMethod"}}
+{"send": {"jsonrpc": "2.0", "id": 1.5, "method": "textDocument/noSuchMethod"}}
+{"send": {"jsonrpc": "2.0", "id": true, "method": "textDocument/noSuchMethod"}}
+{"send": {"jsonrpc": "2.0", "id": null, "method": "textDocument/noSuchMethod"}}
+{"send": {"jsonrpc": "1.0", "id": 9, "method": "textDocument/noSuchMethod"}}
+{"send": {"id": 10, "method": "textDocument/noSuchMethod"}}
+{"send": {"jsonrpc": "2.0", "id": 8, "method": "textDocument/noSuchMethod"}}
+{"expect": {"jsonrpc": "2.0", "id": null, "error": {"code": -32700, "message": "<any>"}}}
+{"expect": {"jsonrpc": "2.0", "id": null, "error": {"code": -32600, "message": "<any>"}}}
+{"expect": {"jsonrpc": "2.0", "id": 7, "error": {"code": -32600, "message": "<any>"}}}
+{"expect": {"jsonrpc": "2.0", "id": null, "error": {"code": -32600, "message": "<any>"}}}
+{"expect": {"jsonrpc": "2.0", "id": null, "error": {"code": -32600, "message": "<any>"}}}
+{"expect": {"jsonrpc": "2.0", "id": null, "error": {"code": -32600, "message": "<any>"}}}
+{"expect": {"jsonrpc": "2.0", "id": null, "error": {"code": -32600, "message": "<any>"}}}
+{"expect": {"jsonrpc": "2.0", "id": 9, "error": {"code": -32600, "message": "<any>"}}}
+{"expect": {"jsonrpc": "2.0", "id": 10, "error": {"code": -32600, "message": "<any>"}}}
+{"expect": {"jsonrpc": "2.0", "id": 8, "error": {"code": -32601, "message": "<any>"}}}

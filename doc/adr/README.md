@@ -75,7 +75,7 @@ for the owner's decisions.
 | [0017](0017-bind-views-per-request-uri-exclude-nested-worktrees.md) | Bind views per request URI; exclude nested worktrees | Accepted (owner, 2026-11-17) |
 | [0018](0018-agent-sandbox-and-fail-closed-tools.md) | Agent sandbox and fail-closed tools | Accepted (owner, 2026-11-17); amended 2026-11-16 (twice) and 2026-11-17 |
 | [0019](0019-build-or-reuse-per-subsystem.md) | Build or reuse, per subsystem | Accepted (owner, 2026-11-17); amended 2026-11-17 (twice) |
-| [0020](0020-lsp-stack-lsp-server-gen-lsp-types-line-index.md) | LSP stack: lsp-server, gen-lsp-types and line-index | Accepted (owner, 2026-11-17) |
+| [0020](0020-lsp-stack-lsp-server-gen-lsp-types-line-index.md) | LSP stack: lsp-server, gen-lsp-types and line-index | Accepted (owner, 2026-11-17); amended 2026-11-17 (LSP-01) |
 | [0021](0021-daemon-ipc-lsp-framing-over-a-unix-socket.md) | Daemon IPC: LSP framing over a Unix socket, single owner by a std file lock | Accepted (owner, 2026-11-17) |
 | [0022](0022-java-grammar-tree-sitter-java-orchard-with-own-queries.md) | Java grammar: tree-sitter-java-orchard with our own queries | Accepted (owner, 2026-11-17); amended 2026-11-17 |
 | [0023](0023-class-files-cafebabe-and-ct-sym.md) | Class files: cafebabe and zip; the JDK API from ct.sym | Accepted (owner, 2026-11-17); amended 2026-11-17 |

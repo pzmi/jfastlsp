@@ -10,8 +10,24 @@ publish = false
 description = "Translation between LSP 3.17 and `jfl-protocol` for the `jfl lsp` proxy."
 
 [dependencies]
+gen-lsp-types = { version = "=0.11.0", default-features = false }
 jfl-domain = { path = "../jfl-domain" }
 jfl-protocol = { path = "../jfl-protocol" }
+lsp-server = { version = "=0.10.0", default-features = false }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+divan = { version = "0.1.21", default-features = false, features = ["help"] }
+jfl-testkit = { path = "../jfl-testkit" }
+proptest = { version = "1.12.0", default-features = false, features = ["std"] }
+
+# The adapter's share of a request in process (LSP-01): one request's round trip through a session
+# over in-memory pipes, and a 1k- and 10k-location answer on the typed path against the path
+# through a `serde_json::Value`; `just bench-lsp`.
+[[bench]]
+name = "lsp"
+harness = false

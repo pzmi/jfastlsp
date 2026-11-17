@@ -118,7 +118,7 @@ jobs:
         with:
           key: mise-${{ hashFiles('mise.lock') }}
           save-if: ${{ github.ref == 'refs/heads/main' }}
-      - run: just check-only unit-tests integration-tests doctests script-tests
+      - run: just check-only unit-tests integration-tests doctests script-tests lsp-conformance
 
   linux-arm:
     name: Linux (arm64)

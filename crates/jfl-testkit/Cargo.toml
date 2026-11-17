@@ -13,6 +13,7 @@ description = "Fakes for every port, the contract suites, fixture builders and t
 jfl-domain = { path = "../jfl-domain" }
 jfl-protocol = { path = "../jfl-protocol" }
 jfl-application = { path = "../jfl-application" }
+serde_json = "1.0.154"
 
 [lints]
 workspace = true

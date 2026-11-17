@@ -1610,6 +1610,13 @@ but follow in lane CLI (M2). Starts after the go decision.
 - **Decided (orchestrator, IDX-03 review):** result payloads take the typed path, as LSP-01's card
   records (plan §5.3): the daemon writes a response's result from the typed struct to the frame
   body, and the CLI client decodes it with `codec::decode_response`, not through `Value`.
+- **Decided (orchestrator, LSP-01 review):** never call `lsp_server::Message::write` or `read`, nor
+  `Connection::stdio`, `connect` or `listen`: they pass each message's text to `log::debug!`, so a
+  `log` bridged into `tracing` at DEBUG would log source text (fnd §5); the root `clippy.toml`
+  denies them in every crate, and frames go through `jfl-protocol`. If `log` is bridged
+  (`tracing-subscriber`'s default `tracing-log` feature does it), keep the `lsp_server` target below
+  DEBUG. The daemon host in `jfl-composition`
+  is the first to install a subscriber.
 - **Reuse considered:** std file locks (Rust 1.89), `rustix`, Tokio's `UnixListener`, `lsp-server`'s
   message type; sccache's spawn handshake, Biome's `lsp-proxy` and buck2's version check copied as
   designs (ADR 0021).
@@ -1633,7 +1640,8 @@ plugin; LSP-06 is M1's gate and makes the bench gate blocking.
 - `jfl-adapter-lsp` on `lsp-server` 0.10 and `gen-lsp-types` 0.11 (exact pin): the synchronous main
   loop (notifications applied in order, requests on a bounded pool against a snapshot), framing
   through `jfl-protocol`'s bounded decoder, request ids of both types, error codes, cancellation
-  bookkeeping. An in-process harness on `Connection::memory()` (rust-analyzer's slow-tests pattern).
+  bookkeeping. An in-process harness in rust-analyzer's slow-tests pattern (amended: on bounded byte
+  pipes, not `Connection::memory()`; ADR 0020).
   The black-box LSP conformance level: a transcript runner (`fixtures/lsp/*.jsonl`, client lines
   sent, server lines expected with documented normalisation) driving a binary over stdio, and the
   `lsp-conformance` stage. First transcripts: framing errors, unknown method, notification without a
@@ -1653,11 +1661,35 @@ plugin; LSP-06 is M1's gate and makes the bench gate blocking.
   20 ms against 9 ms for a 10,000-location response, `just bench-protocol`; plan §5.3). An oversized
   frame is reported by the decoder (`Progress::oversized`) and skipped; answer it with an error and
   carry on.
+- **Done note (LSP-01):** `serve` runs one session: a reader thread over `jfl-protocol`'s decoder
+  handing each message over a rendezvous channel, the synchronous main loop, a bounded pool
+  (4 workers, a queue of 16) and a writer, all scoped threads (the crate's new `spawn` grant, fnd
+  §2.4); input held in memory is bounded by frames (worst case in `server.rs`'s
+  `INCOMING_CAPACITY`). The `Handler` trait applies notifications in order and answers a request
+  now, on the pool against a snapshot, or `MethodNotFound`; a panic in the handler, the snapshot or
+  a job is caught (`InternalError` for a request, a lost notification) and the session goes on.
+  `$/cancelRequest` is the loop's own bookkeeping: a request cancelled in flight is answered
+  `RequestCancelled`, one cancelled in the queue never starts, a later cancel is ignored; a request
+  reusing an in-flight id is a null-id `InvalidRequest`. Parsing is one typed pass: a body that is
+  not JSON is `ParseError`; JSON that is not a JSON-RPC 2.0 message (`jsonrpc` other than
+  `"2.0"`, an `id` that is not an `i32` or a string, which is never taken for a notification) is
+  `InvalidRequest`, under the id when it reads; an oversized frame is a null-id `InvalidRequest`
+  with `{declared, limit}` as data; all with the session going on. Lost framing is a null-id
+  `ParseError` and the end of the session. Results are framed from their typed value
+  (`Reply::result`), errors through `jfl-protocol`'s `Response`; `lsp_server::Message::write`,
+  `read` and its transports are denied in the root `clippy.toml` (they log message text). The
+  in-process harness runs on bounded byte pipes, not `Connection::memory()` (ADR 0020, amended: the
+  typed path and the decoder under test). Until `jfl lsp` exists, the `lsp-conformance` stage runs
+  the transcripts against the adapter's test-only `jfl-lsp-stub`
+  (`crates/jfl-adapter-lsp/tests/lsp_transcripts.rs`, left out of `integration-tests`; runner,
+  normalisation and the optional `exit` step in `jfl_testkit::lsp_transcript`). No corpus input
+  applies (the adapter reads no source); `just bench-lsp` times the round trip and the
+  10k-location answer.
 - **Accept:**
-  - [ ] property tests: arbitrary byte streams never panic the framer and never allocate past the limit
-  - [ ] transcripts for malformed headers, an oversized frame, an unknown request (`MethodNotFound`) and an unknown notification (ignored) pass
-  - [ ] `jfl-adapter-lsp` depends only on `jfl-protocol` and `jfl-domain` (architecture policy)
-  - [ ] runs on the bench corpus (small at least, `just bench`) and reports the metrics it affects; its correctness tests also run against the real-corpus cases that apply (BENCH-05)
+  - [x] property tests: arbitrary byte streams never panic the framer and never allocate past the limit (`crates/jfl-adapter-lsp/tests/properties.rs`: arbitrary and header-like bytes in arbitrary reads; every request of generated mixed traffic answered once)
+  - [x] transcripts for malformed headers, an oversized frame, an unknown request (`MethodNotFound`) and an unknown notification (ignored) pass (`fixtures/lsp/`: seven malformed-header cases, `oversized-frame`, `malformed-body`, `unknown-request` with both id types, `unknown-notification`, `uri-echo` with `+` and `@`; a negative control fails)
+  - [x] `jfl-adapter-lsp` depends only on `jfl-protocol` and `jfl-domain` (architecture policy: `architecture.toml`'s edge row, the `architecture` and `deny` stages)
+  - [x] runs on the bench corpus (small at least, `just bench`) and reports the metrics it affects; its correctness tests also run against the real-corpus cases that apply (BENCH-05): no corpus input applies; `just bench-lsp` times one request's round trip in memory and a 1k- and 10k-location answer on the typed path against a JSON value
 - **Impact:** new adapter.
 
 #### LSP-02: `jfl lsp`: lifecycle, encodings, document sync, deadlines
@@ -1669,6 +1701,19 @@ plugin; LSP-06 is M1's gate and makes the bench gate blocking.
   finished), document sync into daemon overlays with versions, internal deadlines with partial
   answers, reconnect to a restarted daemon with re-sent open documents. Add the
   `ARCH-position-arithmetic` item to the review checklist (fnd §3.3). Transcripts for each.
+- **From LSP-01:** point the `lsp-conformance` stage and `fixtures/lsp/` at `jfl lsp`
+  (`crates/jfl-cli/tests/lsp_*.rs`, ver §2; the stage's target and `integration-tests`' exclusion
+  of it move together) and delete `jfl-lsp-stub`; `serve` returns only once its input ends, so
+  `exit` needs a way to stop the session (the reader blocks in `read`). The transcript runner
+  checks an exit code only when a transcript has an `{"exit": N}` line: the lifecycle transcripts
+  state theirs, and the `malformed-header-*` ones gain one once `jfl lsp`'s exit after lost framing
+  is decided.
+- **Decided (orchestrator, LSP-01 review):** never call `lsp_server::Message::write` or `read`, nor
+  `Connection::stdio`, `connect` or `listen`: they pass each message's text to `log::debug!`, so a
+  `log` bridged into `tracing` at DEBUG would log source text (fnd §5); the root `clippy.toml`
+  denies them in every crate, and frames go through `jfl-protocol`. If `log` is bridged
+  (`tracing-subscriber`'s default `tracing-log` feature does it), keep the `lsp_server` target below
+  DEBUG.
 - **Accept:**
   - [ ] transcripts: lifecycle, both exit codes, cancellation before and after completion, UTF-16 positions on a line with astral characters, `utf-8` when the client offers it
   - [ ] a `jfl-bench` suite records `initialize` latency against a warm daemon (ver §10); the 200 ms budget is reported, not asserted in a parallel test
@@ -2049,6 +2094,12 @@ so citations stay valid; IDX-15 is M2's gate.
   counted refusals and backpressure shown in `jfl status`; watcher overflow and loss trigger a
   rescan (move to `notify` 9 if final, for its rescan events and `update_paths`); automate
   `ARCH-log-event-name` in the architecture test's source scan (fnd §3.3).
+- **Decided (orchestrator, LSP-01 review):** never call `lsp_server::Message::write` or `read`, nor
+  `Connection::stdio`, `connect` or `listen`: they pass each message's text to `log::debug!`, so a
+  `log` bridged into `tracing` at DEBUG would log source text (fnd §5); the root `clippy.toml`
+  denies them in every crate, and frames go through `jfl-protocol`. If `log` is bridged
+  (`tracing-subscriber`'s default `tracing-log` feature does it), keep the `lsp_server` target below
+  DEBUG. Check the subscriber's filter does.
 - **Reuse considered:** `notify` 9's rescan events; turborepo's cookie file; `dylint` only if the
   log-name rule needs name resolution.
 - **Accept:**

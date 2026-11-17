@@ -125,7 +125,8 @@ pub(crate) fn rows() -> Vec<Row> {
             .needs("cargo-nextest"),
             true,
         ),
-        // Integration, component and contract tests: every tests/ target.
+        // Integration, component and contract tests: every tests/ target but the LSP transcripts,
+        // which `lsp-conformance` runs (LSP-01), so each runs in one stage.
         row(
             Stage::call(
                 "integration-tests",
@@ -138,6 +139,8 @@ pub(crate) fn rows() -> Vec<Row> {
                     "fail",
                     "--test",
                     "*",
+                    "-E",
+                    "not binary_id(jfl-adapter-lsp::lsp_transcripts)",
                 ]),
             )
             .needs("cargo-nextest"),
@@ -155,6 +158,27 @@ pub(crate) fn rows() -> Vec<Row> {
         row(
             Stage::in_process("script-tests", stages::SCRIPT_TESTS, stages::script_tests),
             true,
+        ),
+        // The LSP conformance level (ver §2, LSP-01): the transcripts of fixtures/lsp/ against a
+        // server binary over stdio. Until `jfl lsp` exists (LSP-02), the server is the LSP
+        // adapter's test-only `jfl-lsp-stub`.
+        row(
+            Stage::call(
+                "lsp-conformance",
+                nextest(&[
+                    "--locked",
+                    "--retries",
+                    "0",
+                    "--no-tests",
+                    "fail",
+                    "-p",
+                    "jfl-adapter-lsp",
+                    "--test",
+                    "lsp_transcripts",
+                ]),
+            )
+            .needs("cargo-nextest"),
+            false,
         ),
         // Every Quint model of the MODELS registry typechecks, and none is unregistered (FORMAL-01).
         row(

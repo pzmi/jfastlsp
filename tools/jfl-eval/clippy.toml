@@ -40,6 +40,11 @@ disallowed-methods = [
   # grant: env (granted to this crate: lifted)
   # grant: process (granted to this crate: lifted)
   # grant: none
+  { path = "lsp_server::Connection::connect", reason = "lsp-server's transports read without a length limit and log every message's text at debug: frame through jfl-protocol (fnd §5, ADR 0021, LSP-01)", allow-invalid = true },
+  { path = "lsp_server::Connection::listen", reason = "lsp-server's transports read without a length limit and log every message's text at debug: frame through jfl-protocol (fnd §5, ADR 0021, LSP-01)", allow-invalid = true },
+  { path = "lsp_server::Connection::stdio", reason = "lsp-server's transports read without a length limit and log every message's text at debug: frame through jfl-protocol (fnd §5, ADR 0021, LSP-01)", allow-invalid = true },
+  { path = "lsp_server::Message::read", reason = "lsp-server's reader trusts Content-Length and logs each message's text at debug: decode with jfl-protocol's FrameDecoder (fnd §5, ADR 0021, LSP-01)", allow-invalid = true },
+  { path = "lsp_server::Message::write", reason = "lsp-server's writer logs each message's text at debug, source included: frame through jfl-protocol (fnd §5, LSP-01)", allow-invalid = true },
   { path = "crossbeam_channel::unbounded", reason = "unbounded channels are denied everywhere: use a bounded one (fnd §2.4, ARCH-unbounded-channel)", allow-invalid = true },
   { path = "std::sync::mpsc::channel", reason = "unbounded channels are denied everywhere: use sync_channel (fnd §2.4, ARCH-unbounded-channel)" },
   { path = "tokio::sync::mpsc::unbounded_channel", reason = "unbounded channels are denied everywhere: use a bounded one (fnd §2.4, ARCH-unbounded-channel)", allow-invalid = true },

@@ -22,7 +22,7 @@ root = ["jfl-composition", "jfl-cli"]
 process = ["jfl-process", "jfl-testkit", "jfl-architecture", "jfl-bench", "jfl-eval", "xtask"]
 socket = ["jfl-adapter-ipc"]
 fs = ["jfl-adapter-fs", "jfl-adapter-git", "jfl-adapter-store", "jfl-adapter-classfile", "jfl-adapter-javac", "jfl-adapter-gradle", "jfl-adapter-ipc", "jfl-composition", "jfl-testkit", "jfl-conformance", "jfl-architecture", "jfl-bench", "jfl-eval", "jfl-oracle", "xtask"]
-spawn = ["jfl-adapter-ipc", "jfl-composition"]
+spawn = ["jfl-adapter-ipc", "jfl-adapter-lsp", "jfl-composition"]
 sleep = ["jfl-testkit"]
 clock = ["jfl-process", "jfl-composition", "jfl-testkit", "jfl-bench", "jfl-eval"]
 env = ["jfl-process", "jfl-composition", "jfl-cli", "jfl-conformance", "jfl-architecture", "jfl-bench", "jfl-eval", "xtask"]
@@ -115,6 +115,17 @@ jfl-process = { rustix = ["event", "process", "std"], thiserror = ["default"] }
 # dependencies) writes the divergence report's line diff. All in the graph through itf but
 # similar. quint-connect was weighed and not taken (ADR 0007's FORMAL-02 amendment).
 jfl-conformance = { itf = ["default"], serde = ["default", "derive"], serde_json = ["default"], similar = ["default"], toml = ["default"] }
+# jfl-adapter-lsp (LSP-01, ADR 0020): lsp-server (rust-analyzer's message type, which frames
+# requests, notifications and errors; ADR 0021) and gen-lsp-types (the LSP types from the 3.18
+# metamodel), both pinned exactly and without features: gen-lsp-types' `url` and `fluent-uri`
+# features would turn `Uri` into a parsed type and lose the client's spelling, which the proxy
+# echoes (LSP-01's decision). serde (derive) and serde_json (std) read and write the messages; in
+# the graph already (jfl-protocol, jfl-architecture). lsp-server brings crossbeam-channel and log
+# (no build scripts); deny.toml wraps both LSP crates to this adapter and the IPC one.
+jfl-adapter-lsp = { gen-lsp-types = [], lsp-server = [], serde = ["default", "derive"], serde_json = ["default"] }
+# jfl-testkit (LSP-01): serde_json reads the LSP transcripts (fixtures/lsp/*.jsonl) and the server's
+# frames in the transcript runner; in the graph already.
+jfl-testkit = { serde_json = ["default"] }
 
 jfl-bench = { blake3 = ["default"], ignore = ["default"], rayon = ["default"], serde = ["default", "derive"], serde_json = ["default"], toml = ["default"], tree-sitter = ["default"], tree-sitter-java-orchard = ["default"] }
 
@@ -132,6 +143,10 @@ jfl-domain = { divan = ["help"], line-index = ["default"], proptest = ["std"] }
 # identities (ver §2, §8), divan for the in-process protocol benchmark; the same features as
 # jfl-domain's, for the same reasons.
 jfl-protocol = { divan = ["help"], proptest = ["std"] }
+# jfl-adapter-lsp (LSP-01): proptest for the reader on arbitrary bytes and the session on generated
+# traffic (ver §2, §8), divan for the in-process round trip and the typed path's benchmark; the same
+# features as jfl-protocol's, for the same reasons.
+jfl-adapter-lsp = { divan = ["help"], proptest = ["std"] }
 
 [external.build]
 

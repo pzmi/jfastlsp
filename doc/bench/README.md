@@ -19,6 +19,7 @@ jfl-bench compare a/e1-small.json b/e1-small.json     # two runs of one suite (d
 just bench-domain small            # jfl-domain's position conversions in process (divan), after a corpus round-trip check
 just bench-domain-envelope         # jfl-domain's envelope assembly, completeness, summary build and API digests (divan, synthetic)
 just bench-protocol                # jfl-protocol's encode, frame decode and envelope decode of a 1k- and 10k-location response (divan, synthetic)
+just bench-lsp                     # jfl-adapter-lsp's round trip of one request through a session in memory, and a 1k- and 10k-location answer on the typed path and through a JSON value (divan, synthetic)
 ```
 
 `just bench [suite] [corpus] [out]` builds `jfl-bench` with the `bench-tool` profile (thin LTO, one

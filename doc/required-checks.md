@@ -40,7 +40,7 @@ without a row, a row without a job, or any difference fails the `architecture` s
 |:--|:--|:--|:--|
 | `architecture` | Architecture and policy | `ubuntu-24.04` | `check-only architecture deny` |
 | `static` | Static quality | `ubuntu-24.04` | `check-only fmt-check clippy nostd docs` |
-| `tests` | Tests (Linux x86-64) | `ubuntu-24.04` | `check-only unit-tests integration-tests doctests script-tests` |
+| `tests` | Tests (Linux x86-64) | `ubuntu-24.04` | `check-only unit-tests integration-tests doctests script-tests lsp-conformance` |
 | `linux-arm` | Linux (arm64) | `ubuntu-24.04-arm` | `platform-tests` |
 | `macos` | macOS (arm64) | `macos-15` | `platform-tests` |
 | `formal` | Formal models (Quint) | `ubuntu-24.04` | `doctor`, then `check-only formal-typecheck formal-test formal-freshness conformance-replay` |
@@ -91,7 +91,7 @@ to `required`'s `needs` in one commit.
 |:--|:--|:--|:--|
 | `coverage` | Coverage | `check-only coverage changed-lines`, then `just mutants-diff` (full history; diff base `git merge-base HEAD origin/main`, 20-minute cap) | FND-06 |
 | `fixtures` | Java fixtures | `check-only java-fixtures` (pinned JDK) | EVAL-07 |
-| `e2e` | End to end | `check-only e2e-tests lsp-conformance` | IDX-13, LSP-01 |
+| `e2e` | End to end | `check-only e2e-tests lsp-conformance` (until this job exists, `lsp-conformance` runs in `tests`; IDX-13 moves it here) | IDX-13 |
 
 ## Other workflows
 
