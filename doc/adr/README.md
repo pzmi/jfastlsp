@@ -76,3 +76,4 @@ for the owner's decisions.
 | [0029](0029-e0-on-harbor-with-a-multi-swe-bench-java-control.md) | E0 on Harbor, with a Multi-SWE-bench Java control | Proposed (default; owner confirms at FND checkpoint) |
 | [0030](0030-foundation-from-maintained-tools.md) | Foundation from maintained tools: just, mise, cargo-deny, no_std and a thin test layer | Proposed (default; owner confirms at FND checkpoint); amended 2026-11-16 |
 | [0031](0031-benchmark-early-on-a-pinned-real-corpus.md) | Benchmark early on a pinned real-repository corpus; regressions over 10 % block | Proposed (default; owner confirms at FND checkpoint); amended 2026-11-16 |
+| [0032](0032-evaluation-target-spring-framework-at-the-bench-pin.md) | Evaluation target: spring-framework at the bench pin | Accepted (owner, 2026-11-17) |

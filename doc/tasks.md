@@ -20,7 +20,7 @@ and early benchmarks applied) and BOOT-02 (the bootstrap review applied) are the
 
 The ADR number is the decision id (ADR 0001). **Proposed** decisions are orchestrator or planner
 defaults the owner may override; until then tasks follow them as written. Only ADRs 0001–0004
-are the owner's decisions so far; DEC-07 puts the rest to the owner at the FND checkpoint. Only
+and 0032 are the owner's decisions so far; DEC-07 puts the rest to the owner at the FND checkpoint. Only
 the owner flips a decision to Accepted or decides a `DEC-` task.
 
 | ADR | Decision | Status |
@@ -56,6 +56,7 @@ the owner flips a decision to Accepted or decides a `DEC-` task.
 | [0029](adr/0029-e0-on-harbor-with-a-multi-swe-bench-java-control.md) | E0 on Harbor with a Multi-SWE-bench Java control | Proposed |
 | [0030](adr/0030-foundation-from-maintained-tools.md) | Foundation from maintained tools: just, mise, cargo-deny, `no_std`, one architecture test | Proposed |
 | [0031](adr/0031-benchmark-early-on-a-pinned-real-corpus.md) | Benchmarks from FND-01 on a pinned real corpus; >10 % regressions block from M1 | Proposed |
+| [0032](adr/0032-evaluation-target-spring-framework-at-the-bench-pin.md) | E0 to E4 target: spring-framework (public, Apache-2.0) at the bench pin `4cb62d893e09e23791d661e8d9b35aedee7006d0` (DEC-01) | Accepted (owner, 2026-11-17) |
 
 `DEC-` tasks add rows here when the owner decides (DEC-01 target repository, DEC-03 storage tier,
 DEC-04 resolver and the SCIP baseline, DEC-05 diagnostics scope, DEC-06 `referencesMode` and
@@ -392,7 +393,7 @@ puts the Proposed defaults and the skills question to the owner (DEC-07, DEC-08)
 #### DEC-07: (owner) Confirm the Proposed defaults
 - **Depends on:** FND-05. **Model:** light. **Size:** S. **Parallel with:** DEC-08.
 - **Cites:** [`adr/README.md`](adr/README.md); plan §14, §16; ADR 0009, ADR 0019.
-- Only ADRs 0001–0004 are the owner's decisions; every other record is an orchestrator or planner
+- Only ADRs 0001–0004 and 0032 are the owner's decisions; every other record is an orchestrator or planner
   default. In the FND-05 checkpoint report an agent lists each Proposed record (0005–0010,
   0013–0031) in one line with its evidence link, and the two proposed amendments (ADR 0001: the
   `adrs` tool, and optionally MADR 4; ADR 0002: `scripts/land.sh`). The owner accepts, overrides
@@ -658,8 +659,9 @@ target repository is private, only aggregated reports under `doc/eval/` are comm
   changes with tests, a build that runs on the owner's machine, the licence or permission to run
   tools on it), what stays private and how results return as aggregates. The owner chooses.
 - **Accept:**
-  - [ ] `doc/eval/target-criteria.md` committed
-  - [ ] (owner) the target repository chosen; an ADR records the choice, naming it only if it is public (otherwise "a private repository meeting the criteria", with its size class) and the commit to pin
+  - [x] `doc/eval/target-criteria.md` committed
+  - [x] (owner) the target repository chosen; an ADR records the choice, naming it only if it is public (otherwise "a private repository meeting the criteria", with its size class) and the commit to pin
+- **Decided:** 2026-11-17, option B. [ADR 0032](adr/0032-evaluation-target-spring-framework-at-the-bench-pin.md) (Accepted, owner) names spring-framework (public, Apache-2.0) at the bench pin `4cb62d893e09e23791d661e8d9b35aedee7006d0`. Lombok and MapStruct stay with the synthetic fixtures (EVAL-07, SEM-05, EVAL-10).
 - **Impact:** none (decision).
 
 #### EVAL-01: Evaluation harness: Harbor adapter, arms, transcript metrics
