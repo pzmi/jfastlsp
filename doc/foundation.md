@@ -83,10 +83,17 @@ Plan §6.3 is the edge table. Rules over it:
 ### 2.3 Pure-crate restrictions
 
 Pure crates (`jfl-domain`, `jfl-protocol`, and `jfl-resolve` if it joins) are **`#![no_std]`
-with `extern crate alloc`** (ADR 0030). The compiler then refuses `std::fs`, `std::net`,
-`std::os::unix::net`, `std::process`, `std::env`, `std::thread`, `SystemTime`, `Instant`, the
-default-hashed `HashMap`/`HashSet`, `println!`/`eprintln!`/`dbg!` and any std-only dependency,
-with no list to keep current (`ARCH-domain-purity`). Collections are `BTreeMap`/`BTreeSet` or a
+with `extern crate alloc`** (ADR 0030). In the crate's own code the compiler then refuses
+`std::fs`, `std::net`, `std::os::unix::net`, `std::process`, `std::env`, `std::thread`,
+`SystemTime`, `Instant`, the default-hashed `HashMap`/`HashSet` and `println!`/`eprintln!`/`dbg!`,
+with no list to keep current. `#![no_std]` alone does **not** keep std out of the crate's
+dependencies: on a hosted target a `no_std` crate may depend on a std crate and still build. So
+the `nostd` stage also builds every pure crate for a target that has no `std` at all,
+`cargo build --locked -p jfl-domain -p jfl-protocol --target x86_64-unknown-none` (the target is
+in `rust-toolchain.toml`'s `targets`; FND-01), which fails on any std-only crate in the closure,
+`line-index` included if it ever needs std (ADR 0020). Both halves are `ARCH-domain-purity`; the
+negative fixture `tools/jfl-architecture/fixtures/pure-uses-std/` proves the first (FND-07).
+Collections are `BTreeMap`/`BTreeSet` or a
 fixed-seed hasher. What `core` still offers is denied by each pure crate's `clippy.toml`
 (`disallowed-types` for atomics and `core::cell` statics; `ARCH-pure-clippy-config`), and
 `cargo-deny` keeps randomness, async runtimes and I/O crates out of their closure (wrappers,
@@ -96,19 +103,42 @@ fixed-seed hasher. What `core` still offers is denied by each pure crate's `clip
 
 Plan §6.5's table is enforced per crate, because clippy has no module-level configuration:
 
-- The **root `clippy.toml`** holds the canonical `disallowed-methods`, `-types` and `-macros`:
-  `std::process::Command`, `tokio::process::Command`; `std::net::*` and `std::os::unix::net::*`
-  types, Tokio's net types; `std::fs` functions and types, Tokio's fs; `std::thread::spawn`,
-  `std::thread::sleep`, `tokio::spawn`, `tokio::time::sleep`; unbounded channels
-  (`tokio::sync::mpsc::unbounded_channel`, `std::sync::mpsc::channel`,
-  `crossbeam_channel::unbounded`); `std::env::var`; `SystemTime::now`, `Instant::now`.
+- The **root `clippy.toml`** holds the canonical `disallowed-methods`, `-types` and `-macros`,
+  grouped by the grant that lifts them:
+  - `process`: `std::process::Command`, `tokio::process::Command`;
+  - `socket`: `std::os::unix::net::*` types and Tokio's Unix types (TCP and UDP types are in no
+    grant: denied everywhere);
+  - `fs`: `std::fs` functions and types, Tokio's fs;
+  - `spawn`: `std::thread::spawn`, `tokio::spawn`;
+  - `sleep`: `std::thread::sleep`, `tokio::time::sleep`;
+  - `clock`: `SystemTime::now`, `Instant::now`;
+  - `env`: `std::env::var`, `var_os`, `vars`, `set_var`, `remove_var`;
+  - no grant: unbounded channels (`tokio::sync::mpsc::unbounded_channel`,
+    `std::sync::mpsc::channel`, `crossbeam_channel::unbounded`).
+
   `[workspace.lints.clippy]` sets `disallowed_methods`, `disallowed_types` and
   `disallowed_macros` to `deny`.
 - A crate granted an authority carries **its own `clippy.toml`**: the canonical list minus
-  exactly its grants (`jfl-process`: `Command`; `jfl-adapter-ipc`: Unix sockets; the
-  fs-authority crates of plan §6.5: `std::fs`; composition and the adapters that supervise
-  tasks: spawns). Clippy has no inheritance, so the architecture test checks every crate's list
-  against the canonical one and the grants in `architecture.toml` (`ARCH-clippy-lists`).
+  exactly its grants. Clippy has no inheritance, so the architecture test checks every crate's
+  list against the canonical one and the `[grants]` table of `architecture.toml`
+  (`ARCH-clippy-lists`). The grants, kept tight for production crates (plan §6.5):
+
+  | Crate | Grants | Why |
+  |:--|:--|:--|
+  | `jfl-process` | process, clock, env | it spawns; deadlines need `Instant`; it copies the allowlisted variables into the child |
+  | `jfl-adapter-ipc` | socket, fs, spawn | the endpoint, the state directory and lock, per-connection tasks |
+  | fs adapters of plan §6.5 (`-fs`, `-git`, `-store`, `-classfile`, `-javac`, `-gradle`) | fs | their own files only |
+  | `jfl-composition` | fs, spawn, clock, env | the system `Clock`, configuration, task supervision |
+  | `jfl-cli` | env | `--state-dir` defaults (`XDG_*`, `HOME`) |
+  | `jfl-testkit` | process, fs, sleep, clock | fixture builders run `git` and create tempdirs; sleep and clock inside `poll` only (by review) |
+  | `jfl-conformance` | fs, env | committed traces; seed and step parameters from the recipe |
+  | `jfl-architecture` | process, fs, env | runs `cargo metadata`, `git`, `bash scripts/*.sh` on scratch repositories |
+  | `jfl-bench`, `jfl-eval` | process, fs, clock, env | drive binaries and JVMs, write results, time runs |
+  | `jfl-jdtls` | process, fs, socket, spawn, clock, env | its per-user daemon on a Unix socket, one jdtls per worktree |
+  | `jfl-oracle` | fs | reads indexes and reports |
+
+  Pure and application crates get none. A crate's tests share its `clippy.toml`, so a test that
+  needs files or a child in a crate without the grant uses `jfl-testkit`'s builders.
 - **Children** come only from `jfl-process`, whose API always starts from `env_clear()` plus an
   allowlist (`ARCH-process-authority`; `ARCH-child-environment` is its contract suite). The
   daemon launcher uses its detached mode, so composition holds no process grant.
@@ -179,10 +209,13 @@ adapter     = [ ... ]
 root        = ["jfl-composition", "jfl-cli"]
 
 [grants]                      # §2.4: what each crate's clippy.toml may drop from the canonical list
-process = ["jfl-process"]
-socket  = ["jfl-adapter-ipc"]
-fs      = [ ... ]             # plan §6.5
-spawn   = [ ... ]
+process = ["jfl-process", "jfl-testkit", "jfl-architecture", "jfl-bench", "jfl-eval", "jfl-jdtls"]
+socket  = ["jfl-adapter-ipc", "jfl-jdtls"]
+fs      = [ ... ]             # §2.4's table
+spawn   = ["jfl-adapter-ipc", "jfl-composition", "jfl-jdtls"]
+sleep   = ["jfl-testkit"]
+clock   = ["jfl-process", "jfl-composition", "jfl-testkit", "jfl-bench", "jfl-eval", "jfl-jdtls"]
+env     = ["jfl-process", "jfl-composition", "jfl-cli", "jfl-conformance", "jfl-architecture", "jfl-bench", "jfl-eval", "jfl-jdtls"]
 independent = ["jfl-oracle", "jfl-eval", "jfl-jdtls", "jfl-bench"]
 
 [dependencies.normal]         # plan §6.3, one key per crate
@@ -203,8 +236,8 @@ that does not exist, or an exception that no longer matches anything, fails.
 
 ### 3.2 The architecture test (`jfl-architecture`)
 
-A test-only crate in `tools/jfl-architecture`, run by `just check-only architecture` under
-nextest. About 200 lines over the `cargo_metadata` crate (`cargo metadata --locked
+A test-only crate in `tools/jfl-architecture` (FND-07), run by `just check-only architecture`
+under nextest. About 200 lines over the `cargo_metadata` crate (`cargo metadata --locked
 --filter-platform` for each target of ADR 0006) plus a small source scan:
 
 1. **Graph:** every workspace member is classified; every normal and dev edge is in plan §6.3's
@@ -228,16 +261,17 @@ Each rule names the layer that enforces it and the task that lands it.
 
 | Rule | What fails | Enforced by | Task |
 |:--|:--|:--|:--|
-| `ARCH-policy-schema`, `ARCH-metadata`, `ARCH-missing-member`, `ARCH-not-a-member`, `ARCH-missing-crate`, `ARCH-empty-selector`, `ARCH-duplicate-category` | the policy, the metadata or the inventory disagree | architecture test | FND-02 |
-| `ARCH-forbidden-edge`, `ARCH-forbidden-dev-edge`, `ARCH-undeclared-build-dep`, `ARCH-production-closure`, `ARCH-independent-oracle` | an edge outside plan §6.3 | architecture test | FND-02 |
-| `ARCH-unlisted-external`, `ARCH-external-feature` | §2.5, direct dependencies | architecture test | FND-02 |
+| `ARCH-policy-schema`, `ARCH-metadata`, `ARCH-missing-member`, `ARCH-not-a-member`, `ARCH-missing-crate`, `ARCH-empty-selector`, `ARCH-duplicate-category` | the policy, the metadata or the inventory disagree | architecture test | FND-07 |
+| `ARCH-forbidden-edge`, `ARCH-forbidden-dev-edge`, `ARCH-undeclared-build-dep`, `ARCH-production-closure`, `ARCH-independent-oracle` | an edge outside plan §6.3 | architecture test | FND-07 |
+| `ARCH-unlisted-external`, `ARCH-external-feature` | §2.5, direct dependencies | architecture test | FND-07 |
 | `ARCH-external-source`, `ARCH-anyhow-in-library`, adapter-only crates outside their adapter | §2.5, transitive | cargo-deny | FND-02 |
-| `ARCH-domain-purity` | std or I/O in a pure crate | compiler (`#![no_std]`) | FND-02 |
-| `ARCH-pure-clippy-config`, `ARCH-clippy-lists`, `ARCH-process-authority`, `ARCH-socket-authority`, `ARCH-fs-authority`, `ARCH-detached-spawn`, `ARCH-unbounded-channel`, `ARCH-test-sleep` | §2.3, §2.4 | clippy lists, kept in step by the architecture test | FND-02 |
+| `ARCH-domain-purity` | std or I/O in a pure crate or its closure | compiler (`#![no_std]`) and the `nostd` stage (§2.3) | FND-02 (stage), FND-07 (negative fixture) |
+| `ARCH-pure-clippy-config`, `ARCH-process-authority`, `ARCH-socket-authority`, `ARCH-fs-authority`, `ARCH-clock-authority`, `ARCH-env-authority`, `ARCH-detached-spawn`, `ARCH-unbounded-channel`, `ARCH-test-sleep` | §2.3, §2.4 | clippy lists | FND-02 |
+| `ARCH-clippy-lists` | a crate's list differs from the canonical list minus its grants | architecture test | FND-07 |
 | `ARCH-child-environment` | a child without a cleared environment | `jfl-process`'s API and contract suite | IDX-04 |
 | `ARCH-unsafe-code`, `ARCH-unfinished-code`, `ARCH-nightly-features` | `unsafe`, `todo!`/`unimplemented!`/`dbg!`, `#![feature]` | `[workspace.lints]` (`unsafe_code = "forbid"`, clippy `todo`, `dbg_macro`) and the stable toolchain | FND-01 |
-| `ARCH-lint-config`, `ARCH-lint-suppression` | lints loosened; `#[allow]`/`#[expect]`/`#[macro_export]` without an ADR-cited exception | architecture test (source scan) | FND-02 |
-| `ARCH-ignored-test`, `ARCH-test-name`, `ARCH-test-structure`, `ARCH-platform-branch` | `#[ignore]`; a misnamed test; missing sections; a `cfg!(target_os…)` branch | architecture test (source scan) | FND-02 |
+| `ARCH-lint-config`, `ARCH-lint-suppression` | lints loosened; `#[allow]`/`#[expect]`/`#[macro_export]` without an ADR-cited exception | architecture test (source scan) | FND-07 |
+| `ARCH-ignored-test`, `ARCH-test-name`, `ARCH-test-structure`, `ARCH-platform-branch` | `#[ignore]`; a misnamed test; missing sections; a `cfg!(target_os…)` branch | architecture test (source scan) | FND-07 |
 | `ARCH-ci-lockstep` | a stage in no CI job or two; `required` missing a job; a swallowed failure | architecture test | FND-05 |
 | `ARCH-fixtures-lock` | a golden fixture whose digest differs from `fixtures.lock` | architecture test | IDX-07 |
 | `ARCH-fuzz-crate` | the fuzz crate outside its policy rows | architecture test | REL-03 |
@@ -255,7 +289,10 @@ and proves necessary becomes a `dylint` lint through an ADR.
    rule, negative and positive), plus **5 to 10 negative fixture workspaces** under
    `tools/jfl-architecture/fixtures/` (path dependencies only, so they resolve offline) for the
    end-to-end path: `domain-depends-on-application`, `adapter-depends-on-adapter`,
-   `testkit-in-production-closure`, `oracle-imports-domain`, `unlisted-external`.
+   `testkit-in-production-closure`, `oracle-imports-domain`, `unlisted-external`, and
+   `pure-uses-std` (a `#![no_std]` crate naming `std::fs`, which a test builds and expects to
+   fail; a `compile_fail` doctest cannot show this, since rustdoc links each doctest as a std
+   binary).
 2. Clippy lists and `cargo-deny` bans are proven by one negative case each: a crate calling
    `std::process::Command` without the grant fails clippy; a path crate wrapped to the wrong
    parent fails `cargo deny check bans`.
@@ -405,10 +442,10 @@ There is no event store (ADR 0008). What persists:
 | Workflow | Trigger | Content | Task |
 |:--|:--|:--|:--|
 | `ci.yml` | push to `main`, pull request, dispatch | the gate, split into jobs (7.2), and the DCO check | FND-05 |
-| `security.yml` | weekly, dispatch | advisories, licences, secret scan over full history, zizmor online audits, the private-name grep | FND-04, FND-05 |
+| `security.yml` | weekly, dispatch | advisories, licences, secret scan over full history, zizmor online audits | FND-04, FND-05 |
 | `codeql.yml` | push to `main`, pull request, weekly | CodeQL for Rust and Actions | FND-05 |
 | `scorecard.yml` | push to `main`, weekly | OpenSSF Scorecard, SARIF upload | FND-05 |
-| `bench.yml` | push to `main`, dispatch | the corpus benchmarks; history in `gh-pages`; a >10 % regression fails from M1 on | BENCH-04 |
+| `bench.yml` | push to `main`, dispatch | the corpus benchmarks on one fixed runner class; history in `gh-pages` per runner class; the `bench-gate` job (§9) fails a >10 % regression from M1 on | BENCH-04 |
 | `formal.yml` | weekly, dispatch | Apalache bounded verification per model; fresh-seed conformance | FORMAL-01, FORMAL-02 |
 | `fuzz.yml` | nightly, dispatch | each fuzz target for a time budget; crash inputs uploaded | REL-03 |
 | `mutation.yml` | weekly, dispatch | `cargo-mutants` over the configured scope | REL-05 |
@@ -456,10 +493,20 @@ There is no event store (ADR 0008). What persists:
 - `gitleaks` (the binary, pinned by mise) over the full history; `.gitleaks.toml` allowlists
   nothing; fixtures build fake secrets at run time if they need any. GitHub secret scanning and
   push protection are on (owner setting).
-- **Private-name grep** (`private-names` stage): the patterns are never committed (that would
-  name what they protect); the recipe reads them from a file outside the repository locally and
-  from a repository secret in CI, and fails closed when the file is absent. Fork pull requests
-  have no secrets, so the stage runs on pushes to `main` and before landing.
+- **Private names** (`private-names` stage, FND-04): the names are never committed, only their
+  salted hashes. `.private-names.sha256` (committed since BOOT-02) has a `# salt: <hex>` header
+  and one `sha256("<salt>:<name>")` per line, the name lower-cased with everything but ASCII
+  letters and digits removed. The check tokenises the changed text (the diff against
+  `git merge-base HEAD origin/main` plus the working tree, and the commit messages in that
+  range): it lower-cases, splits on anything that is not a letter or digit, and hashes every
+  token and every run of 2 or 3 adjacent tokens joined, so `Foo Bar`, `foo-bar` and `FooBar`
+  match one entry; a match fails with the path and line, never the name. It needs no secret, so
+  it is a stage of `check` and runs in CI, on fork pull requests and in `land.sh`. A missing or
+  empty hash file fails closed in CI (`CI=true`) and in `land.sh`, and only warns elsewhere (a
+  downstream fork may not have one). The owner adds a name with `scripts/private-name-add.sh`,
+  which writes only its hash. The salt is public, so a dictionary guess of a short name is
+  possible: the file keeps names out of plain sight and out of every grep, not out of reach of a
+  determined guesser.
 - **DCO:** a step of `ci.yml` checks that every pushed commit carries a `Signed-off-by` matching
   its author (about 15 lines; FND-03).
 - CodeQL, Scorecard, Dependabot as in 7.1.
@@ -472,19 +519,39 @@ There is no event store (ADR 0008). What persists:
 
 ## 8. Tooling pins
 
+0. **Bootstrap.** mise and just themselves come from `scripts/bootstrap-tools.sh` (BOOT-02):
+   each at a pinned version, verified against a SHA-256 recorded in the script, installed into
+   `~/.local/bin`, a no-op when already present; then `mise install --locked` once `mise.toml`
+   exists. The SessionStart hook runs it in cloud sessions; a cloud environment's setup script may
+   call it too (`bash scripts/bootstrap-tools.sh`). Verified in the cloud sandbox on 2026-11-16:
+   GitHub release downloads (`github.com/<owner>/<repo>/releases/download/…`) and the static
+   crates.io files pass the network proxy, while `api.github.com`, GitHub pages and
+   `codeload.github.com` are refused. mise's aqua backend installed `just` and `hyperfine` there
+   from a `mise.lock` that records each asset URL, but an install without a locked URL (for
+   example `mise exec aqua:koalaman/shellcheck@0.11.0`) failed on the GitHub API: in the sandbox
+   every tool is installed with `--locked`. `mise lock` itself worked in the sandbox for `just` and
+   `hyperfine`; a tool whose lock entry needs the API is locked where the API is reachable (CI,
+   or the owner's machine) and the reason recorded. A version bump of mise or just changes the script's version and every checksum
+   in one commit, and `mise.toml` pins just at the same version.
 1. **mise** pins every tool other than Rust (ADR 0030): `mise.toml` names each tool and version,
-   `mise.lock` records its checksums, and `mise install --locked` refuses a mismatch. Backends:
-   `aqua:` (checksums, often provenance) for gitleaks, actionlint, shellcheck, zizmor, pinact,
-   jq, hyperfine; `cargo:` for cargo-nextest, cargo-deny, cargo-llvm-cov, cargo-mutants,
-   cargo-fuzz, adrs, dist, release-plz; `pipx:` for diff-cover; `npm:@informalsystems/quint`
-   (with Node); `java` for a Temurin JDK; `github:`/`ubi:` for Apalache. Entries arrive with the
-   stage that needs them, each with a comment naming it: just and cargo-nextest (FND-01),
-   cargo-deny (FND-02), adrs (FND-03), gitleaks, actionlint, shellcheck, zizmor, pinact (FND-04),
-   cargo-llvm-cov, diff-cover, cargo-mutants (FND-06), hyperfine (BENCH-02), Node, Quint,
-   Apalache, the JDK (FORMAL-01; the JDK also serves the Java fixtures and the JVM helpers),
-   cargo-fuzz and its nightly (REL-03), dist and release-plz (REL-06).
+   `mise.lock` records its checksums, and `mise install --locked` refuses a mismatch. `mise lock`
+   records a checksum only where the backend's registry has one (on 2026-11-16 it did for `just`
+   and not for `hyperfine`): every lock entry has a `checksum`, or the task that adds the tool
+   records why not and what verifies it instead. Backends: prefer prebuilt, checksummed binaries
+   (`aqua:`, then `github:`) over `cargo:`, which compiles from source in every fresh session and
+   uncached CI job; `aqua:` for gitleaks, actionlint, shellcheck, zizmor, pinact, jq, hyperfine,
+   ripgrep and, where the registry has them, cargo-nextest, cargo-deny, cargo-llvm-cov and
+   cargo-mutants; `cargo:` only for a tool with no prebuilt release (adrs, release-plz if so,
+   cargo-fuzz); `pipx:` for diff-cover; `npm:@informalsystems/quint` (with Node); `java` for a
+   Temurin JDK; `github:`/`ubi:` for Apalache. Entries arrive with the stage that needs them,
+   each with a comment naming it: just and cargo-nextest (FND-01), cargo-deny (FND-02), adrs
+   (FND-03), gitleaks, actionlint, shellcheck, zizmor, pinact (FND-04), cargo-llvm-cov,
+   diff-cover, cargo-mutants (FND-06), hyperfine and ripgrep (BENCH-02; `rg` is the floor arm, so
+   its version is part of the measurement), Node, Quint, Apalache, the JDK (FORMAL-01; the JDK
+   also serves the Java fixtures and the JVM helpers), cargo-fuzz and its nightly (REL-03), dist
+   and release-plz (REL-06).
 2. Versions seen on 2026-11-16 (each task re-checks the current release; a version is never
-   invented): mise 2026.11.9, just 1.59.0, cargo-nextest 0.9.152, cargo-deny 0.21.0,
+   invented): mise 2026.11.9 (the bootstrap pins 2026.10.10, a month old), just 1.59.0, cargo-nextest 0.9.152, cargo-deny 0.21.0,
    cargo-llvm-cov 0.9.1, diff-cover 11.0.2, cargo-mutants 27.1.0, gitleaks 8.30.1, actionlint
    1.7.12, zizmor 1.32.0, pinact 5.0.2, adrs 0.13.0, Quint 0.33.1, Apalache 0.62.1 (Quint 0.33.x
    is validated against it, not 0.63.0), cargo-fuzz 0.13.2, dist 0.34.0, release-plz 0.4.3.
@@ -511,17 +578,21 @@ needs one becomes a recipe parameter (`just conformance seed=42`).
 
 | Command | What it does | Task |
 |:--|:--|:--|
+| `bash scripts/bootstrap-tools.sh` | install the pinned mise and just (checksum-verified), then `mise install --locked` | BOOT-02 |
 | `mise install --locked` | install every pinned tool from `mise.lock` | FND-01 |
-| `just quick` | fmt-check, architecture, clippy, unit tests: the inner loop | FND-02 |
+| `just quick` | fmt-check, architecture (from FND-07), clippy, unit tests: the inner loop | FND-02 |
 | `just check` | the full blocking gate: every stage, in order, stopping at none silently | FND-02 |
 | `just check-only <stage>…` | named stages through the same recipes (what each CI job runs) | FND-02 |
 | `just --list`, `just --dump --dump-format json` | the stage catalog | FND-02 |
 | `just doctor` | `mise doctor` and `mise ls --missing` | FND-01 |
 | `adrs new "<title>"`, `just adr-index` | create an ADR; check the index against the files | FND-03 |
 | `scripts/land.sh <sha>… [--no-push]` | cherry-pick onto a fresh `origin/main` worktree, `just check`, push only on green | FND-03 |
-| `just coverage`, `just changed-lines`, `just mutants-diff` | llvm-cov vs `coverage-floor.toml`; diff-cover on changed lines; cargo-mutants `--in-diff` | FND-06 |
+| `just coverage`, `just changed-lines` | llvm-cov vs `coverage-floor.toml`; diff-cover on the lines changed since `git merge-base HEAD origin/main` (plus the working tree) | FND-06 |
+| `just mutants-diff [base]` | cargo-mutants `--in-diff` over the same diff, with a time cap; outside `check` (below) | FND-06 |
+| `just private-names` | the hashed private-name check of §7.4 | FND-04 |
 | `just bench-corpus` | fetch the pinned corpus of `doc/bench-corpus.md` into the cache directory | BENCH-01 |
-| `just bench [suite] [corpus=small]` | the benchmark suites with machine facts, JSON results | BENCH-02 |
+| `just bench [suite] [corpus=small]` | the benchmark suites with machine facts, JSON results; reports, never gates | BENCH-02 |
+| `just bench-gate` | compare a run with the history of the same runner class; `bench.yml` only | BENCH-04 |
 | `just formal-typecheck`, `just formal-test`, `just formal-verify [model]` | Quint typecheck and tests; Apalache bounded verification | FORMAL-01 |
 | `just conformance [model] [seed] [traces] [steps]` | `quint-connect` runs plus committed-trace replay | FORMAL-02 |
 | `just java-fixtures` | compile the golden Java corpus with the pinned JDK | EVAL-07 |
@@ -533,13 +604,29 @@ needs one becomes a recipe parameter (`just conformance seed=42`).
 | `just mutation` | cargo-mutants over the configured scope | REL-05 |
 | `just release-check [target]` | package, extract and smoke the archive | REL-06 |
 
-Stages of `check` in order (each a recipe): `fmt-check`, `architecture`, `clippy`, `docs` (the
-ADR index matches the files), `unit-tests`, `integration-tests`, `doctests`, `e2e-tests`,
-`lsp-conformance`, `formal-typecheck`, `formal-test`, `formal-freshness`, `conformance-replay`,
-`java-fixtures`, `coverage`, `changed-lines`, `mutants-diff`, `deny`, `secrets`, `workflows`,
-and from M1 `bench-gate`. A stage enters `check` in the commit of the task that introduces it,
-together with its `ci.yml` job entry. `just private-names` is outside `check` (it needs the
-pattern file, §7.4): `scripts/land.sh` runs it before every push and `security.yml` on `main`.
+Stages of `check` in order (each a recipe): `fmt-check`, `architecture`, `clippy`, `nostd`
+(§2.3), `docs` (the ADR index matches the files), `unit-tests`, `integration-tests`, `doctests`,
+`e2e-tests`, `lsp-conformance`, `formal-typecheck`, `formal-test`, `formal-freshness`,
+`conformance-replay`, `java-fixtures`, `coverage`, `changed-lines`, `deny`, `secrets`,
+`workflows`, `private-names`. A stage enters `check` in the commit of the task that introduces
+it, together with its `ci.yml` job entry.
+
+Two recipes are deliberately **outside** `check`:
+
+- `mutants-diff` reruns the tests once per mutant, which grows with the suite. It runs in the CI
+  `coverage` job, and the orchestrator runs it before landing a task sized `L` (or one touching
+  `jfl-domain`, `jfl-protocol` or `jfl-application`), with a time cap of 20 minutes; a run cut by
+  the cap reports which mutants it did not reach and never counts as green.
+- `bench-gate` compares wall times, which are only comparable on one machine class. It runs only
+  in `bench.yml` on a fixed runner class against the history recorded by that class, on the
+  median of N runs written by `jfl-bench`, and a regression must reproduce once in a second run
+  before it fails (ver §10). In-process suites gate on instruction counts (a deterministic metric
+  from `gungraun` or cachegrind) where available and report wall time. `just bench` on a laptop
+  or in the sandbox reports and never gates, and neither `check` nor `land.sh` runs it.
+
+The diff base of `changed-lines`, `mutants-diff` and `private-names` is
+`git merge-base HEAD origin/main` plus the working tree: the same set of lines for a lane's
+uncommitted tree, its commit, and `land.sh`'s cherry-picked tree.
 
 ---
 
@@ -567,10 +654,12 @@ pattern file, §7.4): `scripts/land.sh` runs it before every push and `security.
 
 Integration is directly on `main` (ADR 0002): the orchestrator reviews each task's commit, then
 lands it with `scripts/land.sh` (ADR 0030), which fetches, creates a worktree at `origin/main`,
-cherry-picks, runs `just check` on the merged tree, and pushes only on green, retrying once after a
-fetch on a non-fast-forward. Conflicts are auto-resolved only in `Cargo.lock` (take integration's
+cherry-picks, runs `just check` (with `private-names` failing closed) on the merged tree, and
+pushes only on green, retrying once after a fetch on a non-fast-forward. Conflicts are auto-resolved only in `Cargo.lock` (take integration's
 side, then `cargo update -w`) and in the ADR index (regenerated, then `just adr-index`); anything
-else aborts and names the files. One commit lands per green CI run on `main`. A red `main` is fixed
+else aborts and names the files. One commit lands per green CI run on `main` once `ci.yml`
+exists (FND-05); before that the local gate on the merged tree is the only gate, and the next
+commit may land as soon as the previous one is pushed. A red `main` is fixed
 immediately, by a new commit. Until FND-03 lands `land`, the orchestrator does the same by hand:
 cherry-pick onto a clean `main`, run the gate on the merged tree in the foreground, push only on
 green ([`sdlc.md`](sdlc.md)).

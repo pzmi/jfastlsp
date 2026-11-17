@@ -54,7 +54,7 @@ for the owner's decisions.
 | [0007](0007-formal-methods-required-quint-with-itf-conformance.md) | Formal methods required: Quint models with ITF conformance against the real code | Proposed (default; owner confirms at FND checkpoint); amended 2026-11-16 |
 | [0008](0008-no-event-sourcing-the-index-is-a-rebuildable-cache.md) | No event sourcing: the index is a rebuildable cache | Proposed (default; owner confirms at FND checkpoint) |
 | [0009](0009-phase-0-first-owner-run-evaluations-and-decision-tasks.md) | Phase 0 first: owner-run evaluations and a decision task per open choice | Proposed (default; owner confirms at FND checkpoint); amended 2026-11-16 |
-| [0010](0010-workspace-crate-map-and-dependency-law.md) | Workspace crate map and dependency law in architecture.toml | Proposed; amended 2026-11-16 |
+| [0010](0010-workspace-crate-map-and-dependency-law.md) | Workspace crate map and dependency law in architecture.toml | Proposed; amended 2026-11-16 (twice) |
 | [0011](0011-pinned-toolchains-rust-1-97-0-and-tools-versions-toml.md) | Pinned toolchains: Rust 1.97.0, edition 2024; JDK and tools in tools/versions.toml | Superseded by 0030 |
 | [0012](0012-port-xtask-from-mayfly.md) | Port xtask from mayfly | Superseded by 0030 |
 | [0013](0013-two-carriers-over-one-query-engine-cli-first.md) | Two carriers over one query engine: JSON CLI first, LSP second | Proposed |
@@ -62,7 +62,7 @@ for the owner's decisions.
 | [0015](0015-no-jvm-and-no-build-on-the-request-path.md) | No JVM and no build on the request path | Proposed |
 | [0016](0016-one-daemon-per-user-with-thin-proxies.md) | One daemon per user with thin per-client proxies | Proposed |
 | [0017](0017-bind-views-per-request-uri-exclude-nested-worktrees.md) | Bind views per request URI; exclude nested worktrees | Proposed |
-| [0018](0018-agent-sandbox-and-fail-closed-tools.md) | Agent sandbox and fail-closed tools | Proposed; amended 2026-11-16 |
+| [0018](0018-agent-sandbox-and-fail-closed-tools.md) | Agent sandbox and fail-closed tools | Proposed; amended 2026-11-16 (twice) |
 | [0019](0019-build-or-reuse-per-subsystem.md) | Build or reuse, per subsystem | Proposed (default; owner confirms at FND checkpoint) |
 | [0020](0020-lsp-stack-lsp-server-gen-lsp-types-line-index.md) | LSP stack: lsp-server, gen-lsp-types and line-index | Proposed (default; owner confirms at FND checkpoint) |
 | [0021](0021-daemon-ipc-lsp-framing-over-a-unix-socket.md) | Daemon IPC: LSP framing over a Unix socket, single owner by a std file lock | Proposed (default; owner confirms at FND checkpoint) |
@@ -74,5 +74,5 @@ for the owner's decisions.
 | [0027](0027-javac-worker-forked-from-java-language-server-with-scip-java.md) | javac worker: fork java-language-server's compiler core, load scip-java's plugin | Proposed (default; owner confirms at FND checkpoint) |
 | [0028](0028-jdtls-behind-our-multiplexing-proxy-baseline-and-fallback.md) | jdtls behind our multiplexing proxy: the baseline and the fallback product | Proposed (default; owner confirms at FND checkpoint) |
 | [0029](0029-e0-on-harbor-with-a-multi-swe-bench-java-control.md) | E0 on Harbor, with a Multi-SWE-bench Java control | Proposed (default; owner confirms at FND checkpoint) |
-| [0030](0030-foundation-from-maintained-tools.md) | Foundation from maintained tools: just, mise, cargo-deny, no_std and a thin test layer | Proposed (default; owner confirms at FND checkpoint) |
-| [0031](0031-benchmark-early-on-a-pinned-real-corpus.md) | Benchmark early on a pinned real-repository corpus; regressions over 10 % block | Proposed (default; owner confirms at FND checkpoint) |
+| [0030](0030-foundation-from-maintained-tools.md) | Foundation from maintained tools: just, mise, cargo-deny, no_std and a thin test layer | Proposed (default; owner confirms at FND checkpoint); amended 2026-11-16 |
+| [0031](0031-benchmark-early-on-a-pinned-real-corpus.md) | Benchmark early on a pinned real-repository corpus; regressions over 10 % block | Proposed (default; owner confirms at FND checkpoint); amended 2026-11-16 |

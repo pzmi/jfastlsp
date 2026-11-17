@@ -25,17 +25,16 @@ editing the ruleset.
 | Job id | Display name | Runs (`just ...`) | Arrives with |
 |:--|:--|:--|:--|
 | `architecture` | Architecture and policy | `check-only architecture deny` | FND-05 |
-| `static` | Static quality | `doctor`, then `check-only fmt-check clippy docs` | FND-05 |
+| `static` | Static quality | `doctor`, then `check-only fmt-check clippy nostd docs` | FND-05 |
 | `tests` | Tests (Linux x86-64) | `check-only unit-tests integration-tests doctests` | FND-05 |
 | `linux-arm` | Linux (arm64) | `check-only platform-tests` on `ubuntu-24.04-arm` | FND-05 |
 | `macos` | macOS (arm64) | `check-only platform-tests` on `macos-15` | FND-05 |
-| `security` | Security | `check-only secrets workflows` | FND-05 |
+| `security` | Security | `check-only secrets workflows private-names` | FND-05 |
 | `dco` | DCO | every pushed commit signed off by its author | FND-05 |
-| `coverage` | Coverage | `check-only coverage changed-lines mutants-diff` (full history) | FND-06 |
+| `coverage` | Coverage | `check-only coverage changed-lines`, then `just mutants-diff` (full history; diff base `git merge-base HEAD origin/main`, 20-minute cap) | FND-06 |
 | `formal` | Formal models (Quint) | `check-only formal-typecheck formal-test formal-freshness conformance-replay` | FORMAL-01, FORMAL-02 |
 | `fixtures` | Java fixtures | `check-only java-fixtures` (pinned JDK) | EVAL-07 |
 | `e2e` | End to end | `check-only e2e-tests lsp-conformance` | IDX-13, LSP-01 |
-| `bench-gate` | Benchmarks (small corpus) | `check-only bench-gate`: >10 % regression against the history fails | BENCH-04, active from IDX-15 |
 | `required` | Required | the aggregate; needs all of the above | FND-05 |
 
 Every stage of `check` will be in exactly one job; a test fails when a stage is in none or in two,
@@ -45,8 +44,9 @@ replaced by a newer push: each commit there has its own concurrency group.
 ## Other workflows
 
 Not in `required`: `security.yml` (weekly: new advisories can fail an unchanged tree; zizmor's
-online audits; the `private-names` grep, which needs a secret fork pull requests lack),
-`bench.yml` (medium and large corpus, history upload),
+online audits), `bench.yml` (the corpus suites on one fixed runner class, history upload, and its
+`bench-gate` job, which blocks `main` from IDX-15: red there is fixed like red CI; it is kept out
+of `ci.yml` because wall times are comparable only on one runner class, fnd §9),
 `codeql.yml`, `scorecard.yml`, `formal.yml` (Apalache, weekly and by hand), `fuzz.yml` (nightly),
 `mutation.yml` (weekly), `release.yml` (tags). A red run of any of them is reported to the owner
 and fixed as a task (fnd §7.1).

@@ -24,7 +24,7 @@ Every station that says "the gate" means the command `doc/tasks.md` names as liv
 | Stage of the repo | Gate |
 |:--|:--|
 | Before FND-02 (no `just check`) | `cargo fmt --all --check && cargo clippy --workspace --all-targets --locked -- -D warnings && cargo test --workspace --locked` |
-| FND-02 landed | `just quick` while iterating, `just check` before commit (tools from `mise install --locked`) |
+| FND-02 landed | `just quick` while iterating, `just check` before commit (tools from `bash scripts/bootstrap-tools.sh`) |
 
 `quick` is not `check` (fnd §9). Never report `quick` as the full gate.
 
@@ -81,8 +81,9 @@ Always:
 
 `$ARGUMENTS`: a task id, or a GitHub issue number or URL, plus optional
 `--small`/`--medium`/`--large`. Absent: take the first task in `doc/tasks.md` whose dependencies
-all have a commit (`git log --oneline | grep " <dep>:"`), which has none of its own yet and is
-neither an `(owner)` task nor a `DEC-` task waiting on the owner.
+all have a commit (`git log --oneline | grep " <dep>:"`; a `DEC-` dependency only once its ADR
+reads `Accepted (owner, …)`), which has none of its own yet and is neither an `(owner)` task nor
+a `DEC-` task waiting on the owner.
 
 ## Startup
 
@@ -124,7 +125,7 @@ Prompt section. A subagent crash counts as a failed sensor. Subagents work in th
 | Sensor fails twice | Stop. Report station, sensor, output. |
 | No gate passes | Stop. Report station, output, gates. |
 | Gate red for a reason outside the diff | Stop. Report; do not "fix" other people's WIP. |
-| A required tool is missing (nextest, deny, quint, Apalache, the pinned JDK) | Install it with `mise install --locked` (`just doctor` says what is missing) or stop and report; never treat a skipped check as green. |
+| A required tool is missing (just, nextest, deny, quint, Apalache, the pinned JDK) | Install it with `bash scripts/bootstrap-tools.sh` (`just doctor` says what is missing) or stop and report; never treat a skipped check as green. |
 | The task needs the target Java repository, a Claude Code run or the owner's machine | Build and test everything against the synthetic fixtures; leave the owner-run step documented and runnable; report the `(owner)` part as pending. |
 | CI red 3 times | Stop at babysit. Report the failing job and step. |
 | Force-push needed | Stop at ship. Ask the owner. |

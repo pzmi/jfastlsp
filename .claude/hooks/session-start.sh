@@ -1,11 +1,15 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC2016 # backticks and $PATH in single quotes are literal on purpose
 # SessionStart: make a fresh Claude Code on the web container ready for the
-# gate with no manual setup. Local sessions already have their toolchain, so
-# the hook does nothing outside a remote session. Every step is a no-op while
-# its prerequisite does not exist yet (no rust-toolchain.toml, no Cargo.toml,
-# no Cargo.lock, no mise.toml), so the repository works before FND-01 lands.
-# It installs only what mise.lock pins (the JDK once FORMAL-01 pins it); it
-# never fetches Gradle, jdtls, the bench corpus or a target Java repository.
+# gate with no manual setup. Local sessions already have their tools, so the
+# hook does nothing outside a remote session. It reports and never blocks the
+# session: every step that fails prints what failed and how to retry, and the
+# hook exits 0. Each step is a no-op while its prerequisite does not exist yet
+# (no rust-toolchain.toml, no Cargo.toml, no mise.toml), so the repository
+# works before FND-01 lands, and a no-op when its tool is already installed.
+# It installs only what is pinned (mise and just by scripts/bootstrap-tools.sh,
+# everything else from mise.lock); it never fetches Gradle, jdtls, the bench
+# corpus or a target Java repository.
 set -uo pipefail
 
 if [ "${CLAUDE_CODE_REMOTE:-}" != "true" ]; then
@@ -14,15 +18,22 @@ fi
 
 cd "${CLAUDE_PROJECT_DIR:-$(dirname "$0")/../..}" || exit 0
 
+# ~/.local/bin holds mise and just; make it visible to this hook and, through
+# CLAUDE_ENV_FILE, to every later command of the session.
+case ":$PATH:" in *":$HOME/.local/bin:"*) ;; *) export PATH="$HOME/.local/bin:$PATH" ;; esac
+if [ -n "${CLAUDE_ENV_FILE:-}" ]; then
+  printf 'export PATH="%s/.local/bin:$PATH"\n' "$HOME" >> "$CLAUDE_ENV_FILE"
+fi
+
 # The pinned toolchain. rustup >= 1.28 installs the toolchain named by
-# rust-toolchain.toml (with its components) when given no argument.
+# rust-toolchain.toml (with its components and targets) when given no argument.
 if [ -f rust-toolchain.toml ] || [ -f rust-toolchain ]; then
   if command -v rustup >/dev/null 2>&1; then
-    if ! log="$(rustup toolchain install 2>&1)"; then
-      printf 'rustup could not install the pinned toolchain:\n%s\n' "$log" >&2
-      exit 1
+    if log="$(rustup toolchain install 2>&1)"; then
+      echo "rust: $(rustc --version 2>/dev/null) (pinned by rust-toolchain.toml)"
+    else
+      printf 'rust: `rustup toolchain install` failed; retry it by hand:\n%s\n' "$(printf '%s\n' "$log" | tail -n 20)"
     fi
-    echo "rust: $(rustc --version 2>/dev/null) (pinned by rust-toolchain.toml)"
   else
     echo "rust: rustup missing; install it from https://rustup.rs, then run \`rustup toolchain install\`"
   fi
@@ -32,33 +43,26 @@ fi
 
 # Crates, so the first build in a worktree does not wait on the network.
 if [ -f Cargo.lock ] && [ -f Cargo.toml ]; then
-  if ! log="$(cargo fetch --locked 2>&1)"; then
-    printf 'cargo fetch --locked failed:\n%s\n' "$(printf '%s\n' "$log" | tail -n 30)" >&2
-    exit 1
+  if log="$(cargo fetch --locked 2>&1)"; then
+    echo "crates: fetched (Cargo.lock)"
+  else
+    printf 'crates: `cargo fetch --locked` failed:\n%s\n' "$(printf '%s\n' "$log" | tail -n 20)"
   fi
-  echo "crates: fetched (Cargo.lock)"
 elif [ -f Cargo.toml ]; then
   echo "crates: no Cargo.lock yet; the first build will create it"
 else
   echo "crates: no Cargo.toml yet; nothing to fetch"
 fi
 
-# Pinned tools (ADR 0030): mise installs everything in mise.lock once mise.toml
-# exists (FND-01), Quint, Apalache and the JDK included once FORMAL-01 adds
-# them. A failed install is reported, never fatal: `just doctor` names what is
-# missing.
-if [ -f mise.toml ]; then
-  if command -v mise >/dev/null 2>&1; then
-    if log="$(mise install --locked 2>&1)"; then
-      echo "tools: installed from mise.lock"
-    else
-      printf 'tools: `mise install --locked` failed (run `just doctor`):\n%s\n' "$(printf '%s\n' "$log" | tail -n 20)"
-    fi
+# mise and just (pinned, checksum-verified), then everything in mise.lock once
+# mise.toml exists (FND-01): scripts/bootstrap-tools.sh does both and is
+# idempotent (fnd §8).
+if [ -f scripts/bootstrap-tools.sh ]; then
+  if log="$(bash scripts/bootstrap-tools.sh 2>&1)"; then
+    printf '%s\n' "$log"
   else
-    echo "tools: mise missing; install it from https://mise.jdx.dev, then run \`mise install --locked\`"
+    printf 'tools: scripts/bootstrap-tools.sh failed (rerun it; `just doctor` names what is missing):\n%s\n' "$(printf '%s\n' "$log" | tail -n 20)"
   fi
-else
-  echo "tools: no mise.toml yet (FND-01); nothing pinned to install"
 fi
 
 # The JDK: the javac worker tests, the Gradle model tests and Apalache need

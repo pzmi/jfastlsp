@@ -1,0 +1,8 @@
+# Salted SHA-256 hashes of names that must never appear in this repository (fnd §7.4, ADR 0004).
+# Each line below the header is sha256("<salt>:<name>"), the name lower-cased with everything but
+# ASCII letters and digits removed. The names themselves are never committed. Add one with
+# scripts/private-name-add.sh; the private-names check (FND-04) hashes every token of changed
+# text, and every run of 2 or 3 adjacent tokens joined, and fails on a match.
+# salt: 01502e686016232aaa5d2ea0f6392f6b
+89b18d71052ab0e6fdd29ca98d98e0167a072892a8827bad7b733a920ff76b5d
+accb10efa25801540a17547ad1b1bf1feb0badb63c47e4ccc772b8dcff99d25a

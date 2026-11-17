@@ -4,7 +4,8 @@ Date: 2026-11-16
 
 ## Status
 
-Proposed (orchestrator default; owner confirms at the FND checkpoint, DEC-07). The owner's
+Proposed (orchestrator default; owner confirms at the FND checkpoint, DEC-07); amended
+2026-11-16. The owner's
 direction (2026-11-16): "test on some Java projects and benchmark early; the point of this
 project is speed".
 
@@ -54,3 +55,14 @@ reference machine. REL-05 keeps only the mutation lane.
 - [bencher.dev](https://bencher.dev): statistical thresholds and a dashboard, but an external
   service with an API token; the runner-up if the 10 % threshold proves too noisy.
 - Benchmarks at M5 only: too late for a speed product. Committing corpus code: licences and size.
+
+## Amended 2026-11-16 (planner, BOOT-02): where the 10 % gate runs
+
+A local `just check` or `land.sh` would compare a sandbox run with a history recorded on GitHub
+runners, a different machine, and github-action-benchmark compares single results, not medians.
+So the blocking gate runs only in `bench.yml`, on one fixed runner class, against the history of
+that class: `jfl-bench` runs each suite N times and writes the median, and a regression must
+reproduce in a second run before the job fails. In-process suites gate on instruction counts
+(`gungraun` or cachegrind) where available, which do not depend on a noisy neighbour, and report
+wall time beside them. Local and sandbox runs report and never gate. BENCH-04 builds it; IDX-15
+makes it blocking.

@@ -11,9 +11,10 @@ session after reading only what the card names.
 --all-targets --locked -- -D warnings && cargo test --workspace --locked`) until FND-02 lands,
 then `just check` (and `just quick` while iterating), with tools from `mise install --locked`.
 Until FND-03 lands, the orchestrator lands commits by hand ([`sdlc.md`](sdlc.md) §2); from then
-on with `scripts/land.sh`. Until FND-01 lands there is no Cargo workspace and the gate is
-vacuous; BOOT-00 (plan, process and agent instructions) and BOOT-01 (the reuse survey and early
-benchmarks applied) are the only commits.
+on with `scripts/land.sh`. mise and just come from `scripts/bootstrap-tools.sh` (fnd §8), which
+the SessionStart hook runs in cloud sessions. Until FND-01 lands there is no Cargo workspace and
+the gate is vacuous; BOOT-00 (plan, process and agent instructions), BOOT-01 (the reuse survey
+and early benchmarks applied) and BOOT-02 (the bootstrap review applied) are the only commits.
 
 ## Decisions
 
@@ -103,7 +104,8 @@ the skills plugin).
 14. **Speed is measured, always** (ADR 0031): every product task runs on the bench corpus (small
     at least, `just bench`) and reports the metrics it affects; its correctness tests also run
     against the real-corpus cases that apply (BENCH-05). From M1 on, a tracked metric that
-    regresses by more than 10 % fails the gate.
+    regresses by more than 10 % fails `bench.yml`'s `bench-gate` on its fixed runner class; a
+    local or sandbox run reports and never gates (fnd §9).
 
 **Model key:** `deep` — design, protocols, concurrency, the envelope, Quint models, the
 architecture test, untrusted-input parsers. `standard` — well-specified implementation.
@@ -126,9 +128,10 @@ targets), **IDX-15** (M1 and the blocking bench gate), **LSP-06** (M2), **SEM-07
 | ID | Title | Depends on | Model | Size | ⛳ | Parallel with |
 |---|---|---|---|---|---|---|
 | FND-01 | Workspace, toolchain, crate stubs, mise | — | standard | M |  | DEC-01 |
-| FND-02 | `just` gate, nextest, cargo-deny, `no_std` purity, architecture test | FND-01 | deep | M |  | DEC-01, BENCH-01 |
-| FND-03 | ADR tooling, `scripts/land.sh`, DCO check | FND-02 | standard | M |  | EVAL-01, BENCH-02, EVAL-11 |
-| FND-04 | Security and supply chain: gitleaks, zizmor, pinact, actionlint, private names | FND-03 | standard | S |  | EVAL-11, EVAL-05 |
+| FND-02 | `just` gate, nextest, cargo-deny, clippy authority lists, `nostd` stage | FND-01 | deep | M |  | DEC-01, BENCH-01 |
+| FND-07 | Architecture test (`jfl-architecture`) and its negative fixtures | FND-02 | deep | M |  | EVAL-01, EVAL-11 |
+| FND-03 | ADR tooling, `scripts/land.sh`, DCO check | FND-07 | standard | M |  | EVAL-01, BENCH-02, EVAL-11 |
+| FND-04 | Security and supply chain: gitleaks, zizmor, pinact, actionlint, private names | FND-03 | standard | S |  | EVAL-11 |
 | FND-05 | CI workflows and required checks | FND-04 | standard | M | ⛳ | EVAL-02, EVAL-06 |
 | FND-06 | Coverage, changed lines, mutation in the diff | FND-05 | standard | M |  | EVAL-03, EVAL-10, BENCH-03 |
 | DEC-07 | (owner) Confirm the Proposed defaults | FND-05 | light | S |  | DEC-08 |
@@ -136,35 +139,35 @@ targets), **IDX-15** (M1 and the blocking bench gate), **LSP-06** (M2), **SEM-07
 | BENCH-01 | Benchmark corpus: pinned real repositories and the fetch script | FND-01 | standard | S |  | FND-02 |
 | BENCH-02 | Bench harness: `jfl-bench`, hyperfine, divan, the `rg` floor | BENCH-01, FND-02 | standard | M |  | FND-03 |
 | BENCH-03 | Comparison arms and the first baseline | BENCH-02, EVAL-11 | standard | M |  | FND-06 |
-| BENCH-04 | Results history and the regression gate | BENCH-03, FND-05 | standard | S |  | FORMAL-01 |
-| BENCH-05 | Real-corpus golden cases | BENCH-01, EVAL-08 | deep | M |  | FORMAL-03, FORMAL-04 |
-| FORMAL-01 | Formal toolchain: Quint, Apalache, JDK pins, `MODELS`, formal stages | FND-06 | standard | M |  | EVAL-12, BENCH-04 |
-| FORMAL-02 | Conformance harness: quint-connect drivers, committed-trace replay, negative controls | FORMAL-01 | deep | M |  | EVAL-08 |
-| FORMAL-03 | `views.qnt`: generations, freshness, completeness | FORMAL-02 | deep | M |  | EVAL-07, BENCH-05 |
-| FORMAL-04 | `daemon.qnt`: single owner, spawn, reconnect, no ghost buffers | FORMAL-03 | deep | M |  | EVAL-07, BENCH-05 |
-| FORMAL-05 | `diagnostics.qnt`: staleness | FORMAL-04 | deep | M | ⛳ | EVAL-09 |
+| BENCH-04 | Results history and the regression gate on one runner class | BENCH-03, FND-05 | standard | S |  | FORMAL-01 |
+| BENCH-05 | Real-corpus golden cases | BENCH-04, EVAL-08 | deep | M |  | EVAL-10 |
+| FORMAL-01 | Formal toolchain: Quint, Apalache, JDK pins, `MODELS`, formal stages | FND-05 | standard | M |  | EVAL-12, BENCH-04 |
+| FORMAL-02 | Conformance harness: quint-connect drivers, committed-trace replay, negative controls | FORMAL-01 | deep | M |  | EVAL-07, EVAL-05 |
+| FORMAL-03 | `views.qnt`: generations, freshness, completeness | FORMAL-02, DEC-02 | deep | M |  | IDX-01, IDX-04 |
+| FORMAL-04 | `daemon.qnt`: single owner, spawn, reconnect, no ghost buffers | FORMAL-03 | deep | M |  | IDX-02 |
+| FORMAL-05 | `diagnostics.qnt`: staleness | FORMAL-04 | deep | M | ⛳ | IDX-03 |
 | DEC-01 | (owner) Choose the target Java repository | — | light | S |  | FND-01, FND-02 |
-| EVAL-01 | Evaluation harness: Harbor adapter, arms, transcript metrics | FND-02 | standard | M |  | FND-03 |
-| EVAL-11 | jdtls behind our multiplexing proxy (`jfl-jdtls`) | FND-02 | deep | M |  | FND-03, FND-04 |
+| EVAL-01 | Evaluation harness: Harbor adapter, arms, transcript metrics | FND-02 | standard | M |  | FND-07, FND-03 |
+| EVAL-11 | jdtls behind our multiplexing proxy (`jfl-jdtls`) | FND-02 | deep | M |  | FND-07, FND-03, FND-04 |
 | EVAL-02 | E0 task set from the target repository's history | DEC-01, EVAL-01 | standard | M |  | FND-05 |
 | EVAL-03 | E0 arms, Harbor images and runbook | EVAL-01, EVAL-11 | standard | M |  | FND-06 |
 | EVAL-12 | E0 control set from Multi-SWE-bench Java | EVAL-01 | standard | S |  | FORMAL-01 |
 | EVAL-04 | (owner) Run E0 and report | EVAL-02, EVAL-03, EVAL-12 | standard | M |  | — |
-| EVAL-05 | E1 in the harness: parse and summarise the corpus on CI hardware and the target | BENCH-02 | standard | S |  | FND-04 |
-| EVAL-06 | E4: jdtls at 1, 3 and 10 worktrees, stock and behind the proxy | EVAL-11, BENCH-02 | standard | M |  | FND-05 |
-| EVAL-07 | Golden resolution corpus and `java-fixtures` stage | FORMAL-02 | deep | L |  | FORMAL-03, FORMAL-04 |
-| EVAL-08 | SCIP oracle (`jfl-oracle`) | FND-05 | deep | M |  | FORMAL-02 |
-| EVAL-09 | E2 resolver bake-off | EVAL-07, EVAL-08, EVAL-10, BENCH-05 | deep | L |  | FORMAL-05 |
-| EVAL-10 | E3 `javac` worker spike from the forked compiler core | EVAL-01 | standard | M |  | FND-06 |
-| DEC-03 | Storage tier (from E1) | EVAL-05 | deep | S |  | DEC-04, DEC-05, DEC-06 |
+| EVAL-05 | E1 in the harness: parse and summarise the corpus on the bench runner and the target | BENCH-04 | standard | S |  | FORMAL-02 |
+| EVAL-06 | E4: jdtls at 1, 3 and 10 worktrees, stock and behind the proxy | EVAL-11, BENCH-02 | standard | M |  | FND-05, EVAL-08 |
+| EVAL-07 | Golden resolution corpus and `java-fixtures` stage | FORMAL-01 | deep | L |  | FORMAL-02 |
+| EVAL-08 | SCIP oracle (`jfl-oracle`) | EVAL-07 | deep | M |  | EVAL-06 |
+| EVAL-09 | E2 resolver bake-off | EVAL-07, EVAL-08, EVAL-10, BENCH-05 | deep | L |  | DEC-03 |
+| EVAL-10 | E3 `javac` worker spike from the forked compiler core | EVAL-01 | standard | M |  | FND-06, BENCH-05 |
+| DEC-03 | Storage tier (from E1) | EVAL-05 | deep | S |  | DEC-04, DEC-05, DEC-06, EVAL-09 |
 | DEC-04 | Resolver and the SCIP baseline (from E2) | EVAL-09 | deep | S |  | DEC-03, DEC-05, DEC-06 |
 | DEC-05 | Semantic diagnostics in v1 (from E3) | EVAL-10 | deep | S |  | DEC-03, DEC-04, DEC-06 |
 | DEC-06 | `referencesMode` default and operation priority (from E0) | EVAL-04 | deep | S |  | DEC-03, DEC-04, DEC-05 |
-| DEC-02 | Go/no-go memo, the kill criterion and the speed targets | DEC-03, DEC-04, DEC-05, DEC-06, DEC-07, EVAL-06, FORMAL-05, BENCH-04, BENCH-05 | deep | M | ⛳ | — |
-| IDX-01 | Domain: paths, positions and encodings | DEC-02 | standard | M |  | IDX-04 |
-| IDX-02 | Domain: summaries, symbols, cache keys, the envelope | IDX-01 | deep | M |  | IDX-04 |
-| IDX-03 | Protocol v1: messages, versions, frame decoder, goldens | IDX-02 | deep | M |  | IDX-05, IDX-06 |
-| IDX-04 | `jfl-process`: argv-only child runner | DEC-02 | deep | M |  | IDX-01, IDX-02 |
+| DEC-02 | Go/no-go memo, the kill criterion and the speed targets | DEC-03, DEC-04, DEC-05, DEC-06, DEC-07, EVAL-06, BENCH-03 | deep | M | ⛳ | — |
+| IDX-01 | Domain: paths, positions and encodings | DEC-02 | standard | M |  | IDX-04, FORMAL-03 |
+| IDX-02 | Domain: summaries, symbols, cache keys, the envelope | IDX-01 | deep | M |  | IDX-04, FORMAL-04 |
+| IDX-03 | Protocol v1: messages, versions, frame decoder, goldens | IDX-02 | deep | M |  | IDX-05, IDX-06, FORMAL-05 |
+| IDX-04 | `jfl-process`: argv-only child runner | DEC-02 | deep | M |  | IDX-01, IDX-02, FORMAL-03 |
 | IDX-05 | Git adapter: roots, identity, freshness stat, changed files | IDX-01, IDX-04 | standard | M |  | IDX-03, IDX-06 |
 | IDX-06 | FS adapter: scanning, nested-worktree exclusion, watcher hints | IDX-01 | standard | M |  | IDX-03, IDX-05 |
 | IDX-07 | Syntax adapter: tree-sitter summaries and the golden Java corpus | IDX-02 | deep | L |  | IDX-08 |
@@ -206,72 +209,92 @@ targets), **IDX-15** (M1 and the blocking bench gate), **LSP-06** (M2), **SEM-07
 
 ### Lane FND: foundation
 
-Six small tasks assemble the foundation from maintained tools (ADR 0030): mise pins, a `just`
-gate, the compiler and cargo-deny for the dependency law, one architecture test, adrs and a land
-script, the security scanners, CI, coverage and mutation in the diff. The FND checkpoint (FND-05)
+Seven small tasks assemble the foundation from maintained tools (ADR 0030): mise pins, a `just`
+gate, the compiler, clippy and cargo-deny for the dependency law (FND-02), one architecture test
+(FND-07), adrs and a land script, the security scanners, CI, coverage and mutation in the diff. The FND checkpoint (FND-05)
 puts the Proposed defaults and the skills question to the owner (DEC-07, DEC-08).
 
 #### FND-01: Workspace, toolchain, crate stubs, mise
 - **Depends on:** none. **Model:** standard. **Size:** M. **Parallel with:** DEC-01.
-- **Cites:** plan §6.1, §6.3, §1.6, §16; fnd §2.1, §2.3, §4.1, §4.2, §8; ADR 0005, ADR 0006, ADR 0010, ADR 0030.
+- **Cites:** plan §6.1, §6.3, §6.5, §1.6, §16; fnd §2.1, §2.3, §2.4, §4.1, §4.2, §8; ADR 0005, ADR 0006, ADR 0010, ADR 0030.
 - Create the Cargo workspace with every production, test-only and tool-only crate of plan §6.1 as
-  a stub: `Cargo.toml` (explicit `members`, resolver 3, `[workspace.package]` with
-  `version = "0.1.0"`, `edition = "2024"`, `rust-version = "1.97"`, `license = "MIT OR
-  Apache-2.0"`, repository, readme; `[workspace.lints]` exactly as fnd §4.2), each crate's
-  `Cargo.toml` (`publish = false`, `[lints] workspace = true`, only the path dependencies plan
-  §6.3 allows) and `src/lib.rs` with a `//!` naming its single responsibility and role; the pure
-  crates `#![no_std]` with `extern crate alloc`; `jfl-cli` with `[[bin]] name = "jfl"` whose
-  `main` prints the version; `tools/jfl-architecture` as an empty test crate;
-  `tools/jfl-oracle`, `tools/jfl-eval`, `tools/jfl-jdtls` and `tools/jfl-bench` as binaries
-  printing usage. `rust-toolchain.toml` (1.97.0, `rustfmt`, `clippy`, `llvm-tools-preview`);
-  `mise.toml` and `mise.lock` pinning `just` and `cargo-nextest` at their current releases
-  (checked, never invented); a first `justfile` with `doctor`; `deny.toml` skeleton per fnd §7.4
-  with `[graph] targets`; `architecture.toml` with `schema = 1` and the `[workspace]`, `[roles]`,
-  `[grants]` and `[dependencies.normal]` tables of fnd §3.1 and plan §6.3 filled, empty
-  `[external.*]` and `[exceptions]`; `.editorconfig`, `.gitattributes` (`* text=auto eol=lf`);
-  `Cargo.lock`. No third-party dependency.
+  a stub: `Cargo.toml` (explicit `members`, `exclude = ["spikes"]` so the archived E1 spike stays
+  outside, resolver 3, `[workspace.package]` with `version = "0.1.0"`, `edition = "2024"`,
+  `rust-version = "1.97"`, `license = "MIT OR Apache-2.0"`, repository, readme;
+  `[workspace.lints]` exactly as fnd §4.2), each crate's `Cargo.toml` (`publish = false`,
+  `[lints] workspace = true`, only the path dependencies plan §6.3 allows) and `src/lib.rs` with
+  a `//!` naming its single responsibility and role; the pure crates `#![no_std]` with
+  `extern crate alloc`; `jfl-cli` with `[[bin]] name = "jfl"` whose `main` prints the version;
+  `tools/jfl-architecture` as an empty test crate; `tools/jfl-oracle`, `tools/jfl-eval`,
+  `tools/jfl-jdtls` and `tools/jfl-bench` as binaries printing usage. `rust-toolchain.toml`
+  (1.97.0, `rustfmt`, `clippy`, `llvm-tools-preview`, `targets = ["x86_64-unknown-none"]` for the
+  `nostd` stage, fnd §2.3); `mise.toml` and `mise.lock` pinning `just` (at the version
+  `scripts/bootstrap-tools.sh` pins) and `cargo-nextest` at their current releases (checked,
+  never invented; prebuilt backends, fnd §8), every lock entry with a checksum or a recorded
+  reason; a first `justfile` with `doctor`, which also fails when `just --version` differs from
+  the pin; `deny.toml` skeleton per fnd §7.4 with `[graph] targets`; `architecture.toml` with
+  `schema = 1` and the `[workspace]`, `[roles]`, `[grants]` (every crate's row of fnd §2.4,
+  production and tool and test crates alike) and `[dependencies.normal]` tables of fnd §3.1 and
+  plan §6.3 filled, empty `[external.*]` and `[exceptions]`; `.editorconfig`, `.gitattributes`
+  (`* text=auto eol=lf`); `Cargo.lock`. No third-party dependency.
 - **Reuse considered:** mise for every non-Rust tool (replaces `tools/versions.toml`, `doctor` and
-  `install-tools`); `#![no_std]` instead of a purity checker; `cargo-run-bin` rejected (Rust
-  tools only).
+  `install-tools`), bootstrapped by `scripts/bootstrap-tools.sh` (BOOT-02); `#![no_std]` plus a
+  no-std target build instead of a purity checker; `cargo-run-bin` rejected (Rust tools only).
 - **Accept:**
   - [ ] the fallback gate is green; `cargo build --locked --workspace` succeeds
-  - [ ] `cargo metadata --format-version 1 --no-deps` lists exactly the crates of plan §6.1 (minus `jfl-fuzz` and `jfl-resolve`)
+  - [ ] `cargo metadata --format-version 1 --no-deps` lists exactly the crates of plan §6.1 (minus `jfl-fuzz` and `jfl-resolve`), and nothing under `spikes/`
   - [ ] `grep -L 'publish = false' crates/*/Cargo.toml tools/*/Cargo.toml` prints nothing; every member has `[lints] workspace = true`
   - [ ] `target/debug/jfl --version` prints `jfl 0.1.0`; `rustc --version` inside the repository reports 1.97.0
-  - [ ] `mise install --locked` succeeds from an empty cache and `just doctor` exits 0
-  - [ ] a pure crate naming `std::fs` fails to compile (a `compile_fail` doctest)
+  - [ ] `bash scripts/bootstrap-tools.sh` succeeds in the sandbox, then `mise install --locked` succeeds from an empty mise data directory and `just doctor` exits 0
+  - [ ] each pure crate's `lib.rs` starts with `#![no_std]` (a grep in the commit body; FND-07 makes it a rule) and `cargo build --locked -p jfl-domain -p jfl-protocol --target x86_64-unknown-none` succeeds
 - **Impact:** dependency graph (initial).
 
-#### FND-02: `just` gate, nextest, cargo-deny, `no_std` purity, architecture test
+#### FND-02: `just` gate, nextest, cargo-deny, clippy authority lists, `nostd` stage
 - **Depends on:** FND-01. **Model:** deep. **Size:** M. **Parallel with:** DEC-01, BENCH-01.
-- **Cites:** plan §6.3, §6.5; fnd §2.2, §2.3, §2.4, §2.5, §3, §9; ver §2, §3; ADR 0010, ADR 0018, ADR 0030.
-- The gate and the dependency law from tools (fnd §3). `justfile`: `_preflight` (fnd §3.6), one
-  recipe per stage (`fmt-check`, `architecture`, `clippy`, `deny`, `unit-tests`,
-  `integration-tests`, `doctests`), `quick`, `check` and `check-only <stage>…`.
-  `.config/nextest.toml` (`default`, `ci` with JUnit and no fail-fast, `serial`; `retries = 0`;
-  slow-timeout 30 s × 4; a `daemon-or-jvm` test group bounded to 2); `jfl-testkit::poll`
-  (`wait_until(deadline, reason, condition)`). `cargo-deny` pinned by mise; `deny.toml` with
-  advisories, the licence allowlist of plan §16.2, crates.io only, and `bans` (wrappers for the
-  adapter-only crates of fnd §2.5, features, the build-script allowlist). The root `clippy.toml`
-  canonical list and the per-crate lists of fnd §2.4; `disallowed_*` denied in
-  `[workspace.lints.clippy]`. `jfl-architecture`: the graph checks, list sync and source scan of
-  fnd §3.2, as table-driven cases over synthetic metadata plus the negative fixture workspaces of
-  fnd §3.4.
-- **Reuse considered:** `cargo-deny` bans with `wrappers`, clippy `disallowed-*`, `#![no_std]`,
-  nextest profiles and `cargo_metadata` replace mayfly's checker (about 3.5k lines and 140
-  fixtures, plus a 12.6k-line semantic engine); `cargo-bylaw` and `cargo-pup` (0.1, too young)
-  and `dylint` (only for a rule clippy cannot express) were weighed; `cargo-make` is stale.
+- **Cites:** plan §6.3, §6.5; fnd §2.3, §2.4, §2.5, §3.3, §3.6, §9; ver §2, §3; ADR 0010, ADR 0018, ADR 0030.
+- The gate and the tool-enforced half of the dependency law (fnd §3). `justfile`: `_preflight`
+  (fnd §3.6), one recipe per stage (`fmt-check`, `clippy`, `nostd`, `deny`, `unit-tests`,
+  `integration-tests`, `doctests`; `architecture` arrives with FND-07), `quick`, `check` and
+  `check-only <stage>…`. `.config/nextest.toml` (`default`, `ci` with JUnit and no fail-fast,
+  `serial`; `retries = 0`; slow-timeout 30 s × 4; a `daemon-or-jvm` test group bounded to 2);
+  `jfl-testkit::poll` (`wait_until(deadline, reason, condition)`). `cargo-deny` pinned by mise;
+  `deny.toml` with advisories, the licence allowlist of plan §16.2, crates.io only, and `bans`
+  (wrappers for the adapter-only crates of fnd §2.5, features, the build-script allowlist). The
+  root `clippy.toml` canonical list grouped by grant and every crate's own list per fnd §2.4's
+  table; `disallowed_*` denied in `[workspace.lints.clippy]`. The negative cases of this card's
+  rules as small fixture crates under `tools/jfl-architecture/fixtures/` driven by one test file
+  there (FND-07 builds the rest of that crate around them).
+- **Reuse considered:** `cargo-deny` bans with `wrappers`, clippy `disallowed-*`, `#![no_std]`
+  with a no-std target build, and nextest profiles replace mayfly's checker; `cargo-bylaw` and
+  `cargo-pup` (0.1, too young) and `dylint` (only for a rule clippy cannot express) were weighed;
+  `cargo-make` is stale.
 - **Accept:**
   - [ ] `just quick` and `just check` exit 0 on the tree; `just check-only nope` exits non-zero naming the valid recipes
-  - [ ] each rule fnd §3.3 assigns to FND-02 fails its negative case with its id and path; a rule without a negative case fails the test
   - [ ] a path crate wrapped to the wrong parent fails `cargo deny check bans` (confirms `wrappers` on workspace crates)
-  - [ ] `std::thread::sleep` in a test outside `poll` fails clippy; `poll` times out with its reason in the message
+  - [ ] `std::process::Command` in a crate without the `process` grant, and `std::thread::sleep` in a test outside `poll`, each fail clippy; `poll` times out with its reason in the message
+  - [ ] a pure fixture crate with a path dependency on a std crate builds on the host and fails the `nostd` stage
   - [ ] `_preflight` refuses `RUSTC_WRAPPER` (a test that sets it on the child process, not an inline variable in a script)
   - [ ] `tasks.md`'s live gate line still holds: the fallback until this commit, `just check` from it
+- **Impact:** none (tooling); the tool-enforced dependency law and authority now in force.
+
+#### FND-07: Architecture test (`jfl-architecture`) and its negative fixtures
+- **Depends on:** FND-02. **Model:** deep. **Size:** M. **Parallel with:** EVAL-01, EVAL-11.
+- **Cites:** plan §6.3, §6.5; fnd §2.1, §2.2, §2.3, §2.4, §2.5, §3.1, §3.2, §3.3, §3.4; ADR 0010, ADR 0030.
+- `tools/jfl-architecture`: the graph checks, the clippy-list sync against `[grants]` and the
+  source scan of fnd §3.2, as table-driven cases over synthetic `cargo metadata` JSON plus the
+  negative fixture workspaces of fnd §3.4, `pure-uses-std` among them; the `architecture` stage
+  joins `quick` and `check`; a meta-test fails when a rule of fnd §3.3 has no negative case.
+- **Reuse considered:** `cargo_metadata` and `toml` with `deny_unknown_fields`; the ported
+  `syn` checker rejected (ADR 0030).
+- **Accept:**
+  - [ ] each rule fnd §3.3 assigns to FND-07 fails its negative case with its id and path; a rule without a negative case fails the meta-test
+  - [ ] `pure-uses-std` (a `#![no_std]` crate naming `std::fs`) is built by a test and fails to compile
+  - [ ] a crate's `clippy.toml` that drops a lint its grants do not cover fails `ARCH-clippy-lists`
+  - [ ] `just quick` runs the stage; the tree is green
 - **Impact:** none (tooling); the dependency law now enforced.
 
 #### FND-03: ADR tooling, `scripts/land.sh`, DCO check
-- **Depends on:** FND-02. **Model:** standard. **Size:** M. **Parallel with:** EVAL-01, BENCH-02, EVAL-11.
+- **Depends on:** FND-07. **Model:** standard. **Size:** M. **Parallel with:** EVAL-01, BENCH-02, EVAL-11.
 - **Cites:** fnd §7.4, §9, §10.2, §10.3; ADR 0001, ADR 0002, ADR 0030.
 - `adrs` pinned by mise and configured for the Nygard format with `doc/adr/template.md`;
   `just adr-index` checks the index rows against the files (`adrs generate toc` compared with the
@@ -279,8 +302,9 @@ puts the Proposed defaults and the skills question to the owner (DEC-07, DEC-08)
   says which) and joins `check` as the `docs` stage. `scripts/land.sh` (about 150 lines,
   shellcheck-clean): refuse a dirty checkout, fetch, create a temporary worktree at
   `origin/main`, cherry-pick each commit, resolve only `Cargo.lock` (`cargo update -w`) and the
-  ADR index, run `just check` and `just private-names` (once FND-04 lands it), push, retry once
-  after a fetch on a non-fast-forward, `--no-push` for a dry run. `scripts/dco-check.sh`: every
+  ADR index, run `just check` on the merged tree (once FND-04 lands `private-names`, with the
+  hash file required, fnd §7.4), push, retry once after a fetch on a non-fast-forward,
+  `--no-push` for a dry run. `scripts/dco-check.sh`: every
   commit in a range carries a `Signed-off-by` matching its author. Tests in `jfl-architecture`
   drive both scripts against scratch repositories in tempdirs.
 - **Reuse considered:** `adrs` (Nygard or MADR 4, index, lint) replaces about 1,090 lines;
@@ -295,26 +319,28 @@ puts the Proposed defaults and the skills question to the owner (DEC-07, DEC-08)
 - **Impact:** none (tooling).
 
 #### FND-04: Security and supply chain: gitleaks, zizmor, pinact, actionlint, private names
-- **Depends on:** FND-03. **Model:** standard. **Size:** S. **Parallel with:** EVAL-11, EVAL-05.
+- **Depends on:** FND-03. **Model:** standard. **Size:** S. **Parallel with:** EVAL-11.
 - **Cites:** fnd §7.3, §7.4, §8; ADR 0004, ADR 0005, ADR 0030.
 - gitleaks, actionlint, shellcheck, zizmor and pinact pinned by mise at their current releases.
   Recipes: `secrets` (gitleaks over the full history; `.gitleaks.toml` with `useDefault` and no
   allowlist), `workflows` (actionlint with shellcheck; zizmor offline audits with an
-  `unpinned-uses` hash-pin policy; `pinact run --check --verify-comment`), `private-names` (reads
-  its patterns from a file outside the repository, fails closed when the file is absent; how to
-  provide the file locally and as a CI secret is documented in `SECURITY.md` without any
-  pattern). `deny` completed with advisories (yanked denied). Fixtures: an unpinned action, a
-  tag-pinned action, a fake secret built at run time, a planted name matched by a test pattern
-  file.
+  `unpinned-uses` hash-pin policy; `pinact run --check --verify-comment`), `private-names`
+  (`scripts/private-names-check.sh`: the hashed check of fnd §7.4 over the diff since
+  `git merge-base HEAD origin/main`, the working tree and the commit messages in that range,
+  against `.private-names.sha256` and `scripts/private-name-add.sh`, both committed in BOOT-02;
+  `SECURITY.md` says how the owner adds a name, without naming any). `deny` completed with
+  advisories (yanked denied). Fixtures: an unpinned action, a tag-pinned action, a fake secret
+  built at run time, a test hash file with its own salt and a planted name.
 - **Reuse considered:** zizmor, pinact and actionlint replace mayfly's `action_pins.rs` (about
   860 lines); the gitleaks binary rather than `gitleaks-action` (a licence key for organisation
   accounts); trufflehog (AGPL), `cargo-audit` (redundant with cargo-deny) and `cargo-vet` (heavy
   for one maintainer; optional later) were weighed.
 - **Accept:**
-  - [ ] the stages are in `check` (except `private-names`, fnd §9) and green on the tree
+  - [ ] the stages, `private-names` included, are in `check` and green on the tree
   - [ ] each fixture fails its stage with the offending file named
-  - [ ] `just private-names` fails closed without the pattern file and finds the planted name with a test pattern file
+  - [ ] `just private-names` finds the planted name written as `Foo Bar`, `foo-bar` and `FooBar` in a changed line and in a commit message, naming the path and line but never printing the name; a missing hash file fails under `CI=true` and in `land.sh` and only warns otherwise
   - [ ] `just doctor` lists the five tools
+  - [ ] (owner) further private names added with `scripts/private-name-add.sh` and committed (only hashes)
 - **Impact:** none (tooling).
 
 #### FND-05: ⛳ CI workflows and required checks
@@ -337,7 +363,7 @@ puts the Proposed defaults and the skills question to the owner (DEC-07, DEC-08)
   - [ ] every workflow green on `main` for this commit; `Required` green
   - [ ] zizmor, pinact and actionlint clean; every `uses:` pinned by SHA
   - [ ] the lockstep test fails on a fixture `ci.yml` with a stage in two jobs, with `continue-on-error`, and with `|| true`
-  - [ ] (owner) GitHub secret scanning and push protection on; the private-names secret set
+  - [ ] (owner) GitHub secret scanning and push protection on
   - [ ] (owner) a branch ruleset on `main` requiring only `Required`, if the owner wants one
 - **Impact:** CI topology.
 
@@ -347,16 +373,19 @@ puts the Proposed defaults and the skills question to the owner (DEC-07, DEC-08)
 - cargo-llvm-cov, diff-cover and cargo-mutants pinned by mise. Recipes: `coverage`
   (`cargo llvm-cov nextest` with LCOV and JSON output; `scripts/coverage-floors.sh`, about 100
   lines of jq, compares each crate with `coverage-floor.toml`, floors set to the measured values
-  rounded down and only ever raised), `changed-lines` (diff-cover against the parent commit,
-  `--fail-under` 90), `mutants-diff` (`cargo mutants --in-diff`; a missed mutant in `jfl-domain`,
-  `jfl-protocol` or `jfl-application` fails, elsewhere it is reported); the `coverage` CI job in
-  `Required`.
+  rounded down and only ever raised), `changed-lines` (diff-cover against
+  `git merge-base HEAD origin/main` plus the working tree, `--fail-under` 90), `mutants-diff`
+  (`cargo mutants --in-diff` over the same diff with a 20-minute cap, outside `check` (fnd §9); a
+  missed mutant in `jfl-domain`, `jfl-protocol` or `jfl-application` fails, elsewhere it is
+  reported; a run cut by the cap reports what it did not reach and is not green); the `coverage`
+  CI job (all three) in `Required`; the orchestrate skill already runs `mutants-diff` before
+  landing a task sized `L` once the recipe exists.
 - **Reuse considered:** diff-cover replaces the changed-line half of mayfly's `coverage.rs` (about
   900 lines); Codecov's patch status is an external service; cargo-llvm-cov has one global floor
   per run, so per-crate floors are a thin script.
 - **Accept:**
   - [ ] the coverage job is green and in `Required`
-  - [ ] an untested changed line fails `changed-lines` on a fixture; a planted surviving mutant in the diff fails `mutants-diff`
+  - [ ] an untested changed line fails `changed-lines` on a fixture; a planted surviving mutant in the diff fails `mutants-diff`; the base is the merge-base for an uncommitted tree, a commit and a cherry-pick alike (a test over a scratch repository)
   - [ ] `coverage-floor.toml` holds the measured floors, each with the date it was measured
 - **Impact:** none (tooling).
 
@@ -394,7 +423,10 @@ puts the Proposed defaults and the skills question to the owner (DEC-07, DEC-08)
 
 Speed is the product's primary value (plan §1.1), so measurement starts with the workspace, on
 real public Gradle Java repositories pinned at fixed commits, beside the rest of FND and phase 0
-(ADR 0031). From M1 on, a tracked metric that regresses by more than 10 % fails the gate.
+(ADR 0031). From M1 on, a tracked metric that regresses by more than 10 % fails the
+`bench-gate` job of `bench.yml`, run on one fixed runner class (fnd §9). No Gradle build and no
+jdtls import of a corpus repository runs in the cloud sandbox: those runs are `bench.yml`
+dispatch jobs or `(owner)` items.
 
 #### BENCH-01: Benchmark corpus: pinned real repositories and the fetch script
 - **Depends on:** FND-01. **Model:** standard. **Size:** S. **Parallel with:** FND-02.
@@ -420,23 +452,27 @@ real public Gradle Java repositories pinned at fixed commits, beside the rest of
 #### BENCH-02: Bench harness: `jfl-bench`, hyperfine, divan, the `rg` floor
 - **Depends on:** BENCH-01, FND-02. **Model:** standard. **Size:** M. **Parallel with:** FND-03.
 - **Cites:** plan §1.7; ver §10; fnd §2.7, §8, §9; ADR 0031.
-- `tools/jfl-bench` (tool only, independent), seeded from the E1 spike's parse harness (Rust: an
-  `ignore` walk, a rayon pool with one tree-sitter parser per thread, read, blake3, parse and
-  declaration-extract stages timed separately, cold runs after dropping the page cache, warm runs as
-  the median of three), which the orchestrator kept from the spike of 2026-11-16: suites as TOML
-  (corpus size, operation, query positions picked by seed from the corpus), runners for hyperfine
-  (pinned by mise; the CLI end to end), RSS sampling (peak and steady), freshness lag (edit a file,
-  time until the next request sees it) and the marginal cost of 1, 3 and 10 linked worktrees; the
-  in-process convention for product crates (`crates/*/benches/` with divan, criterion where a
-  statistical comparison matters); JSON results with machine facts (CPU, RAM, OS, disk, toolchain,
-  commit) in the format github-action-benchmark reads (`customSmallerIsBetter`); `just bench [suite]
-  [corpus]`. The first arm is the floor: `rg` answering name queries over the corpus. The first
-  suites reproduce the spike's table in `doc/bench-corpus.md` within its noise.
+- `tools/jfl-bench` (tool only, independent; grants per fnd §2.4), seeded from the archived E1
+  spike in `spikes/e1-parse/` (its `parse-spike/` harness: an `ignore` walk, a rayon pool with one
+  tree-sitter parser per thread, read, blake3, parse and declaration-extract stages timed
+  separately, cold runs after dropping the page cache, warm runs as the median of three; its
+  `bench.sh`, `floors.sh` and `summarize.py` drivers), rewritten under the workspace's rules.
+  Only what has a subject now: suites as TOML (corpus size, operation, query positions picked by
+  seed from the corpus); a hyperfine runner (hyperfine and ripgrep pinned by mise) for commands
+  end to end; RSS sampling (peak and steady); the `rg-floor` suite (`rg` answering name queries
+  over the corpus) and the `e1` parse suite; JSON results with machine facts (CPU, RAM, OS, disk,
+  toolchain, tool versions, commit) in the format github-action-benchmark reads
+  (`customSmallerIsBetter`), each metric the median of N runs; `just bench [suite] [corpus]`,
+  which reports and never gates; the in-process convention for product crates
+  (`crates/*/benches/` with divan, criterion where a statistical comparison matters) written in
+  `doc/bench/README.md`. Freshness lag and the 1/3/10-worktree marginal cost need a product:
+  they arrive with IDX-15 for `jfl` and with E4 (EVAL-06) for jdtls.
 - **Reuse considered:** hyperfine, divan, criterion, github-action-benchmark's JSON; a bespoke
   timer was rejected.
 - **Accept:**
   - [ ] `just bench rg-floor small` writes JSON with machine facts and p50 and p95 per query
-  - [ ] two runs on the same machine agree within a noise band the report states
+  - [ ] `just bench e1 small` reproduces the spike's junit-framework row of `doc/bench-corpus.md` within the noise band the report states (same machine class), or the commit body says why not
+  - [ ] two runs on the same machine agree within that noise band
   - [ ] the JSON is accepted by the history tool's format (a test against its schema or examples)
   - [ ] `jfl-bench` imports no production crate
 - **Impact:** none (tooling).
@@ -446,43 +482,54 @@ real public Gradle Java repositories pinned at fixed commits, beside the rest of
 - **Cites:** plan §1.3, §1.7, §9.2; ver §10; ADR 0028, ADR 0031.
 - Arms in `jfl-bench`: jdtls behind our proxy (`jfl-jdtls`, EVAL-11) driven over LSP
   (definition, references, workspace symbol, hover, `initialize`), kmp-lsp at a pinned commit, and
-  the `rg` floor; every metric of plan §1.7 on the small and medium corpus (the large one where the
-  sandbox can hold it). `doc/bench/baseline.md`: the numbers with machine facts and, per §1.7
-  target, a recommendation to confirm or correct it.
+  the `rg` floor. In the sandbox the jdtls arm runs only on the synthetic multi-module fixture with
+  `java.import.gradle.enabled=false` and `java.import.maven.enabled=false` (a jdtls import runs the
+  project's build); kmp-lsp and `rg` run on the small and medium corpus where they need no build.
+  The jdtls arm on the corpus is a `bench.yml` dispatch job (BENCH-04 adds it) or an `(owner)`
+  run. `doc/bench/baseline.md`: the numbers with machine facts and, per §1.7 target, a
+  recommendation to confirm or correct it.
 - **Reuse considered:** kmp-lsp as shipped; jdtls's own sharing options (`sharedIndexLocation`,
   the syntax server).
 - **Accept:**
   - [ ] the baseline report committed; an arm that cannot run is recorded with the reason, never dropped
-  - [ ] (owner) the large corpus run on the reference machine, named in the report
+  - [ ] (owner) the jdtls arm on the medium corpus (or BENCH-04's dispatch job) and the large corpus run on the reference machine, named in the report
 - **Impact:** none.
 
-#### BENCH-04: Results history and the regression gate
+#### BENCH-04: Results history and the regression gate on one runner class
 - **Depends on:** BENCH-03, FND-05. **Model:** standard. **Size:** S. **Parallel with:** FORMAL-01.
 - **Cites:** plan §1.7; ver §10; fnd §7.1, §9; ADR 0031.
-- `bench.yml` (push to `main`, dispatch): the small-corpus suites (medium where a runner holds
-  it), results stored in the `gh-pages` branch by github-action-benchmark (current release
-  checked, pinned by SHA; `alert-threshold: 110%`, `fail-on-alert`; the job alone gets
-  `contents: write`, with the reason beside it). The `bench-gate` recipe compares a run with the
-  history; it reports here and becomes a `Required` job at IDX-15. A short guide to reading the
-  history in `doc/bench/README.md`.
+- `bench.yml` (push to `main`, dispatch) on **one fixed runner class** (named in the workflow and
+  the results; a change of class starts a new series): the small-corpus suites (medium where the
+  runner holds it), each metric the median of N runs written by `jfl-bench`, results stored per
+  runner class in the `gh-pages` branch by github-action-benchmark (current release checked,
+  pinned by SHA; `alert-threshold: 110%`; the job alone gets `contents: write`, with the reason
+  beside it). The `bench-gate` recipe compares a run with that class's history and, on an alert,
+  reruns the suite once and fails only if the regression reproduces; in-process suites gate on
+  instruction counts (`gungraun` or cachegrind, pinned) where available, with wall time
+  reported. `bench-gate` is never a stage of `check` and never runs in `land.sh` (fnd §9); it
+  reports here and becomes blocking at IDX-15. Dispatch jobs for corpus work the sandbox must not
+  do: the jdtls arm of BENCH-03 on the medium corpus (with its Gradle import), and a hook for
+  BENCH-05's `scip-java` indexes. A short guide to reading the history in `doc/bench/README.md`.
 - **Reuse considered:** github-action-benchmark (no account or token) over bencher.dev (the
   runner-up: statistical thresholds, but a SaaS and a token); own history storage rejected.
 - **Accept:**
   - [ ] a dispatch run stores its results in the history
-  - [ ] a planted 20 % slowdown in a test suite raises the alert and fails `bench-gate`
+  - [ ] a planted 20 % slowdown in a test suite raises the alert and fails `bench-gate` after the rerun; a one-off slow run that does not reproduce passes
+  - [ ] `just check` and `land.sh` do not run `bench-gate` (a test over the `justfile` dump)
   - [ ] zizmor and actionlint clean on `bench.yml`
   - [ ] (owner) the `gh-pages` branch allowed for GitHub Pages, if the owner wants the charts published
 - **Impact:** CI topology.
 
 #### BENCH-05: Real-corpus golden cases
-- **Depends on:** BENCH-01, EVAL-08. **Model:** deep. **Size:** M. **Parallel with:** FORMAL-03, FORMAL-04.
+- **Depends on:** BENCH-04, EVAL-08. **Model:** deep. **Size:** M. **Parallel with:** EVAL-10.
 - **Cites:** plan §5.6, §8; ver §4, §7.1; ADR 0004, ADR 0031.
 - `fixtures/corpus/<repository>/`: expectation files only (repository, commit, file, position,
   construct, expected symbol or `possible` reason), picked by construct with ast-grep (pinned by
   mise) from the **Apache-2.0 repositories only** (spring-framework, kafka, gradle; never
   elasticsearch, and not junit-framework's EPL-2.0 code), with expected answers from a `scip-java`
-  index of the repository at its commit. Indexes are built outside the gate (a `bench.yml` dispatch
-  job or the owner's machine) and kept as artefacts, never committed. `jfl-oracle corpus-check`
+  index of the repository at its commit. Indexes are built outside the gate and outside the
+  sandbox (a `bench.yml` dispatch job this task adds, which runs the Gradle build on the runner,
+  or the owner's machine) and kept as artefacts, never committed. `jfl-oracle corpus-check`
   loads the cases. Only positions and symbol strings are committed, never code.
 - **Reuse considered:** `scip-java` as the oracle, ast-grep for picking sites by construct, the
   `scip` crate; copying corpus code into fixtures (licences, size) was rejected.
@@ -494,8 +541,14 @@ real public Gradle Java repositories pinned at fixed commits, beside the rest of
 
 ### Lane FORMAL: formal models and conformance
 
+The toolchain and the conformance harness (FORMAL-01, FORMAL-02) come right after CI, beside
+phase 0; the three models (FORMAL-03 to FORMAL-05) describe a product that is built only after
+the go decision, so they follow DEC-02 and still precede the tasks that implement what they model
+(model first, ADR 0007): `views.qnt` before IDX-09, `daemon.qnt` before IDX-12, `diagnostics.qnt`
+before LSP-04.
+
 #### FORMAL-01: Formal toolchain: Quint, Apalache, JDK pins, `MODELS`, formal stages
-- **Depends on:** FND-06. **Model:** standard. **Size:** M. **Parallel with:** EVAL-12, BENCH-04.
+- **Depends on:** FND-05. **Model:** standard. **Size:** M. **Parallel with:** EVAL-12, BENCH-04.
 - **Cites:** ver §6.1, §6.3; fnd §8, §9; ADR 0007, ADR 0030.
 - Node with Quint 0.33.1 (`npm:@informalsystems/quint`), Apalache 0.62.1 (checksum in
   `mise.lock`) and a Temurin JDK 21 pinned by mise (current releases re-checked); the `MODELS`
@@ -515,7 +568,7 @@ real public Gradle Java repositories pinned at fixed commits, beside the rest of
 - **Impact:** none (tooling).
 
 #### FORMAL-02: Conformance harness: quint-connect drivers, committed-trace replay, negative controls
-- **Depends on:** FORMAL-01. **Model:** deep. **Size:** M. **Parallel with:** EVAL-08.
+- **Depends on:** FORMAL-01. **Model:** deep. **Size:** M. **Parallel with:** EVAL-07, EVAL-05.
 - **Cites:** ver §6.2; plan §7; ADR 0007, ADR 0030.
 - `jfl-conformance` (test only) on `quint-connect` 0.1 and `itf` 0.4: drivers implement
   `quint-connect`'s `Driver` (`step` dispatches actions with `switch!`; the state is compared
@@ -540,7 +593,7 @@ real public Gradle Java repositories pinned at fixed commits, beside the rest of
 - **Impact:** none (tooling).
 
 #### FORMAL-03: `views.qnt`: generations, freshness, completeness
-- **Depends on:** FORMAL-02. **Model:** deep. **Size:** M. **Parallel with:** EVAL-07, BENCH-05.
+- **Depends on:** FORMAL-02, DEC-02. **Model:** deep. **Size:** M. **Parallel with:** IDX-01, IDX-04.
 - **Cites:** plan §4, §7.1, §2.1; ver §6.1; ADR 0007, ADR 0014, ADR 0017.
 - The model of plan §7.1: worktrees with files and versions, `HEAD` changes touching many files,
   watcher hints that can be lost, duplicated or reordered, reconcile steps, atomic publish,
@@ -560,7 +613,7 @@ real public Gradle Java repositories pinned at fixed commits, beside the rest of
 - **Impact:** none (model).
 
 #### FORMAL-04: `daemon.qnt`: single owner, spawn, reconnect, no ghost buffers
-- **Depends on:** FORMAL-03. **Model:** deep. **Size:** M. **Parallel with:** EVAL-07, BENCH-05.
+- **Depends on:** FORMAL-03. **Model:** deep. **Size:** M. **Parallel with:** IDX-02.
 - **Cites:** plan §5.2, §7.2; ver §6.1; ADR 0007, ADR 0016.
 - The model of plan §7.2: proxies (connect, spawn racing, reconnect, open and close documents,
   drop), daemons (start, lock acquire or fail, crash, idle exit, SIGTERM). Invariants
@@ -576,7 +629,7 @@ real public Gradle Java repositories pinned at fixed commits, beside the rest of
 - **Impact:** none (model).
 
 #### FORMAL-05: ⛳ `diagnostics.qnt`: staleness
-- **Depends on:** FORMAL-04. **Model:** deep. **Size:** M. **Parallel with:** EVAL-09.
+- **Depends on:** FORMAL-04. **Model:** deep. **Size:** M. **Parallel with:** IDX-03.
 - **Cites:** plan §3.2, §7.3; ver §6.1; ADR 0007.
 - The model of plan §7.3: documents with versions, compile jobs started per version, results
   arriving in any order, worker crash and restart, close. Invariants `NeverOlderOverNewer`,
@@ -610,7 +663,7 @@ target repository is private, only aggregated reports under `doc/eval/` are comm
 - **Impact:** none (decision).
 
 #### EVAL-01: Evaluation harness: Harbor adapter, arms, transcript metrics
-- **Depends on:** FND-02. **Model:** standard. **Size:** M. **Parallel with:** FND-03.
+- **Depends on:** FND-02. **Model:** standard. **Size:** M. **Parallel with:** FND-07, FND-03.
 - **Cites:** plan §1.2, §9.2; ver §11; fnd §2.7; ADR 0029.
 - `tools/jfl-eval` (tool only, independent) around Harbor (ADR 0029): a task-set format (TOML: id,
   starting commit, prompt, test command, known-good diff reference, category) converted to Harbor
@@ -635,7 +688,7 @@ target repository is private, only aggregated reports under `doc/eval/` are comm
 - **Impact:** none (tooling).
 
 #### EVAL-11: jdtls behind our multiplexing proxy (`jfl-jdtls`)
-- **Depends on:** FND-02. **Model:** deep. **Size:** M. **Parallel with:** FND-03, FND-04.
+- **Depends on:** FND-02. **Model:** deep. **Size:** M. **Parallel with:** FND-07, FND-03, FND-04.
 - **Cites:** plan §1.3, §9.2; fnd §2.7; ADR 0020, ADR 0028.
 - `tools/jfl-jdtls` (tool only, independent): `jfl-jdtls lsp`, a stdio proxy, and a per-user
   daemon running one jdtls per worktree root (the innermost `.git`; a nested worktree binds to
@@ -646,7 +699,8 @@ target repository is private, only aggregated reports under `doc/eval/` are comm
   forwarded, a client's exit never stops a jdtls others use, idle eviction. jdtls pinned and
   checksum-verified. A `.lsp.json` plugin variant for E0 and E4 and `doc/eval/jfl-jdtls.md`.
   Tested against a scripted fake language server; one integration test with the real pinned
-  jdtls when the sandbox can fetch it.
+  jdtls on a synthetic single-module fixture with `java.import.gradle.enabled=false` when the
+  sandbox can fetch jdtls (never a Gradle import in the sandbox). Authority per fnd §2.4.
 - **Reuse considered:** jdtls's launch options; `lsp-server` for framing; Plumb's shared-daemon
   proxy and Serena's collision fix (ideas only); the stock `jdtls-lsp` plugin as is (unfair
   baseline, ADR 0028).
@@ -713,38 +767,40 @@ target repository is private, only aggregated reports under `doc/eval/` are comm
   - [ ] `doc/eval/e0-results.md` committed with only aggregates, each number traceable to the report
 - **Impact:** none.
 
-#### EVAL-05: E1 in the harness: parse and summarise the corpus on CI hardware and the target
-- **Depends on:** BENCH-02. **Model:** standard. **Size:** S. **Parallel with:** FND-04.
+#### EVAL-05: E1 in the harness: parse and summarise the corpus on the bench runner and the target
+- **Depends on:** BENCH-04. **Model:** standard. **Size:** S. **Parallel with:** FORMAL-02.
 - **Cites:** plan §1.7, §5.5, §9.2 (E1); ver §10; ADR 0022, ADR 0031.
 - E1 is answered in spirit by the spike recorded in `doc/bench-corpus.md` (measured 2026-11-16 on
   a 4 vCPU Xeon 2.3 GHz VM): a full parse and declaration walk takes 7.2 s warm and 8.7 s cold on
-  elasticsearch with 4 threads, about 50 MB/s, 153 MB peak RSS. This task re-runs it as the `e1`
-  suite of BENCH-02's harness on CI hardware (and the target, owner-run): cold and warm wall time,
+  elasticsearch with 4 threads, about 50 MB/s, 153 MB peak RSS. This task runs BENCH-02's `e1`
+  suite in `bench.yml` on its fixed runner class (and on the target, owner-run): cold and warm wall time,
   CPU time, files per second, per-file p50, p95 and max, peak RSS of the in-memory summaries, and
   each grammar's parse-error rate (orchard and upstream), with machine facts.
 - **Reuse considered:** the spike's harness and corpus instead of a synthetic generator; `ignore`
   for the walk.
 - **Accept:**
-  - [ ] `just bench e1` on the small, medium and large corpus in CI; results in `doc/eval/e1-results.md` with machine facts, compared with the spike's numbers
+  - [ ] `just bench e1` on the small, medium and large corpus in a `bench.yml` dispatch run (the sandbox runs small only); results in `doc/eval/e1-results.md` with machine facts, compared with the spike's numbers
   - [ ] cold runs drop the page cache or say they could not (never report warm as cold)
   - [ ] (owner) run on the target repository; aggregate numbers added to `doc/eval/e1-results.md`
 - **Impact:** none.
 
 #### EVAL-06: E4: jdtls at 1, 3 and 10 worktrees, stock and behind the proxy
-- **Depends on:** EVAL-11, BENCH-02. **Model:** standard. **Size:** M. **Parallel with:** FND-05.
+- **Depends on:** EVAL-11, BENCH-02. **Model:** standard. **Size:** M. **Parallel with:** FND-05, EVAL-08.
 - **Cites:** plan §1.3, §1.7, §9.2 (E4); ADR 0028, ADR 0031.
 - A `jfl-bench` suite `e4`: jdtls stock (one per client, `-data` as its launcher picks it) and
   behind our proxy (`jfl-jdtls`), driven with `initialize` and a fixed query script over LSP, with
   RSS over time, time to first useful answer and project import count for 1, 3 and 10 linked
-  worktrees and 1 and 3 clients per worktree; runbook in `doc/eval/e4-runbook.md`. Run on the
-  small bench corpus in the sandbox if it can fetch the pinned jdtls, otherwise the runbook only.
+  worktrees and 1 and 3 clients per worktree; runbook in `doc/eval/e4-runbook.md`. In the sandbox
+  it runs on the synthetic multi-module fixture with `java.import.gradle.enabled=false` (no build
+  of any repository here); the corpus and target runs, which import with Gradle, are `(owner)`.
 - **Accept:**
-  - [ ] `just bench e4` produces a report on the small corpus, or the card's runbook-only fallback is recorded with the reason
+  - [ ] `just bench e4` produces a report on the synthetic fixture, or the runbook-only fallback is recorded with the reason
+  - [ ] (owner) run on the medium corpus with its Gradle import; aggregates in `doc/eval/e4-results.md`
   - [ ] (owner) run on the target repository at 1, 3 and 10 worktrees; aggregates in `doc/eval/e4-results.md`
 - **Impact:** none.
 
 #### EVAL-07: Golden resolution corpus and `java-fixtures` stage
-- **Depends on:** FORMAL-02. **Model:** deep. **Size:** L. **Parallel with:** FORMAL-03, FORMAL-04.
+- **Depends on:** FORMAL-01 (the pinned JDK). **Model:** deep. **Size:** L. **Parallel with:** FORMAL-02.
 - **Cites:** plan §5.6, §8; ver §4, §7.1; fnd §9.
 - `fixtures/java/resolution/`: 200+ small cases by construct (plan §5.6 list plus overloads,
   inheritance, generics, inner, anonymous and local classes, static imports, enums, records,
@@ -762,16 +818,16 @@ target repository is private, only aggregated reports under `doc/eval/` are comm
 - **Impact:** none (fixtures).
 
 #### EVAL-08: SCIP oracle (`jfl-oracle`)
-- **Depends on:** FND-05. **Model:** deep. **Size:** M. **Parallel with:** FORMAL-02.
+- **Depends on:** EVAL-07. **Model:** deep. **Size:** M. **Parallel with:** EVAL-06.
 - **Cites:** ver §7.1; plan §5.6; fnd §2.7.
 - `tools/jfl-oracle` (tool only, independent): read a SCIP index with the `scip` crate (0.10), map
   occurrences to (file, range, symbol, role), classify each call site by construct (from its syntax,
   with its own tree-sitter use, not `jfl`'s), and compare a candidate's answers (the `jfl --json`
   envelope shape, or a bake-off adapter's output) with SCIP: precision of `exact`, coverage per
   construct, recall of `exact ∪ possible` when `complete=true`; report with aggregates only. A small
-  SCIP fixture generated from a resolution-corpus project by a pinned `scip-java` (its javac plugin
-  works for Gradle builds; its default Gradle command cleans the build, so it runs on a throwaway
-  copy), else a hand-written index with a test that it decodes.
+  SCIP fixture generated from a single-module resolution-corpus project (EVAL-07) by a pinned
+  `scip-java` driving `javac` directly (no Gradle build in the sandbox), else a hand-written
+  index with a test that it decodes.
 - **Reuse considered:** `scip-java` (Apache-2.0) as the independent indexer and the `scip` crate
   (its `protobuf` =3.7.2 pin watched by cargo-deny); Kythe and Glean were rejected as heavy.
 - **Accept:**
@@ -781,10 +837,12 @@ target repository is private, only aggregated reports under `doc/eval/` are comm
 - **Impact:** none (tooling).
 
 #### EVAL-09: E2 resolver bake-off
-- **Depends on:** EVAL-07, EVAL-08, EVAL-10, BENCH-05. **Model:** deep. **Size:** L. **Parallel with:** FORMAL-05.
+- **Depends on:** EVAL-07, EVAL-08, EVAL-10, BENCH-05. **Model:** deep. **Size:** L. **Parallel with:** DEC-03.
 - **Cites:** plan §5.6, §9.2 (E2), §9.3; ver §7.1; ADR 0027.
 - Run each candidate resolver of plan §5.6 on the resolution corpus through thin wrappers in
-  `jfl-eval` (a minimal tree-sitter resolver prototype of our own written as a spike; `ktcore`; the
+  `jfl-eval` (a minimal tree-sitter resolver prototype of our own written as a spike; `ktcore`, which
+  is not a crates.io crate, so the card's agent first records its repository URL, pinned commit
+  and licence file, and records it as not runnable if it cannot; the
   `kmp-lsp` resolver at a pinned commit; the **javac-attributed** arm, scip-java's plugin in
   EVAL-10's warm worker, timed per file), on the resolution corpus and the real-corpus cases
   (BENCH-05), feed results to `jfl-oracle`, and write `doc/eval/e2-results.md`: precision, coverage
@@ -799,7 +857,7 @@ target repository is private, only aggregated reports under `doc/eval/` are comm
 - **Impact:** none.
 
 #### EVAL-10: E3 `javac` worker spike from the forked compiler core
-- **Depends on:** EVAL-01. **Model:** standard. **Size:** M. **Parallel with:** FND-06.
+- **Depends on:** EVAL-01. **Model:** standard. **Size:** M. **Parallel with:** FND-06, BENCH-05.
 - **Cites:** plan §3, §9.2 (E3); ver §10; ADR 0027.
 - Fork the compiler core of georgewfraser/java-language-server (MIT; pinned base commit,
   licence and notices kept) into `java/javac-worker/` as the spike: one warm JVM compiling single
@@ -807,17 +865,19 @@ target repository is private, only aggregated reports under `doc/eval/` are comm
   given `-sourcepath` and classpath, with scip-java's plugin optionally loaded; an ECJ batch arm
   (`-proceedOnError`). `jfl-eval e3` drives both over a list of files and reports p50, p95, RSS,
   false errors, the plugin's attribution cost and, given several worktrees' classpaths, the number
-  of distinct `EnvironmentKey`s (plan §5.4). Measured on the multi-module fixture project and a
-  module of the small bench corpus.
+  of distinct `EnvironmentKey`s (plan §5.4). Measured on the multi-module fixture project with a
+  classpath the fixture declares (no Gradle run in the sandbox); a module of the small bench
+  corpus, whose classpath needs a Gradle resolve, is an `(owner)` or `bench.yml` dispatch run.
 - **Reuse considered:** the forked compiler core (ADR 0027) instead of a blank spike; ECJ as a
   comparison arm; jdtls's javac backend (incubating) and NetBeans' nb-javac for ideas only.
 - **Accept:**
-  - [ ] fixture and small-corpus results committed in `doc/eval/e3-results.md` with machine facts, for javac and ECJ
+  - [ ] fixture results committed in `doc/eval/e3-results.md` with machine facts, for javac and ECJ
+  - [ ] (owner) one module of the small corpus measured the same way; aggregates added
   - [ ] (owner) run on two modules of the target repository and over 10 worktrees' classpaths; aggregates added
 - **Impact:** none.
 
 #### DEC-03: Storage tier (from E1)
-- **Depends on:** EVAL-05. **Model:** deep. **Size:** S. **Parallel with:** DEC-04, DEC-05, DEC-06.
+- **Depends on:** EVAL-05. **Model:** deep. **Size:** S. **Parallel with:** DEC-04, DEC-05, DEC-06, EVAL-09.
 - **Cites:** plan §5.5; ADR 0009.
 - From `doc/eval/e1-results.md`, a draft ADR (Proposed) picking the tier of plan §5.5 with the
   numbers that decide it. The E1 spike already points the way (plan §5.5): rebuild in memory at
@@ -862,7 +922,10 @@ target repository is private, only aggregated reports under `doc/eval/` are comm
 - **Impact:** none (decision).
 
 #### DEC-02: ⛳ Go/no-go memo, the kill criterion and the speed targets
-- **Depends on:** DEC-03, DEC-04, DEC-05, DEC-06, DEC-07, EVAL-06, FORMAL-05, BENCH-04, BENCH-05. **Model:** deep. **Size:** M. **Parallel with:** none.
+- **Depends on:** DEC-03, DEC-04, DEC-05, DEC-06, DEC-07, EVAL-06, BENCH-03. **Model:** deep. **Size:** M. **Parallel with:** none.
+- The kill criterion comes first: this memo waits only on the measurements that decide it (E0 to
+  E4, the speed baseline), not on the formal models (FORMAL-03 to FORMAL-05 follow it) or the
+  coverage tooling.
 - **Cites:** plan §1.3, §1.7, §9.3; ADR 0009, ADR 0028, ADR 0031.
 - `doc/eval/go-no-go.md`: each criterion of plan §9.3 with its numbers and source report, the
   kill criterion of plan §1.3 against E0 and E4 (jdtls behind our proxy as the baseline), the §1.7
@@ -880,7 +943,7 @@ target repository is private, only aggregated reports under `doc/eval/` are comm
 M1 (plan §10.1): syntax index, envelope, daemon, CLI and plugin. Starts after the go decision.
 
 #### IDX-01: Domain: paths, positions and encodings
-- **Depends on:** DEC-02. **Model:** standard. **Size:** M. **Parallel with:** IDX-04.
+- **Depends on:** DEC-02. **Model:** standard. **Size:** M. **Parallel with:** IDX-04, FORMAL-03.
 - **Cites:** plan §2.3, §6.1; fnd §2.3, §4.3; ver §2, §3.
 - In `jfl-domain`: validated value types for worktree-relative paths and `file://` URIs (percent
   encoding, no `..` escape), a `LineIndex` over UTF-8 bytes (LF and CRLF, a final line without a
@@ -898,7 +961,7 @@ M1 (plan §10.1): syntax index, envelope, daemon, CLI and plugin. Starts after t
 - **Impact:** public API (domain types).
 
 #### IDX-02: Domain: summaries, symbols, cache keys, the envelope
-- **Depends on:** IDX-01. **Model:** deep. **Size:** M. **Parallel with:** IDX-04.
+- **Depends on:** IDX-01. **Model:** deep. **Size:** M. **Parallel with:** IDX-04, FORMAL-04.
 - **Cites:** plan §2.1, §2.2, §5.4; ADR 0014.
 - In `jfl-domain`: `FileSummary` (package, imports, declarations with kind, name, signature,
   modifiers, Javadoc range, supertypes by name; reference sites by simple name, arity and syntactic
@@ -918,7 +981,7 @@ M1 (plan §10.1): syntax index, envelope, daemon, CLI and plugin. Starts after t
 - **Impact:** public API (domain types).
 
 #### IDX-03: Protocol v1: messages, versions, frame decoder, goldens
-- **Depends on:** IDX-02. **Model:** deep. **Size:** M. **Parallel with:** IDX-05, IDX-06.
+- **Depends on:** IDX-02. **Model:** deep. **Size:** M. **Parallel with:** IDX-05, IDX-06, FORMAL-05.
 - **Cites:** plan §2.4, §5.3, §6.6; ver §4; fnd §6; ADR 0021.
 - `jfl-protocol`: the handshake (protocol major and minor, client kind), request and response
   messages for every operation of plan §2.4 and document sync (open, change, close with versions),
@@ -937,7 +1000,7 @@ M1 (plan §10.1): syntax index, envelope, daemon, CLI and plugin. Starts after t
 - **Impact:** protocol (v1).
 
 #### IDX-04: `jfl-process`: argv-only child runner
-- **Depends on:** DEC-02. **Model:** deep. **Size:** M. **Parallel with:** IDX-01, IDX-02.
+- **Depends on:** DEC-02. **Model:** deep. **Size:** M. **Parallel with:** IDX-01, IDX-02, FORMAL-03.
 - **Cites:** plan §6.2, §6.5, §11; fnd §2.4, §4.4; ver §5.
 - `jfl-process` (support): run a child from a program path and argv (no shell, no string splitting),
   a cleared environment plus an explicit allowlist, a working directory, a deadline, its own process
@@ -1087,9 +1150,11 @@ M1 (plan §10.1): syntax index, envelope, daemon, CLI and plugin. Starts after t
 #### IDX-12: Daemon and IPC: lock, socket, spawn, reconnect (daemon driver)
 - **Depends on:** IDX-03, IDX-09, FORMAL-04. **Model:** deep. **Size:** L. **Parallel with:** IDX-11.
 - **Cites:** plan §5.1, §5.2, §5.3, §7.2, §11; fnd §4.4; ADR 0016, ADR 0021.
-- `jfl-adapter-ipc`: the state directory (`0700`), the single-owner lock (std `File::try_lock`,
-  `0600`, held for life; no pid file trusted), Unix socket (`0600`, created with its mode;
-  path-length limit refused with the limit named), peer-uid check (Tokio `peer_cred()` on the daemon
+- `jfl-adapter-ipc`: the state directory (created with `DirBuilderExt::mode(0o700)`; an existing
+  one must be owned by the daemon's uid with mode `0700`, or the daemon refuses and names it;
+  plan §5.3), the single-owner lock (std `File::try_lock`, held for life; no pid file trusted),
+  Unix socket bound inside the directory (path-length limit refused with the limit named), both
+  then set to `0600`, peer-uid check (Tokio `peer_cred()` on the daemon
   side; the CLI client on std `UnixStream`), JSON-RPC with LSP framing through `jfl-protocol`'s
   decoder and `lsp_server::Message`, server and client, the `endpoint` contract suite.
   `jfl-composition`: the daemon host (accept loop, per-connection state, supervision, idle exit,
@@ -1103,7 +1168,7 @@ M1 (plan §10.1): syntax index, envelope, daemon, CLI and plugin. Starts after t
   designs (ADR 0021).
 - **Accept:**
   - [ ] `conformance-replay` green for `daemon`; the negative control fails at its step
-  - [ ] integration tests: a second daemon on the same state dir exits with a clear error; modes are `0700`/`0600` (also under a non-root uid via `setpriv`, since the sandbox runs as root); a peer with another uid is refused; two clients racing start one daemon
+  - [ ] integration tests: a second daemon on the same state dir exits with a clear error; modes are `0700`/`0600` (also under a non-root uid via `setpriv`, since the sandbox runs as root); an existing state dir with mode `0755` or another owner is refused; a peer with another uid is refused; two clients racing start one daemon
   - [ ] after a daemon crash a client reconnects and the new daemon holds no overlay of a dead connection
   - [ ] runs on the bench corpus (small at least, `just bench`) and reports the metrics it affects; its correctness tests also run against the real-corpus cases that apply (BENCH-05)
 - **Impact:** protocol (endpoint); new authority (sockets).
@@ -1149,12 +1214,16 @@ M1 (plan §10.1): syntax index, envelope, daemon, CLI and plugin. Starts after t
   caller in each module of each multi-module fixture; 10 concurrent worktrees (linked, under
   `.claude/worktrees/`) queried in parallel with no cross-view result and no duplicate workspace
   symbol; freshness under shell edits (`git checkout`, `git stash`, `sed -i`, `rm`) answered
-  correctly without `sync`; the M1 rows of plan §1.7 measured on the corpus. The `bench-gate` job
-  moves from `bench.yml` into `ci.yml` and `Required`: from here a tracked metric that regresses by
-  more than 10 % fails. `doc/eval/m1.md` lists the gate items and their tests.
+  correctly without `sync`; the M1 rows of plan §1.7 measured on the corpus, with the
+  `jfl-bench` runners that need a product: freshness lag (edit a file, time until the next
+  request sees it) and the marginal cost of 1, 3 and 10 linked worktrees. `bench.yml`'s
+  `bench-gate` becomes blocking: from here a tracked metric that regresses by more than 10 % on
+  its fixed runner class fails the run on `main`, and a red `bench-gate` is fixed like red CI. It
+  stays out of `ci.yml`, `check` and `land.sh` (fnd §9). `doc/eval/m1.md` lists the gate items and
+  their tests.
 - **Accept:**
   - [ ] every gate item has a passing test named in `doc/eval/m1.md`
-  - [ ] `bench-gate` is in `Required` and fails a planted 20 % regression; the M1 rows of plan §1.7 measured, with the reference-machine run (owner) where the sandbox differs
+  - [ ] `bench-gate` blocks on `main` and fails a planted 20 % regression that reproduces; the M1 rows of plan §1.7 measured, with the reference-machine run (owner) where the sandbox differs
   - [ ] (owner) the E0 task subset rerun with the CLI plugin; aggregates in `doc/eval/m1.md`
   - [ ] (owner) the cloud-session check of IDX-14 done
   - [ ] runs on the bench corpus (small at least, `just bench`) and reports the metrics it affects; its correctness tests also run against the real-corpus cases that apply (BENCH-05)
@@ -1239,6 +1308,7 @@ M1 (plan §10.1): syntax index, envelope, daemon, CLI and plugin. Starts after t
   written down in `doc/plugins.md` (which wins for `.java`, or that they cannot coexist).
 - **Accept:**
   - [ ] the key-list test passes and fails on a fixture with an unknown key
+  - [ ] `doc/plugins.md` and the plugin README state the minimum Claude Code version the keys need (`requestTimeout` needs v2.1.288 or later, re-checked against the current plugins reference)
   - [ ] (owner) `claude plugin validate --strict` passes for both variants
   - [ ] `doc/plugins.md` states the coexistence result and how it was checked
   - [ ] runs on the bench corpus (small at least, `just bench`) and reports the metrics it affects; its correctness tests also run against the real-corpus cases that apply (BENCH-05)

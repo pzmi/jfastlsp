@@ -4,7 +4,7 @@ Date: 2026-11-16
 
 ## Status
 
-Proposed; amended 2026-11-16.
+Proposed; amended 2026-11-16 (twice).
 
 ## Context
 
@@ -37,3 +37,22 @@ Changing the deny list is an ADR amendment.
 With ADR 0030 the allow list names `just`, `mise`, `adrs` and `scripts/land.sh` instead of
 `cargo xtask`; SessionStart runs `mise install --locked` once `mise.toml` exists, and Stop runs
 `just quick` once the justfile has it. The deny list is unchanged.
+
+## Amended 2026-11-16 (planner, BOOT-02): the deny list, the bootstrap and the Stop hook
+
+- **Deny list.** `rm -rf /*` also matched every `rm -rf` of an absolute path, including the lane
+  target directories and worktrees the process requires deleting; it is narrowed to `rm -rf /`
+  and `rm -rf / *`, and `rm -rf` is allowed under the session scratchpad. Deleting a remote ref by
+  refspec (`git push origin :main`) and the `git -C <dir> push` forms of deletion and `+refspec`
+  were not denied, although this record said "in every form"; they are now. The commands the
+  process mandates (`cargo add`, `git cat-file`, `setpriv`, `shellcheck`, `bash scripts/*.sh`,
+  Quint, `rustup target add`, `mkdir -p .work/*`) are allowed, since a background agent cannot
+  answer a permission prompt.
+- **Bootstrap.** SessionStart now installs mise and just themselves (pinned, checksum-verified,
+  `scripts/bootstrap-tools.sh`) before `mise install --locked`; it reports and never blocks the
+  session.
+- **Stop hook.** It fails when the justfile has `quick` and `just` is missing, instead of quietly
+  running the cargo-only fallback; it builds with `CARGO_BUILD_JOBS=2`. It guards the checkout the
+  session started in, which for the orchestrator is the main checkout; lane worktrees are guarded
+  by the work skill's ship station (the gate on the exact tree, its exit code recorded) and by the
+  gate on the merged tree when landing.

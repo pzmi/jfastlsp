@@ -24,6 +24,7 @@ a pinned real-repository corpus (plan §1.7, ADR 0031). Reuse before building (A
 | `doc/required-checks.md` | The CI jobs and the `Required` aggregate (planned until FND-05) |
 | `doc/tasks.md` | Decisions (ADR numbers), rules for every task, the live gate, lanes and task cards, ⛳ checkpoints |
 | `doc/adr/` | Decisions, Nygard style; the ADR number is the decision id; index in `doc/adr/README.md` |
+| `spikes/e1-parse/` | The archived E1 parse spike: evidence for plan §1.7 and §5.5, the seed of BENCH-02; outside the workspace |
 
 Citations read "plan §4.3", "fnd §3", "ver §6"; read the sections a task cites, not whole
 documents. Decisions in `doc/tasks.md` and Accepted ADRs override earlier plan text. Only ADRs
@@ -51,11 +52,12 @@ cargo fmt --all --check && cargo clippy --workspace --all-targets --locked -- -D
 From FND-02 on (each command exists once the task named in fnd §9 has landed; ADR 0030):
 
 ```bash
+bash scripts/bootstrap-tools.sh      # pinned mise and just, checksum-verified, then `mise install --locked`
 mise install --locked                # every pinned tool from mise.lock (FND-01); `just doctor` checks them
 just quick                           # fmt check, architecture, clippy, fast tests: while working
 just check                           # the full blocking gate: before every commit
 just check-only <stage>...           # named stages through the same recipes (what each CI job runs)
-just bench [suite] [corpus=small]    # benchmarks on the pinned corpus (BENCH-02); `just bench-corpus` fetches it
+just bench [suite] [corpus=small]    # benchmarks (BENCH-02); reports, never gates; `just bench-corpus` fetches the corpus
 adrs new "<title>"                   # a new ADR (FND-03); `just adr-index` checks the index
 scripts/land.sh <sha>                # orchestrator only (ADR 0002; FND-03)
 ```
@@ -76,10 +78,14 @@ cherry-pick onto a clean `main`, the gate on the merged tree, push only on green
   `clippy.toml` entries in the same commit. Fix an architecture failure in the structure, never by
   loosening the policy.
 - **Authority** (plan §6.5, fnd §2.3–§2.4): pure crates (`jfl-domain`, `jfl-protocol`) are
-  `#![no_std]` + `alloc`. Children only through `jfl-process` (argv only, never `sh -c`; cleared
-  environment plus an allowlist; deadline; own process group; bounded output), the daemon
-  launcher and the JVM helpers included. Sockets only in `jfl-adapter-ipc`,
-  Unix domain, `0600` in a `0700` state dir, peer uid checked; never TCP.
+  `#![no_std]` + `alloc` and build for `x86_64-unknown-none` (the `nostd` stage). Production
+  crates: children only through `jfl-process` (argv only, never `sh -c`; cleared environment plus
+  an allowlist; deadline; own process group; bounded output), the daemon launcher and the JVM
+  helpers included; sockets only in `jfl-adapter-ipc`, Unix domain, in a `0700` state dir that is
+  the access control (socket and lock `0600`), peer uid checked; clock and environment only in
+  composition and `jfl-process` (the CLI reads the environment for defaults); no sleeps. Tool and
+  test crates hold exactly the grants of their `architecture.toml` row (process, socket, fs,
+  spawn, sleep, clock, env; fnd §2.4). Never TCP.
 - **The envelope** (plan §2.1): `exact` only with evidence; `possible` a sound superset with
   reasons; `complete=true` only when every module that can see the target is indexed and fresh at
   the pinned generation; never an empty answer without a completeness statement.
@@ -111,7 +117,8 @@ cherry-pick onto a clean `main`, the gate on the merged tree, push only on green
   0019, plan §16). `cargo add`, reason in the commit; `Cargo.lock` committed, builds `--locked`;
   licences per `deny.toml`; tools pinned in `mise.toml`; GitHub Actions pinned by commit SHA.
 - **Speed** (ADR 0031): a product task runs on the bench corpus (small at least) and reports the
-  metrics it changes; from M1 a >10 % regression fails. Never loosen a budget.
+  metrics it changes; from M1 a >10 % regression fails `bench.yml`'s `bench-gate` on its fixed
+  runner class (local runs report, never gate). Never loosen a budget.
 - **Decisions** (`doc/adr/README.md`): a change that adds or reverses an architectural decision
   adds or supersedes an ADR in the same commit, with the rules and tests that pin it. Only the
   owner flips Proposed to Accepted or decides a `DEC-` task.
@@ -143,14 +150,22 @@ cherry-pick onto a clean `main`, the gate on the merged tree, push only on green
   synthetic fixtures. The bench corpus is read from its cache, never committed; building it runs
   only in `bench.yml` or owner-side. `gh` may be absent: use the GitHub MCP tools.
 - Hooks (each a no-op until its prerequisite exists): SessionStart installs the pinned toolchain
-  and `mise install --locked`; every edited `*.rs` is rustfmt'ed; Stop runs `just quick` (or the
-  fallback) when code, manifests, the policy, tool pins, a model or a fixture changed.
+  and runs `scripts/bootstrap-tools.sh` (mise and just, then `mise install --locked`), reporting
+  and never blocking; every edited `*.rs` is rustfmt'ed, so re-read a Rust file before the next
+  Edit of it rather than fight a stale-file refusal; Stop runs `just quick` (or the fallback before
+  FND-02) with `CARGO_BUILD_JOBS=2` when code, manifests, the policy, tool pins, a model or a
+  fixture changed, and fails when the justfile has `quick` but `just` is missing. Stop guards only
+  the checkout the session started in: in a lane worktree the ship station's gate is the guard.
+- Network (verified 2026-11-16): GitHub release downloads, crates.io files, npm and PyPI pass the
+  proxy; `api.github.com` and GitHub pages do not, so tools install from `mise.lock` with
+  `--locked` (fnd §8).
 - Temporary files go in the session scratchpad, never `/tmp` or the repo. Kill only PIDs you
   started, never by pattern. Never end a turn with the gate, a daemon or a JVM still running.
 
-## Rules learned the hard way
+## Standing rules
 
-They bind every session; an incident in this repository adds a dated line here.
+They bind every session. They are the orchestrator's operating rules from the start of the
+project, not incidents of this repository; an incident here adds a dated line.
 
 1. **Review every task commit before landing it**, not only at ⛳; for the socket, the lock,
    `jfl-process`, the Gradle model and parsers, the review finishes before `land` starts.
@@ -180,4 +195,6 @@ anywhere (code, docs, ADRs, fixtures, evaluation reports, commit messages), and 
 design came from an unnamed elsewhere (ADR 0004). The public repositories site-preview and mayfly
 may be cited where a design is borrowed. Nothing from a private target Java repository enters this
 repository: harnesses and runbooks here, runs on the owner's machine, aggregates only. Fixtures are
-synthetic.
+synthetic. Names that must never appear are kept only as salted hashes in `.private-names.sha256`
+(fnd §7.4); the owner adds one with `scripts/private-name-add.sh`, and nobody writes the names
+themselves anywhere, this file and commit messages included.

@@ -40,8 +40,13 @@ from FND-03, `land`'s refusals of a dirty or stale `main`.
 
 ## Amended 2026-11-16 (planner, amendment proposed): `land` is a script
 
-The decision is unchanged: one signed-off commit per task, gated on the merged tree, pushed only
-on green. Only the tool changes (ADR 0030): from FND-03 on, the orchestrator lands with
+Only the tool names change; the decision stands, and `scripts/land.sh` may be used from FND-03
+on whether or not this amendment has been accepted. The decision is unchanged: one signed-off
+commit per task, gated on the merged tree, pushed only on green. Only the tool changes (ADR 0030): from FND-03 on, the orchestrator lands with
 `scripts/land.sh <sha>` (about 150 lines of shell: fetch, a worktree at `origin/main`,
 cherry-pick, `just check`, push, one retry on a non-fast-forward), not `cargo xtask land`. CI
 adds a DCO check on every pushed commit.
+
+Before `ci.yml` exists (FND-05), "one commit lands per green CI run" cannot hold: there is no CI
+run. Until then the local gate on the merged tree is the only gate and the next commit may land as
+soon as the previous one is pushed (BOOT-02).

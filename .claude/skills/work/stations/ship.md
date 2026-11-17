@@ -8,7 +8,7 @@ intake.{taskId, title, branch, checkpoint, gate, pushOwner, ownerCriteria}, impl
 
 ## Steps
 
-1. **Final gate.** The gate green once more on the exact tree being committed (`just check` once FND-02 has landed, the fallback before). `git status --short`: every changed file is yours or listed; someone else's uncommitted edits stay unstaged.
+1. **Final gate.** The gate green once more on the exact tree being committed (`just check` once FND-02 has landed, the fallback before), run in the foreground in the worktree you commit from, with its exit code recorded in `ship.json` (`gateExit`). In a lane worktree this station is the gate: the Stop hook guards only the checkout the session started in. `git status --short`: every changed file is yours or listed; someone else's uncommitted edits stay unstaged.
 2. **Docs.** A decision that adds to or reverses `doc/plan.md`, `doc/foundation.md`, `doc/verification.md` or an Accepted ADR has its ADR in this commit (`adrs new` or the reserved number, index updated and `just adr-index` clean; a reversed ADR marked `Superseded by NNNN`). Affected docs updated in the same commit. `CLAUDE.md` and `.claude/` are not edited: a needed change goes in the report.
 3. **Commit.** Only on the green gate of step 1. `git add <the files>` (never `-A`, never `.`). `git commit --author "Patryk Żmigrodzki <pzmi@users.noreply.github.com>"` (the committer stays the environment's identity; ADR 0003) with:
    - subject `<ID>: <summary>` (imperative, under 72 chars)
@@ -23,12 +23,12 @@ intake.{taskId, title, branch, checkpoint, gate, pushOwner, ownerCriteria}, impl
 ## Output
 
 ```
-{ commitSha, pushed: bool, ownerPending[], issues[] }
+{ commitSha, gateCommand, gateExit: 0, pushed: bool, ownerPending[], issues[] }
 ```
 
 ## Sensors
 
-Commit exists; its author is the owner's identity; its trailer block is last and ordered `Signed-off-by`, `Co-Authored-By`, `Claude-Session` (`git log -1 --format=%B | tail -4`); its subject starts with `<ID>: ` and the body has an `Impact:` line; the gate was green on it; if pushed, the remote head equals the sha.
+Commit exists; `gateExit` is 0 for the exact tree committed; its author is the owner's identity; its trailer block is last and ordered `Signed-off-by`, `Co-Authored-By`, `Claude-Session` (`git log -1 --format=%B | tail -4`); its subject starts with `<ID>: ` and the body has an `Impact:` line; the gate was green on it; if pushed, the remote head equals the sha.
 
 ## Gates
 

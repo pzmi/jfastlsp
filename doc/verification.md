@@ -50,7 +50,7 @@ that enforce structure, and [`tasks.md`](tasks.md) owns order. A citation "ver �
 | **Formal verify** | `just formal-verify` (§6.3) | Apalache (pinned) | weekly, by hand | an invariant must hold for every behaviour to a bound |
 | **Differential and oracles** | `tools/jfl-oracle` (§7) | the built `jfl`, SCIP indexes, the golden corpus, the real-corpus cases | `integration-tests` (golden corpus), `bench.yml` (real corpus), owner-run (target repository) | an answer must agree with an independent indexer, or completeness must survive an inserted caller |
 | **Fuzz** | `fuzz/` (§8) | `cargo-fuzz` on the pinned nightly | nightly | a parser must survive hostile input |
-| **Mutation** | `just mutants-diff`, `just mutation` (§9) | `cargo-mutants` | `mutants-diff` every push; full weekly | the question is whether the tests can fail |
+| **Mutation** | `just mutants-diff`, `just mutation` (§9) | `cargo-mutants` | `mutants-diff` in the CI `coverage` job and before landing a large task; full weekly | the question is whether the tests can fail |
 | **Benchmark** | `crates/*/benches/`, `tools/jfl-bench`, `just bench` (§10) | divan or criterion, hyperfine, the pinned real corpus, recorded machine facts | `bench.yml` on every push to `main`; `bench-gate` from M1 | a latency, memory or throughput claim |
 | **Agent evaluation** | `tools/jfl-eval` over Harbor (§11) | Claude Code trajectories, the target repository, the Multi-SWE-bench control | owner-run per milestone | the claim is about agents finishing tasks |
 
@@ -234,8 +234,10 @@ test.
 
 ## 9. Mutation testing
 
-`cargo-mutants` (27.1.0) runs in two places. **In the diff** (`just mutants-diff`, FND-06): every
-push mutates only the changed lines (`--in-diff` against the parent); a missed mutant in
+`cargo-mutants` (27.1.0) runs in two places. **In the diff** (`just mutants-diff`, FND-06): the
+CI `coverage` job, and the orchestrator before landing a large task, mutate only the changed
+lines (`--in-diff` against `git merge-base HEAD origin/main`, with a 20-minute cap; fnd §9;
+it is not a stage of `check`, since it reruns the suite once per mutant); a missed mutant in
 `jfl-domain`, `jfl-protocol`, `jfl-application` or the resolver fails, elsewhere it is reported.
 **In full** (REL-05), weekly and by hand over the same crates; survivors are triaged (equivalent,
 or a missing test added). The curated envelope mutants of §7.3 are separate and gate on every
@@ -263,10 +265,14 @@ at the end (ADR 0031, BENCH lane).
 4. **Every product task** runs its suites on the corpus (small at least) and reports the metrics
    it changes in its report and commit body.
 5. **Budgets** are plan §1.7's table. History is kept by github-action-benchmark in the
-   `gh-pages` branch. From M1 on, `bench-gate` fails a push to `main` when a tracked metric
-   regresses by more than 10 % against that history (medians of several runs; a regression must
-   reproduce once, ver §1), and each milestone gate checks the absolute targets on the recorded
-   reference machine. A budget is changed only by the owner, never loosened to make a run pass.
+   `gh-pages` branch, one series per runner class. From M1 on, the `bench-gate` job of
+   `bench.yml`, on one fixed runner class, fails a push to `main` when a tracked metric regresses
+   by more than 10 % against that class's history: `jfl-bench` writes the median of N runs, a
+   regression must reproduce in a second run (§1), and in-process suites gate on instruction
+   counts where available, with wall time reported beside them. A local or sandbox `just bench`
+   reports and never gates; `check` and `land.sh` do not run `bench-gate` (fnd §9). Each
+   milestone gate checks the absolute targets on the recorded reference machine. A budget is
+   changed only by the owner, never loosened to make a run pass.
    A test that times something against a fixed bound runs in the `serial` nextest profile, after
    the others.
 
@@ -297,7 +303,7 @@ at the end (ADR 0031, BENCH lane).
 | Lane | Runs | Where |
 |:--|:--|:--|
 | `check` | every stage of fnd §9 | every push (CI jobs), before every commit (local) |
-| `bench.yml` | the corpus benchmarks and real-corpus cases; the >10 % gate from M1 | every push to `main`, by hand |
+| `bench.yml` | the corpus benchmarks and real-corpus cases; the >10 % gate from M1, on one fixed runner class | every push to `main`, by hand |
 | `formal.yml` | Apalache per model, fresh-seed conformance | weekly, by hand |
 | `fuzz.yml` | each target for a time budget | nightly, by hand |
 | `mutation.yml` | `cargo-mutants` | weekly, by hand |

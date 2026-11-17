@@ -115,8 +115,10 @@ For scale: a full syntax index costs about 40 times a warm `rg` scan on elastics
 across worktrees and agents (§5.1), and kept fresh by re-hashing, not re-parsing.
 
 **From M1 on the table is a blocking gate**: a tracked metric that regresses by more than 10 %
-against the stored history fails the `bench-gate` job, and each milestone gate checks the budgets
-on the recorded reference machine (ver §10).
+against the history of the same runner class fails the `bench-gate` job of `bench.yml` (medians
+of several runs, reproduced once; instruction counts where the suite allows), and each milestone
+gate checks the budgets on the recorded reference machine (ver §10). A local or sandbox run
+reports and never gates (fnd §9).
 
 ---
 
@@ -400,14 +402,21 @@ daemon are the closest published shapes (§16).
 
 ### 5.3 IPC and socket security
 
-- A Unix domain socket in the state directory; never TCP. The state directory is created `0700`
-  and the socket and lock `0600`, created with those modes (no chmod-after race). Each connection's
-  peer uid (`SO_PEERCRED` on Linux, `getpeereid` on macOS) must equal the daemon's.
+- A Unix domain socket in the state directory; never TCP. **The `0700` state directory is the
+  access control.** It is created with `DirBuilderExt::mode(0o700)`; if it already exists, its
+  owner must be the daemon's uid and its mode exactly `0700`, or the daemon refuses to start and
+  names the path. The socket is bound and the lock file created inside it, then both are set to
+  `0600`. That chmod comes after the bind (std and Tokio's `UnixListener::bind` take no mode, and
+  `umask` is process-wide and racy in a threaded daemon), but the window is harmless because no
+  other user can traverse the directory; macOS ignores socket-file permissions on `connect`
+  anyway. Each connection's peer uid (`SO_PEERCRED` on Linux, `getpeereid` on macOS) must equal
+  the daemon's: the backstop if the directory check is ever wrong.
 - Socket paths are limited to about 104 bytes on macOS and 108 on Linux: a state directory whose
   socket path would be longer is refused with the limit named, never truncated.
-- Frames are JSON-RPC 2.0 with the LSP base protocol's `Content-Length` framing, reusing
-  `lsp_server::Message`, so the CLI, the LSP proxy and the daemon share one parser and one trace
-  format (ADR 0021). `jfl-protocol` defines the methods, payloads and limits; the declared length
+- Frames are JSON-RPC 2.0 with the LSP base protocol's `Content-Length` framing, so the CLI, the
+  LSP proxy and the daemon share one frame decoder (`jfl-protocol`'s, which checks the length
+  before allocating), one message type (`lsp_server::Message`) and one trace format (ADR 0021);
+  the adapters feed bytes to that decoder rather than use `lsp-server`'s own reader. `jfl-protocol` defines the methods, payloads and limits; the declared length
   is checked against the maximum size before allocation; a version handshake opens every
   connection (§6.6). The daemon side is Tokio; the CLI client is std only, so it starts fast.
 
@@ -612,10 +621,21 @@ proxies (`jfl lsp`, CLI) speak `jfl-protocol` through the IPC client.
 | Child processes | `jfl-process` (and through it the git, javac and Gradle adapters, and `jfl-composition`'s daemon launcher) | names no `std::process` (`ARCH-process-authority`) |
 | Sockets | `jfl-adapter-ipc` (Unix domain only) | names no `std::net` or `std::os::unix::net`; no TCP anywhere |
 | Filesystem | `jfl-adapter-fs`, `-git`, `-store`, `-ipc`, `-classfile`, `-javac`, `-gradle`, `jfl-composition` | pure and application crates name no `std::fs` |
-| Clock, randomness, environment | `jfl-composition` (provides `Clock`), adapters for their own needs | pure crates name none |
+| Clock and environment | `jfl-composition` (provides `Clock`, reads configuration), `jfl-process` (deadlines, the child's allowlisted environment), `jfl-cli` (environment only, for defaults) | adapters take time from the `Clock` port; pure and application crates name none |
+| Sleeping | no production crate (waits are deadlines on the `Clock` port or channels) | `jfl-testkit`'s `poll` is the only sleep in the workspace |
+| Randomness | none in v0.x | pure crates name none; a future need is a port |
 
-Enforced by `#![no_std]` on the pure crates, per-crate clippy `disallowed-*` lists and
-`cargo-deny` wrappers, kept in step by the architecture test (fnd §2.3, §2.4, §3; FND-02).
+**Tool and test crates** are never reached from production (§6.3) and hold the authority their
+job needs, each listed in `architecture.toml`'s `[grants]` (fnd §2.4): `jfl-testkit` (processes
+and files for fixture builders; sleep and clock inside `poll` only), `jfl-conformance` (files,
+environment), `jfl-architecture` (processes and files: `cargo metadata`, `git`, the scripts it
+tests), `jfl-bench` and `jfl-eval` (processes, files, clock, environment), `jfl-jdtls`
+(processes, files, Unix sockets, spawns, clock, environment: it is a daemon), `jfl-oracle`
+(files). TCP stays denied everywhere.
+
+Enforced by `#![no_std]` and the `nostd` stage on the pure crates, per-crate clippy
+`disallowed-*` lists and `cargo-deny` wrappers, kept in step by the architecture test (fnd §2.3,
+§2.4, §3; FND-02, FND-07).
 
 ### 6.6 Protocol and compatibility
 

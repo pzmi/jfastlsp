@@ -11,3 +11,5 @@ mutants.out*/
 lcov.info
 *.profraw
 .DS_Store
+/.claude/worktrees/
+/.claude/settings.local.json

@@ -29,17 +29,22 @@ GitHub Actions run or job URL (a failure to fix), or nothing (the next ready tas
    the fallback before FND-02, then `just check`) and the overview rows of the tasks in
    scope with their dependencies, model, size, ⛳ mark and "Parallel with" column.
 2. A task is **ready** when every dependency has a commit and the task has none yet. Subjects
-   are `<ID>: summary`, so: `git log --oneline main | grep " <dep>:"`. A `DEC-` task is the
-   owner's: prepare what its card says an agent prepares, then put the decision to the owner;
+   are `<ID>: summary`, so: `git log --oneline main | grep " <dep>:"`. A `DEC-` dependency counts
+   only when its ADR's status reads `Accepted (owner, …)` (`grep -A2 '^## Status'` on the
+   record): an agent's draft, committed as `Proposed` under the `DEC-` subject, does not make
+   the dependants ready. A `DEC-` task is the owner's: prepare what its card says an agent prepares, then put the decision to the owner;
    never decide it. An acceptance item marked `(owner)` is never run by an agent; a task whose
    remaining items are all `(owner)` is reported, not dispatched.
 3. `git fetch origin`, then `git status` on `main` must be clean and not behind `origin/main`;
    someone else's edits are left alone and reported. Worktrees start from the fetched
    `origin/main`, never from a stale local `main`.
-4. Toolchain: the SessionStart hook installs the pinned toolchain and fetches crates. If it
-   reported a missing tool the gate needs (cargo-nextest, cargo-deny, cargo-llvm-cov, quint,
-   the pinned JDK), install it once now with `mise install --locked` (`just doctor` says what is missing or
-   wrong), not per agent.
+4. Toolchain: the SessionStart hook installs the pinned toolchain, fetches crates and runs
+   `scripts/bootstrap-tools.sh` (mise and just, checksum-verified, then `mise install --locked`).
+   If it reported a failure or a missing tool the gate needs (just, cargo-nextest, cargo-deny,
+   cargo-llvm-cov, quint, the pinned JDK), run `bash scripts/bootstrap-tools.sh` once now
+   (`just doctor` says what is missing or wrong), not per agent. `.private-names.sha256` must
+   exist (`land.sh` and CI fail closed without it); if it is missing, stop and ask the owner one
+   question.
 5. Resources: the sandbox has 4 CPUs and about 15 GB RAM. **At most two lanes run at once**,
    each with `CARGO_BUILD_JOBS=2` and `CARGO_INCREMENTAL=0`. `df -h /` and `free -g` before every
    dispatch round; start fewer lanes, or delete finished lanes' target dirs, rather than fill the
@@ -140,14 +145,19 @@ resetting the worktree"; never discard its uncommitted change without reading it
    findings go back to the task's agent by `SendMessage`; land only a clean or fixed commit.
    For the socket, the lock, `jfl-process`, the Gradle model (trusted code) and every parser of
    untrusted input, the review finishes before `land` starts, never alongside it.
-3. Land **one commit at a time**, and the next only after the previous commit's CI run is
-   green: `scripts/land.sh <sha>` (`--no-push` for a dry run). It refuses a dirty checkout,
-   fetches, works in a temporary worktree at `origin/main`, cherry-picks, resolves only
-   `Cargo.lock` and the ADR index, aborts on any other conflict, runs `just check` and
-   `just private-names` on the merged tree and pushes only when it is green. Integration is
-   direct on `main` (ADR 0002); there is no PR phase. Never land on
-   red CI. Before FND-03 lands `land` does not exist: cherry-pick onto a clean `main`, run the
-   gate (the fallback before FND-02) on the merged tree in the foreground, and push with
+3. Land **one commit at a time**, and, once `ci.yml` exists (FND-05), the next only after the
+   previous commit's CI run is green; before FND-05 there is no run to wait for, the gate on the
+   merged tree is the only gate, and the next commit may land once the previous one is pushed.
+   Before landing a task sized `L`, or one touching `jfl-domain`, `jfl-protocol` or
+   `jfl-application`, run `just mutants-diff` in its worktree once FND-06 has landed (20-minute
+   cap; fnd §9). Then: `scripts/land.sh <sha>` (`--no-push` for a dry run). It refuses a dirty
+   checkout, fetches, works in a temporary worktree at `origin/main`, cherry-picks, resolves only
+   `Cargo.lock` and the ADR index, aborts on any other conflict, runs `just check` (with
+   `private-names` failing closed) on the merged tree and pushes only when it is green.
+   Integration is direct on `main` (ADR 0002); there is no PR phase. Never land on red CI.
+   `bench-gate` is not part of landing: it runs only in `bench.yml` on its runner class. Before
+   FND-03 lands `land` does not exist: cherry-pick onto a clean `main`, run the gate (the
+   fallback before FND-02) on the merged tree in the foreground, and push with
    `git push origin main` only on green.
 4. An aborted land: a conflict in code the agent wrote goes back to that agent via
    `SendMessage` (rebase its lane, re-run the gate); a shared file follows the table above.
@@ -165,7 +175,8 @@ resetting the worktree"; never discard its uncommitted change without reading it
 
 ## After the push
 
-- **CI**, after every push and before the next land (`gh` may be unavailable, so use MCP):
+- **CI**, after every push and before the next land, from FND-05 on (before it there is no
+  workflow: record `ci: none (pre-FND-05)`; `gh` may be unavailable, so use MCP):
   `actions_list` (workflow runs for the branch, match the head sha), `actions_get` until
   `completed`, then `get_job_logs` with `failed_only` and `tail_lines` 60 to 120 (a large log
   lands in a file: grep it). Red is work now: name the failing line, hand the fix to a work

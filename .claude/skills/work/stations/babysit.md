@@ -8,6 +8,7 @@ ship.{commitSha, pushed}, intake.branch
 
 ## Steps
 
+0. **Before FND-05** (no `.github/workflows/ci.yml` on `main`): there is no run. Record `ci: none (pre-FND-05)` with `finalStatus: green` only if the gate on the merged tree was green, and end.
 1. **Find the run** for the pushed commit: MCP `actions_list` (workflow runs, filter by branch, match `head_sha`), then `actions_get` until its `status` is `completed`; with `gh`, `gh run watch`. Poll patiently with the Monitor tool or spaced checks; never a busy loop, and never tell the owner to "check back" if you can wait.
 2. **Green**: every required job succeeded (the `Required` job of `doc/required-checks.md` once FND-05 has landed). Done.
 3. **Red**: read the failing job with MCP `get_job_logs` (`failed_only`, `tail_lines` 60 to 120; a large log lands in a file: grep it). Name the failing line. Reproduce with the matching `just check-only <stages>`, fix, run the gate in the foreground, commit on green with the rules of `ship.md` (a fix commit repeats the task id: `<ID>: fix <what>`), land it, wait again. A macOS-only failure (the `macos` job, `aarch64-apple-darwin`) or an arm64-Linux-only failure that cannot be reproduced here: fix from the log, say so. An owner-run step (the target Java repository, a Claude Code evaluation run) is not yours to run: report it. At most 3 fix attempts, then stop and report the failing job, step and your diagnosis.

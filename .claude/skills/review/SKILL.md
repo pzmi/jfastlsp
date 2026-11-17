@@ -49,8 +49,10 @@ threads or Tokio; a child process is started only through `jfl-process` (argv on
 `sh -c` or a string built from input; cleared environment plus an allowlist; a deadline; its own
 process group, killed as a group; bounded captured output), the daemon launcher and the JVM
 helpers included;
-sockets only in `jfl-adapter-ipc`, Unix domain only, never TCP. A spawn, a socket or a
-filesystem write outside the crates plan §6.5 grants it to is HIGH. Rules no tool enforces
+sockets only in `jfl-adapter-ipc`, Unix domain only, never TCP. Tool and test crates hold the
+grants their `architecture.toml` row gives them (fnd §2.4: `jfl-jdtls`'s socket and daemon,
+`jfl-testkit`'s sleep and clock inside `poll` only). A spawn, a socket, a filesystem write, a
+clock, a sleep or an environment read outside the crates fnd §2.4 grants it to is HIGH. Rules no tool enforces
 (fnd §3.3) are checked here: application command code naming query modules or the reverse, a
 `tracing` value reaching a branch, a hidden seam into composition, a non-literal event name,
 arithmetic on LSP `Position` fields outside `jfl-domain`.
@@ -80,8 +82,10 @@ mtime seen. A cross-view result, a mixed-generation answer or a stale answer aft
 is HIGH.
 
 **Daemon lifecycle and socket** (plan §5.2, §5.3, `formal/daemon.qnt`): one daemon per state
-directory, enforced by a lock held for the daemon's life; the state directory `0700`, the socket
-and lock `0600`, created with those modes (no chmod-after race); a peer's uid checked against
+directory, enforced by a lock held for the daemon's life; the state directory created `0700`
+and an existing one refused unless owned by the daemon's uid with mode `0700` (the directory is
+the access control, plan §5.3); the socket and lock bound inside it, then `0600`; a peer's uid
+checked against
 the daemon's; proxies spawn the daemon on demand and reconnect after a restart; a restarted
 daemon holds no buffer from a dead connection (no ghost buffers); idle exit and SIGTERM release
 the socket and the lock; every spawned task owned, cancellable and joined on shutdown.

@@ -13,7 +13,9 @@ A task in [`tasks.md`](tasks.md) is ready to start when:
 
 - every task it depends on has a commit on `main` (subjects are `<ID>: <summary>`, so
   `git log --oneline main | grep " <dep>:"` finds it), a `DEC-` dependency has its ADR in the
-  tree, and the task has no commit of its own;
+  tree **with the status `Accepted (owner, …)`** (an agent's draft ADR, committed as `Proposed`
+  under the `DEC-` subject, does not count: `grep -A2 '^## Status' doc/adr/NNNN-*.md`), and the
+  task has no commit of its own;
 - its card states what is built, the sections to read (`Cites:`), the acceptance items and
   which of them are `(owner)`;
 - the observable behaviour, the invariants, the crates it touches, the threat model (when
@@ -53,11 +55,14 @@ are the real procedure; this section summarises it.
    it; HIGH and MEDIUM findings go back to the task's agent.
 5. **Land.** `scripts/land.sh <sha>`: one commit at a time, the next only after the previous
    commit's CI is green; `just check` on the merged tree; push only on green (ADR 0002, ADR 0030).
+   Before `ci.yml` exists (FND-05) there is no CI run to wait for: the gate on the merged tree is
+   the only gate, and the next commit may land once the previous one is pushed.
    **Until FND-03 lands `land`**, the orchestrator does it by hand: `git fetch`, a clean `main`
    equal to `origin/main`, `git cherry-pick <sha>`, the live gate on the merged tree in the
    foreground (the fallback until FND-02), `git push origin main` only on green.
-6. **Watch CI.** The orchestrator waits for the run of the pushed commit and reads the
-   `Required` result. Without `gh` it uses the GitHub MCP tools.
+6. **Watch CI.** From FND-05 on, the orchestrator waits for the run of the pushed commit and
+   reads the `Required` result. Without `gh` it uses the GitHub MCP tools. Before FND-05 it
+   records `ci: none (pre-FND-05)` and moves on.
 
 Agents never suppress a failing test, widen a lint exemption, remove a modelled invariant,
 loosen a budget or rewrite a golden fixture to obtain green. A missing pinned tool is an
@@ -86,10 +91,11 @@ reported as green. A ⛳ task is done only after the checkpoint review below.
 | Before FND-02 | the fallback: `cargo fmt --all --check && cargo clippy --workspace --all-targets --locked -- -D warnings && cargo test --workspace --locked` |
 | From FND-02 | `just quick` while working; `just check` before every commit and in `scripts/land.sh` |
 
-Tools come from `mise install --locked`. The stages of `check` are listed in fnd §9 and by
-`just --list`; each CI job runs `just check-only <stage>…`
-([`required-checks.md`](required-checks.md)). From M1 on the `bench-gate` stage fails a tracked
-metric that regresses by more than 10 % (plan §1.7).
+Tools come from `bash scripts/bootstrap-tools.sh` (mise and just) and `mise install --locked`
+(the rest). The stages of `check` are listed in fnd §9 and by `just --list`; each CI job runs
+`just check-only <stage>…` ([`required-checks.md`](required-checks.md)). `bench-gate` is not a
+stage of `check`: from M1 on `bench.yml`'s `bench-gate` job, on one fixed runner class, fails a
+tracked metric that regresses by more than 10 % (plan §1.7, fnd §9).
 
 ## 5. Integration procedure
 

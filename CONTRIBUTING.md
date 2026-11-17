@@ -26,11 +26,12 @@ installs it on first use) and the other tools the gate needs are pinned in `mise
 `mise.lock` ([mise](https://github.com/jdx/mise)):
 
 ```text
-mise install --locked       # installs every pinned tool
-just doctor                 # checks them; run it first when local and CI disagree
-just quick                  # fmt check, architecture, clippy, fast tests: while working
-just check                  # the full blocking gate: before every commit
-just bench                  # benchmarks on the pinned corpus (`just bench-corpus` fetches it)
+bash scripts/bootstrap-tools.sh  # the pinned mise and just, checksum-verified
+mise install --locked            # every other pinned tool
+just doctor                      # checks them; run it first when local and CI disagree
+just quick                       # fmt check, architecture, clippy, fast tests: while working
+just check                       # the full blocking gate: before every commit
+just bench                       # benchmarks on the pinned corpus (`just bench-corpus` fetches it)
 ```
 
 `quick` is not `check`; a pull request says which stages it ran. `just check-only <stage>...`

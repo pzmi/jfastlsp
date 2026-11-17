@@ -4,7 +4,8 @@ Date: 2026-11-16
 
 ## Status
 
-Proposed (orchestrator default; owner confirms at the FND checkpoint, DEC-07). Supersedes
+Proposed (orchestrator default; owner confirms at the FND checkpoint, DEC-07); amended
+2026-11-16. Supersedes
 [0011](0011-pinned-toolchains-rust-1-97-0-and-tools-versions-toml.md) and
 [0012](0012-port-xtask-from-mayfly.md).
 
@@ -71,3 +72,25 @@ test before relying on them.
 - Port xtask (ADR 0012): about 16k lines to own. `cargo-bylaw`, `cargo-pup`: too young.
   `cargo-make`: last release January 2025. A PR and merge-queue flow instead of `land.sh`: the
   owner chose trunk (ADR 0002), and merge queues need an organisation-owned repository.
+
+## Amended 2026-11-16 (planner, BOOT-02): review findings before FND-01
+
+- **Purity needs a no-std target.** `#![no_std]` refuses std in the crate's own code but not a
+  std-only dependency. A `nostd` stage builds the pure crates for `x86_64-unknown-none` (in
+  `rust-toolchain.toml`'s targets), and a negative fixture crate proves the first half; a
+  `compile_fail` doctest cannot, since rustdoc links doctests as std binaries (fnd §2.3, §3.4).
+- **Bootstrap.** mise and just are installed by `scripts/bootstrap-tools.sh` at pinned,
+  checksum-verified versions (fnd §8); prebuilt `aqua:`/`github:` backends are preferred to
+  `cargo:`.
+- **Private names are hashed, not hidden.** The private-name grep needed a pattern file kept
+  outside the repository, which no fresh session or fork has. Instead the repository commits
+  salted SHA-256 hashes of the normalised names (`.private-names.sha256`); the check hashes the
+  tokens of the changed text, needs no secret, and is a stage of `check` (fnd §7.4).
+- **Bench gate on one runner class.** Wall times from a laptop, the sandbox and a shared runner
+  are not comparable, so `bench-gate` runs only in `bench.yml` on a fixed runner class against
+  that class's history (medians, reproduced once), gating on instruction counts where possible;
+  `check` and `land.sh` never run it (fnd §9, ADR 0031).
+- **Diff-based stages.** `changed-lines`, `mutants-diff` and `private-names` use
+  `git merge-base HEAD origin/main` plus the working tree as their base; `mutants-diff` leaves
+  `check` and runs in CI and before landing large tasks, with a time cap.
+- **Seven FND tasks.** FND-02 is the gate and its tools; the architecture test is FND-07.

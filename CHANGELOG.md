@@ -10,5 +10,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Added
 
 - The product and architecture plan, the engineering foundation, the verification strategy, the
-  development process, the founding ADRs (0001–0018) and the task breakdown.
+  development process, the ADRs (0001–0031) and the task breakdown.
+- `scripts/bootstrap-tools.sh` (pinned, checksum-verified mise and just), the hashed private-name
+  list and its `scripts/private-name-add.sh`, and the archived E1 parse spike (`spikes/e1-parse/`).
 - Agent instructions (`CLAUDE.md`, `.claude/`), dual licences and repository hygiene files.
