@@ -3,8 +3,8 @@
 //! ```text
 //! jfl-jdtls lsp    [--state-dir DIR] [--root DIR] [DAEMON OPTIONS]
 //! jfl-jdtls daemon [--state-dir DIR] [DAEMON OPTIONS]
-//! jfl-jdtls status [--state-dir DIR]
-//! jfl-jdtls stop   [--state-dir DIR]
+//! jfl-jdtls status [--state-dir DIR] [--short-socket-base DIR]
+//! jfl-jdtls stop   [--state-dir DIR] [--short-socket-base DIR]
 //!
 //! DAEMON OPTIONS (used by the proxy that starts the daemon; a running daemon keeps its own):
 //!   --jdtls-home DIR        the extracted jdtls (default: where scripts/jdtls-fetch.sh puts it)
@@ -14,6 +14,8 @@
 //!   --no-gradle-import      java.import.gradle.enabled=false
 //!   --idle-secs N           stop a jdtls with no client after N seconds (default 1800)
 //!   --daemon-idle-secs N    exit the daemon after N seconds with no jdtls (default 600)
+//!   --short-socket-base DIR where the socket goes when <state>/sock is too long for a socket
+//!                           address (default /tmp; the socket is <DIR>/jfl-jdtls-<uid>/<key>.sock)
 //!   --backend-command PROG [ARGS...]   front another language server instead (must be last)
 //! ```
 
@@ -40,6 +42,7 @@ struct Parsed {
     gradle_import: bool,
     idle_secs: Option<u64>,
     daemon_idle_secs: Option<u64>,
+    short_socket_base: Option<PathBuf>,
     backend_command: Option<Vec<OsString>>,
     /// The daemon options as given, for a proxy to pass on.
     daemon_args: Vec<OsString>,
@@ -64,6 +67,12 @@ fn parse(args: Vec<OsString>) -> Result<Parsed, String> {
         match name.as_str() {
             "--state-dir" => parsed.state_dir = Some(value(&mut it)?.into()),
             "--root" => parsed.root = Some(value(&mut it)?.into()),
+            "--short-socket-base" => {
+                let v = value(&mut it)?;
+                parsed.daemon_args.push(arg.clone());
+                parsed.daemon_args.push(v.clone());
+                parsed.short_socket_base = Some(v.into());
+            }
             "--backend-command" => {
                 let rest: Vec<OsString> = it.by_ref().collect();
                 if rest.is_empty() {
@@ -108,7 +117,11 @@ fn layout(parsed: &Parsed) -> Result<StateLayout, String> {
         Some(dir) => std::path::absolute(dir).map_err(|e| e.to_string())?,
         None => proxy::default_state_dir().ok_or("no state directory: pass --state-dir")?,
     };
-    Ok(StateLayout::new(dir))
+    let layout = StateLayout::new(dir);
+    Ok(match &parsed.short_socket_base {
+        Some(base) => layout.with_short_base(std::path::absolute(base).map_err(|e| e.to_string())?),
+        None => layout,
+    })
 }
 
 fn daemon_config(parsed: Parsed) -> Result<DaemonConfig, String> {

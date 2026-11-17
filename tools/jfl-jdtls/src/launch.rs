@@ -17,6 +17,15 @@ use crate::worktree::data_key;
 /// and `scripts/test-jdtls-fetch.sh` checks that the two agree.
 pub const JDTLS_VERSION: &str = "1.61.0";
 
+/// The longest socket path `bind` accepts: `sun_path` is 108 bytes on Linux and 104 on macOS,
+/// one of them the terminating NUL.
+#[cfg(target_os = "linux")]
+pub const MAX_SOCKET_PATH: usize = 107;
+/// The longest socket path `bind` accepts: `sun_path` is 108 bytes on Linux and 104 on macOS,
+/// one of them the terminating NUL.
+#[cfg(not(target_os = "linux"))]
+pub const MAX_SOCKET_PATH: usize = 103;
+
 /// Environment variables a backend inherits; everything else is cleared.
 pub const ENV_ALLOWLIST: &[&str] = &[
     "PATH",
@@ -34,13 +43,32 @@ pub const ENV_ALLOWLIST: &[&str] = &[
 #[derive(Debug, Clone)]
 pub struct StateLayout {
     root: PathBuf,
+    short_base: PathBuf,
 }
 
 impl StateLayout {
-    /// A layout rooted at `root`.
+    /// A layout rooted at `root`, with `/tmp` as the base of the short socket directory.
     #[must_use]
     pub fn new(root: PathBuf) -> Self {
-        Self { root }
+        Self {
+            root,
+            short_base: PathBuf::from("/tmp"),
+        }
+    }
+
+    /// The same layout with another base for the short socket directory
+    /// (`--short-socket-base`; the tests use one of their own).
+    #[must_use]
+    pub fn with_short_base(mut self, base: PathBuf) -> Self {
+        self.short_base = base;
+        self
+    }
+
+    /// The same layout rooted at `root` (the canonical state directory, once it exists).
+    #[must_use]
+    pub fn with_root(mut self, root: PathBuf) -> Self {
+        self.root = root;
+        self
     }
 
     /// The state directory itself.
@@ -49,11 +77,32 @@ impl StateLayout {
         &self.root
     }
 
-    /// The Unix socket the proxies connect to. Kept short: socket paths are limited to about
-    /// 104 bytes on macOS and 108 on Linux.
+    /// The Unix socket the proxies connect to: `<state>/sock` when that fits a socket address
+    /// ([`MAX_SOCKET_PATH`]), else `<short dir>/<key>.sock` in [`StateLayout::short_socket_dir`],
+    /// keyed on the state directory (canonical once `daemon::prepare_state_dir` has returned the
+    /// layout, so aliases of one directory find one daemon) so several state directories never
+    /// share a socket. Pinned by
+    /// `tests::should_move_the_socket_to_a_short_directory_when_the_state_path_is_long` and
+    /// `tests/daemon.rs::daemon_or_jvm::should_serve_through_a_short_socket_when_the_state_path_is_long`.
     #[must_use]
     pub fn socket(&self) -> PathBuf {
-        self.root.join("sock")
+        let direct = self.root.join("sock");
+        if direct.as_os_str().len() <= MAX_SOCKET_PATH {
+            return direct;
+        }
+        let key = data_key(&self.root);
+        self.short_socket_dir()
+            .join(format!("{}.sock", key.get(..16).unwrap_or(&key)))
+    }
+
+    /// Where a socket goes when `<state>/sock` is too long: `<base>/jfl-jdtls-<euid>`, with `/tmp`
+    /// as the base by default, a fixed short path (not `$TMPDIR`, which may itself be long), held
+    /// to the state directory's rules (`0700`, owned by the effective uid) by
+    /// `daemon::prepare_state_dir`.
+    #[must_use]
+    pub fn short_socket_dir(&self) -> PathBuf {
+        self.short_base
+            .join(format!("jfl-jdtls-{}", rustix::process::geteuid().as_raw()))
     }
 
     /// The lock the one daemon of this state directory holds for its lifetime.
@@ -350,6 +399,25 @@ mod tests {
                 .any(|a| a.to_string_lossy().contains("/opt/jdtls/config_ss_"))
         };
         assert!(shared(&syntax) && !shared(&full));
+    }
+
+    #[test]
+    fn should_move_the_socket_to_a_short_directory_when_the_state_path_is_long() {
+        // given
+        let short = StateLayout::new("/home/u/.local/state/jfl-jdtls".into());
+        let long_root = PathBuf::from(format!("/home/u/{}/jfl-jdtls", "d".repeat(120)));
+        let long = StateLayout::new(long_root.clone());
+        let other = StateLayout::new(long_root.join("other"));
+
+        // when
+        let (s, l, o) = (short.socket(), long.socket(), other.socket());
+
+        // then
+        assert_eq!(s, Path::new("/home/u/.local/state/jfl-jdtls/sock"));
+        assert!(l.starts_with(long.short_socket_dir()), "{}", l.display());
+        assert!(l.as_os_str().len() <= MAX_SOCKET_PATH);
+        assert!(l.as_os_str().len() <= 103, "fits macOS too");
+        assert_ne!(l, o);
     }
 
     #[test]

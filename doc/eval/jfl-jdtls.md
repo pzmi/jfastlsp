@@ -75,6 +75,11 @@ jfl-jdtls stop                               # stops every jdtls and the daemon
   `--state-dir` overrides it. It is created `0700`, and an existing one is refused, naming the
   path, unless it is a real directory (not a symlink) of mode `0700` owned by you. The socket and
   locks are `0600`; on Linux a peer of another uid is refused. Logs are in `<state>/logs/`.
+- The socket is `<state>/sock` when that path fits a Unix socket address (107 bytes on Linux,
+  103 on macOS); otherwise it is `/tmp/jfl-jdtls-<uid>/<key>.sock` (`--short-socket-base`
+  moves `/tmp`), keyed on the canonical state directory so every alias of it finds the same
+  daemon, in a directory held to the same rules (`0700`, yours, not a symlink). `status` and
+  `stop` check both directories before connecting.
 - Daemon options (`--jdtls-home`, `--java`, `--heap-mib`, `--syntax-server`,
   `--no-gradle-import`, `--idle-secs`, `--daemon-idle-secs`, `--backend-command`) are given to
   `lsp` and passed on by the proxy that starts the daemon; a running daemon keeps its own. Stop it

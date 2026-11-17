@@ -14,6 +14,7 @@ mod daemon_or_jvm {
 
     use jfl_jdtls::framing::{MAX_FRAME_BYTES, read_frame, write_frame};
     use jfl_jdtls::json::Value;
+    use jfl_jdtls::launch::{MAX_SOCKET_PATH, StateLayout};
 
     type Res<T> = Result<T, Box<dyn Error>>;
 
@@ -57,7 +58,31 @@ mod daemon_or_jvm {
         fn drop(&mut self) {
             let _ = ctl(&self.state(), "stop");
             let _ = std::fs::remove_dir_all(&self.dir);
+            let _ = std::fs::remove_dir_all(short_base());
         }
+    }
+
+    /// Stops the daemon of a state directory the scratch does not know about, on drop (so a
+    /// failing assertion still leaves nothing running).
+    struct StopOnDrop(PathBuf);
+
+    impl Drop for StopOnDrop {
+        fn drop(&mut self) {
+            let _ = ctl(&self.0, "stop");
+        }
+    }
+
+    /// This test process's base for the short socket directory: short whatever `$TMPDIR` is,
+    /// and removed with the scratch, so no test leaves `/tmp/jfl-jdtls-<uid>` behind.
+    fn short_base() -> PathBuf {
+        PathBuf::from(format!("/tmp/jjs-{}", std::process::id()))
+    }
+
+    /// The socket a state directory's daemon listens on, as the tool computes it.
+    fn socket_of(state: &Path) -> Res<PathBuf> {
+        Ok(StateLayout::new(state.canonicalize()?)
+            .with_short_base(short_base())
+            .socket())
     }
 
     /// `jfl-jdtls <op> --state-dir <state>`, its stdout as JSON.
@@ -66,6 +91,8 @@ mod daemon_or_jvm {
             .arg(op)
             .arg("--state-dir")
             .arg(state)
+            .arg("--short-socket-base")
+            .arg(short_base())
             .output()?;
         if !out.status.success() {
             return Err(format!("{op} failed: {}", String::from_utf8_lossy(&out.stderr)).into());
@@ -96,6 +123,8 @@ mod daemon_or_jvm {
         fn start(state: &Path, root: &Path) -> Res<Self> {
             let mut child = Command::new(EXE)
                 .arg("lsp")
+                .arg("--short-socket-base")
+                .arg(short_base())
                 .arg("--state-dir")
                 .arg(state)
                 .arg("--root")
@@ -260,12 +289,13 @@ mod daemon_or_jvm {
         // and when both leave and the daemon is stopped, the backend is gone with it
         a.close()?;
         b.close()?;
+        let socket = socket_of(&scratch.state())?;
         assert_eq!(
             ctl(&scratch.state(), "stop")?.get("ok"),
             Some(&Value::Bool(true))
         );
         assert!(!alive(&backend)?);
-        assert!(!scratch.state().join("sock").exists());
+        assert!(!socket.exists());
         Ok(())
     }
 
@@ -361,7 +391,7 @@ mod daemon_or_jvm {
         // then
         let mode = |p: &Path| std::fs::metadata(p).map(|m| m.permissions().mode() & 0o777);
         assert_eq!(mode(&scratch.state())?, 0o700);
-        assert_eq!(mode(&scratch.state().join("sock"))?, 0o600);
+        assert_eq!(mode(&socket_of(&scratch.state())?)?, 0o600);
         assert_eq!(mode(&scratch.state().join("daemon.lock"))?, 0o600);
         assert_eq!(mode(&scratch.state().join("startup.lock"))?, 0o600);
         Ok(())
@@ -371,6 +401,8 @@ mod daemon_or_jvm {
     fn refused(state: &Path, root: &Path) -> Res<String> {
         let out = Command::new(EXE)
             .arg("lsp")
+            .arg("--short-socket-base")
+            .arg(short_base())
             .arg("--state-dir")
             .arg(state)
             .arg("--root")
@@ -411,7 +443,7 @@ mod daemon_or_jvm {
             link_err.contains(&*link.to_string_lossy()) && link_err.contains("Symlink"),
             "{link_err}"
         );
-        assert!(!open.join("sock").exists() && !private.join("sock").exists());
+        assert!(!socket_of(&open)?.exists() && !socket_of(&private)?.exists());
         Ok(())
     }
 
@@ -437,6 +469,115 @@ mod daemon_or_jvm {
 
         // then
         assert!(err.contains("Owner("), "{err}");
+        Ok(())
+    }
+
+    #[test]
+    fn should_serve_through_a_short_socket_when_the_state_path_is_long() -> Res<()> {
+        use std::os::unix::fs::PermissionsExt;
+        // given: a state directory whose `sock` would not fit a socket address on any platform
+        let scratch = Scratch::new("long")?;
+        let root = scratch.worktree("repo")?;
+        let state = scratch.dir.join("l".repeat(120)).join("s");
+        assert!(state.join("sock").as_os_str().len() > MAX_SOCKET_PATH);
+        let _stop = StopOnDrop(state.clone());
+        let mut a = Proxy::start(&state, &root)?;
+
+        // when
+        a.initialize()?;
+        let socket = socket_of(&state)?;
+        let echo =
+            a.result(r#"{"jsonrpc":"2.0","id":1,"method":"fake/echo","params":{"ok":1}}"#)?;
+
+        // then: served through a short, private socket that the stop removes
+        assert_eq!(echo["ok"], 1);
+        assert!(
+            socket.as_os_str().len() <= MAX_SOCKET_PATH,
+            "{}",
+            socket.display()
+        );
+        let mode = |p: &Path| std::fs::metadata(p).map(|m| m.permissions().mode() & 0o777);
+        assert_eq!(mode(&socket)?, 0o600);
+        assert_eq!(mode(socket.parent().ok_or("no parent")?)?, 0o700);
+        assert_eq!(ctl(&state, "stop")?.get("ok"), Some(&Value::Bool(true)));
+        assert!(!socket.exists());
+        Ok(())
+    }
+
+    #[test]
+    fn should_find_the_same_daemon_when_a_long_state_directory_is_reached_through_an_alias()
+    -> Res<()> {
+        // given: a long state directory, and a short symlinked alias of its parent
+        let scratch = Scratch::new("alias")?;
+        let root = scratch.worktree("repo")?;
+        let long_parent = scratch.dir.join("l".repeat(120));
+        std::fs::create_dir_all(&long_parent)?;
+        let alias = scratch.dir.join("a");
+        std::os::unix::fs::symlink(&long_parent, &alias)?;
+        let (state, aliased) = (long_parent.join("s"), alias.join("s"));
+        let _stop = StopOnDrop(state.clone());
+        let mut a = Proxy::start(&state, &root)?;
+        a.initialize()?;
+
+        // when: a second client and `status` name the state directory through the alias
+        let mut b = Proxy::start(&aliased, &root)?;
+        b.initialize()?;
+        let sessions = sessions(&aliased)?;
+
+        // then: one daemon, one backend, both clients on it
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].get("clients"), Some(&Value::from(2)));
+        assert_eq!(socket_of(&state)?, socket_of(&aliased)?);
+        Ok(())
+    }
+
+    #[test]
+    fn should_refuse_a_short_socket_directory_when_it_is_not_private() -> Res<()> {
+        use std::os::unix::fs::PermissionsExt;
+        // given: a long state directory, so its socket goes to the short directory, which is
+        // pre-created in turn as 0755, as a symlink to a private directory and (as root) as
+        // another user's
+        let scratch = Scratch::new("shortdir")?;
+        let root = scratch.worktree("repo")?;
+        let state = scratch.dir.join("l".repeat(120)).join("s");
+        std::fs::create_dir_all(short_base())?;
+        let short = StateLayout::new(state.clone())
+            .with_short_base(short_base())
+            .short_socket_dir();
+        let private = scratch.dir.join("private");
+        std::fs::create_dir(&private)?;
+        std::fs::set_permissions(&private, std::fs::Permissions::from_mode(0o700))?;
+        let mut faults = vec!["Mode(493)", "Symlink"];
+        if rustix::process::geteuid().is_root() {
+            faults.push("Owner(65534)");
+        }
+
+        for fault in faults {
+            if fault == "Symlink" {
+                std::os::unix::fs::symlink(&private, &short)?;
+            } else {
+                std::fs::create_dir(&short)?;
+                let mode = if fault == "Mode(493)" { 0o755 } else { 0o700 };
+                std::fs::set_permissions(&short, std::fs::Permissions::from_mode(mode))?;
+                if fault == "Owner(65534)" {
+                    std::os::unix::fs::chown(&short, Some(65534), Some(65534))?;
+                }
+            }
+
+            // when
+            let err = refused(&state, &root)?;
+
+            // then: refused, naming the directory and the limit, and no socket was bound in it
+            assert!(
+                err.contains(fault) && err.contains(&*short.to_string_lossy()),
+                "{err}"
+            );
+            assert!(err.contains("socket path limit"), "{err}");
+            assert!(!private.read_dir()?.any(|_| true));
+            if std::fs::remove_dir(&short).is_err() {
+                std::fs::remove_file(&short)?;
+            }
+        }
         Ok(())
     }
 }

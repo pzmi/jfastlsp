@@ -49,14 +49,14 @@ pub fn run_lsp(options: &LspOptions) -> io::Result<()> {
     let root = std::path::absolute(&options.start)?;
     let hello = json!({ "op": "lsp", "root": root.to_string_lossy() });
     let stream = {
-        prepare_state_dir(&options.layout)?;
-        let startup = open_lock(&options.layout.startup_lock())?;
+        let layout = prepare_state_dir(&options.layout)?;
+        let startup = open_lock(&layout.startup_lock())?;
         startup.lock()?;
-        let mut stream = match UnixStream::connect(options.layout.socket()) {
+        let mut stream = match UnixStream::connect(layout.socket()) {
             Ok(stream) => stream,
             Err(_) => {
-                start_daemon(options)?;
-                UnixStream::connect(options.layout.socket())?
+                start_daemon(options, &layout)?;
+                UnixStream::connect(layout.socket())?
             }
         };
         let reply = exchange(&mut stream, &hello)?;
@@ -111,15 +111,15 @@ fn exchange(stream: &mut UnixStream, hello: &Value) -> io::Result<Value> {
     serde_json::from_slice(&reply).map_err(io::Error::other)
 }
 
-fn start_daemon(options: &LspOptions) -> io::Result<()> {
+fn start_daemon(options: &LspOptions, layout: &StateLayout) -> io::Result<()> {
     let log = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
-        .open(options.layout.logs().join("daemon.log"))?;
+        .open(layout.logs().join("daemon.log"))?;
     let mut child = Command::new(&options.exe)
         .arg("daemon")
         .arg("--state-dir")
-        .arg(options.layout.root())
+        .arg(layout.root())
         .args(&options.daemon_args)
         .env_clear()
         .envs(allowed_env())
@@ -167,8 +167,14 @@ fn start_daemon(options: &LspOptions) -> io::Result<()> {
 ///
 /// # Errors
 ///
-/// When the exchange fails after connecting.
+/// When the state or short socket directory is refused, or the exchange fails after
+/// connecting.
 pub fn ask(layout: &StateLayout, op: &str) -> io::Result<Option<Value>> {
+    if layout.root().symlink_metadata().is_err() {
+        return Ok(None);
+    }
+    // The same checks as `lsp`: a socket in a directory someone else controls is not asked.
+    let layout = prepare_state_dir(layout)?;
     let Ok(mut stream) = UnixStream::connect(layout.socket()) else {
         return Ok(None);
     };

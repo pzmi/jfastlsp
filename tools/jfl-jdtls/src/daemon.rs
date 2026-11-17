@@ -30,7 +30,7 @@ use std::time::{Duration, Instant};
 
 use crate::framing::{read_frame, write_frame};
 use crate::json::{Value, json};
-use crate::launch::{BackendSpec, ENV_ALLOWLIST, StateLayout};
+use crate::launch::{BackendSpec, ENV_ALLOWLIST, MAX_SOCKET_PATH, StateLayout};
 use crate::mux::MuxConfig;
 use crate::session::{self, Backend, CLIENT_CAPACITY, Event, Owner, SessionConfig, SessionHandle};
 use crate::worktree::{data_key, worktree_root};
@@ -110,36 +110,65 @@ pub fn check_state_dir(meta: &std::fs::Metadata, euid: u32) -> Option<StateDirFa
 }
 
 /// Creates the state directory `0700` (its parents as usual), or checks an existing one, then
-/// its `logs/`.
+/// its `logs/` and, when the socket path would be too long, the short socket directory. Returns
+/// the layout rooted at the **canonical** state directory, so every alias of it computes the
+/// same socket.
 ///
 /// # Errors
 ///
 /// The filesystem's error, or a refusal naming the path when an existing directory is a symlink,
 /// not a directory, not `0700` or not ours.
-pub fn prepare_state_dir(layout: &StateLayout) -> io::Result<()> {
+pub fn prepare_state_dir(layout: &StateLayout) -> io::Result<StateLayout> {
     let root = layout.root();
     if let Some(parent) = root.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    match DirBuilder::new().mode(0o700).create(root) {
-        Ok(()) => std::fs::set_permissions(root, std::fs::Permissions::from_mode(0o700))?,
+    private_dir(root, "state directory")?;
+    let layout = layout.clone().with_root(root.canonicalize()?);
+    let root = layout.root();
+    match DirBuilder::new().mode(0o700).create(layout.logs()) {
+        Err(e) if e.kind() != io::ErrorKind::AlreadyExists => return Err(e),
+        _ => {}
+    }
+    let socket = layout.socket();
+    if let Some(dir) = socket.parent().filter(|d| *d != root) {
+        // The state path is too long for a socket address: the socket lives in the short
+        // directory, which must be as private as the state directory.
+        let made = match dir.parent() {
+            Some(base) => std::fs::create_dir_all(base),
+            None => Ok(()),
+        };
+        made.and_then(|()| private_dir(dir, "short socket directory")).map_err(|e| {
+            io::Error::new(
+                e.kind(),
+                format!(
+                    "{}/sock would exceed the {MAX_SOCKET_PATH}-byte socket path limit, and {e}",
+                    root.display()
+                ),
+            )
+        })?;
+    }
+    Ok(layout)
+}
+
+/// Creates `dir` with mode `0700`, or checks that an existing one passes [`check_state_dir`].
+fn private_dir(dir: &Path, what: &str) -> io::Result<()> {
+    match DirBuilder::new().mode(0o700).create(dir) {
+        Ok(()) => std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700)),
         Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {
-            let meta = root.symlink_metadata()?;
-            if let Some(fault) = check_state_dir(&meta, rustix::process::geteuid().as_raw()) {
-                return Err(io::Error::new(
+            let meta = dir.symlink_metadata()?;
+            match check_state_dir(&meta, rustix::process::geteuid().as_raw()) {
+                None => Ok(()),
+                Some(fault) => Err(io::Error::new(
                     io::ErrorKind::PermissionDenied,
                     format!(
-                        "refusing state directory {}: {fault:?}; it must be a directory of mode 0700 owned by this user",
-                        root.display()
+                        "refusing {what} {}: {fault:?}; it must be a directory of mode 0700 owned by this user",
+                        dir.display()
                     ),
-                ));
+                )),
             }
         }
-        Err(e) => return Err(e),
-    }
-    match DirBuilder::new().mode(0o700).create(layout.logs()) {
-        Err(e) if e.kind() != io::ErrorKind::AlreadyExists => Err(e),
-        _ => Ok(()),
+        Err(e) => Err(e),
     }
 }
 
@@ -260,8 +289,8 @@ impl Owner for RegistryOwner {
 /// # Errors
 ///
 /// When the state directory, the lock or the socket cannot be set up.
-pub fn run(config: DaemonConfig) -> io::Result<()> {
-    prepare_state_dir(&config.layout)?;
+pub fn run(mut config: DaemonConfig) -> io::Result<()> {
+    config.layout = prepare_state_dir(&config.layout)?;
     let mut lock = open_lock(&config.layout.daemon_lock())?;
     match lock.try_lock() {
         Ok(()) => {}
