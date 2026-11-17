@@ -147,7 +147,7 @@ Every navigation query returns one envelope (ADR 0014):
 ```jsonc
 {
   "query": { "op": "refs", "uri": "file:///repo/.claude/worktrees/a/src/Billing.java", "line": 41, "col": 17 },
-  "view": { "worktree": "/repo/.claude/worktrees/a", "head": "3f2c…", "generation": 118 },
+  "view": { "worktree": "file:///repo/.claude/worktrees/a", "head": "3f2c…", "generation": 118 },
   "target": { "symbol": "com.acme.Billing#charge(Money)", "status": "exact" },
   "exact":    [ { "uri": "...", "range": [41, 17, 41, 23] } ],
   "possible": [ { "uri": "...", "range": [ … ], "why": "receiver type unknown (var in lambda)" } ],
@@ -447,7 +447,16 @@ daemon are the closest published shapes (§16).
 - Frames are JSON-RPC 2.0 with the LSP base protocol's `Content-Length` framing, so the CLI, the
   LSP proxy and the daemon share one frame decoder (`jfl-protocol`'s, which checks the length
   before allocating), one message type (`lsp_server::Message`) and one trace format (ADR 0021);
-  the adapters feed bytes to that decoder rather than use `lsp-server`'s own reader. `jfl-protocol` defines the methods, payloads and limits; the declared length
+  the adapters feed bytes to that decoder rather than use `lsp-server`'s own reader. **Result
+  payloads take the typed path (orchestrator, IDX-03 review):** a response's `result` is
+  serialized from `jfl-protocol`'s typed struct straight to the frame body and decoded from it
+  (`codec::decode_response`); requests, notifications and errors may travel as
+  `lsp_server::Message`, but no adapter round-trips a large result through `serde_json::Value`.
+  `lsp_server::Response::result` is a `Value`, so carrying a result in it costs that round trip:
+  measured by `just bench-protocol` (IDX-03), a 10,000-location `jfl/references` response takes
+  about 9 ms to encode and decode typed and about 20 ms through a `Value`. A frame over the
+  limit is skipped, not fatal: the decoder reports it and the carrier answers with an error and
+  goes on. `jfl-protocol` defines the methods, payloads and limits; the declared length
   is checked against the maximum size before allocation; a version handshake opens every
   connection (§6.6). The daemon side is Tokio; the CLI client is std only, so it starts fast.
 
@@ -719,6 +728,14 @@ Enforced by `#![no_std]` and the `nostd` stage on the pure crates, per-crate cli
   daemon from different releases therefore fail loudly or work, never misread each other.
 - The `--json` schema and the protocol change only by adding optional fields or new messages;
   a rename, removal or retyped field is a new major version and an ADR.
+- **A minor never adds a member that `complete` covers** (hits, or anything that changes what
+  `complete=true` asserts): a reader of an older minor drops unknown members and would pass
+  `complete=true` on over a union it no longer holds, which would be wrong for it (ADR 0014).
+  Such a change is a new major (IDX-03 review; pinned by `jfl-protocol`'s
+  `tests/compat.rs::should_keep_the_members_complete_covers_when_a_minor_is_made`).
+- Frozen across majors, so any proxy can refuse and stop any daemon: `jfl/handshake` with its
+  `protocol` member, the version-mismatch error (-32010) and its `data`, and `jfl/stop` (params
+  `{}`, `null` or omitted; result `{}`).
 - Golden JSON fixtures pin every message and the `--json` output (ver §4).
 
 ---

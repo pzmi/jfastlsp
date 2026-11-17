@@ -205,6 +205,13 @@ bench-process corpus="": _preflight
 bench-domain-envelope: _preflight
     {{cargo}} bench --locked -p jfl-domain --bench envelope
 
+# jfl-protocol's in-process benchmark (IDX-03, divan): a `jfl/references` response of 1,000 and
+# 10,000 locations encoded from the domain envelope, its frame decoded from 64 KiB reads and its
+# body decoded; synthetic, deterministic inputs (doc/bench/README.md); prints each response's
+# bytes first. Reports, never gates. `just bench-protocol`.
+bench-protocol: _preflight
+    {{cargo}} bench --locked -p jfl-protocol --bench protocol
+
 # Every tool of tools/versions.toml on the stages' PATH at its pinned version (xtask's cache first,
 # then mise's install directories), and versions.toml agreeing with mise.toml and mise.lock;
 # fails naming each missing or wrong tool and the fix (XT-02, fnd §8).

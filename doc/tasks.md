@@ -1345,11 +1345,22 @@ but follow in lane CLI (M2). Starts after the go decision.
   bytes. Goldens for every message first, then the codec (golden first, rule 8).
 - **Reuse considered:** `lsp_server::Message` as the JSON-RPC type in the adapters (ADR 0021);
   `serde_json` with `alloc`; `schemars` for the `--json` schema; `jsonrpsee` and `tarpc` rejected.
+- **Done note (IDX-03):** the decoded envelope is a wire type (`WireEnvelope`, its `complete` a
+  `ClaimedCompleteness`) with no conversion back into the domain's, so `jfl_domain::completeness`
+  stays the only source of `complete=true` (`tests/claims.rs`); a `DocumentUri` keeps a URI's
+  text as sent beside its `FileUri` (LSP-01's echo); the view carries the worktree root (IDX-09).
+  The bench item was met with synthetic inputs sized from BENCH-03's fan-out (hits over 1,600
+  files), not a corpus run: the protocol reads no source file. `just bench-protocol` reports it:
+  a 10,000-location `jfl/references` response costs about 9 ms to encode and decode on the typed
+  path and about 20 ms through `serde_json::Value` (1,000 locations: about 1 ms and 1.9 ms), so
+  result payloads take the typed path (plan §5.3). Round 2 (review): a minor never adds a member
+  `complete` covers (plan §6.6); an oversized frame is skipped and reported, not fatal; the
+  cross-major contract (`jfl/handshake`'s `protocol`, -32010, `jfl/stop`) is frozen.
 - **Accept:**
-  - [ ] golden tests for every message; a decode of an unknown field succeeds (additive) and of a different major fails with a typed error
-  - [ ] a frame over the limit is refused before allocating (a test with a lying `Content-Length`); junk and duplicate headers are refused
-  - [ ] property test: encode then decode is identity for generated messages
-  - [ ] runs on the bench corpus (small at least, `just bench`) and reports the metrics it affects; its correctness tests also run against the real-corpus cases that apply (BENCH-05)
+  - [x] golden tests for every message; a decode of an unknown field succeeds (additive) and of a different major fails with a typed error (`crates/jfl-protocol/tests/golden.rs`, `tests/compat.rs`, fixtures in `tests/fixtures/{v1,compat}/`)
+  - [x] a frame over the limit is refused before allocating (a test with a lying `Content-Length`); junk and duplicate headers are refused (`src/frame.rs` tests, `tests/properties.rs::should_refuse_before_allocating_when_content_length_lies`)
+  - [x] property test: encode then decode is identity for generated messages (`tests/properties.rs`)
+  - [x] runs on the bench corpus (small at least, `just bench`) and reports the metrics it affects; its correctness tests also run against the real-corpus cases that apply (BENCH-05): no corpus input applies; `just bench-protocol` times encode, frame decode and envelope decode at 1k and 10k locations
 - **Impact:** protocol (v1).
 
 #### IDX-04: `jfl-process`: argv-only child runner
@@ -1565,6 +1576,9 @@ but follow in lane CLI (M2). Starts after the go decision.
   a version handshake, reconnect with re-sent documents. Model first: the `daemon` conformance
   driver over the in-process host with real sockets and locks in a tempdir; negative control:
   release the lock before removing the socket.
+- **Decided (orchestrator, IDX-03 review):** result payloads take the typed path, as LSP-01's card
+  records (plan §5.3): the daemon writes a response's result from the typed struct to the frame
+  body, and the CLI client decodes it with `codec::decode_response`, not through `Value`.
 - **Reuse considered:** std file locks (Rust 1.89), `rustix`, Tokio's `UnixListener`, `lsp-server`'s
   message type; sccache's spawn handshake, Biome's `lsp-proxy` and buck2's version check copied as
   designs (ADR 0021).
@@ -1601,6 +1615,13 @@ plugin; LSP-06 is M1's gate and makes the bench gate blocking.
   `line_length`); the CLI refuses it (plan §2.3).
 - **Decided (orchestrator, IDX-01 review):** echo the client's URI string as sent for a document it
   opened or named, not `FileUri`'s canonical form; a transcript test with `+` or `@` in a directory.
+- **Decided (orchestrator, IDX-03 review):** result payloads take the typed path: `lsp_server::Message`
+  frames requests, notifications and errors, but a response's result is serialized from
+  `jfl-protocol`'s typed struct to the frame body and decoded with `codec::decode_response`, never
+  round-tripped through `serde_json::Value` (`lsp_server::Response::result` is a `Value`: about
+  20 ms against 9 ms for a 10,000-location response, `just bench-protocol`; plan §5.3). An oversized
+  frame is reported by the decoder (`Progress::oversized`) and skipped; answer it with an error and
+  carry on.
 - **Accept:**
   - [ ] property tests: arbitrary byte streams never panic the framer and never allocate past the limit
   - [ ] transcripts for malformed headers, an oversized frame, an unknown request (`MethodNotFound`) and an unknown notification (ignored) pass
@@ -1707,6 +1728,9 @@ so citations stay valid; IDX-15 is M2's gate.
   grouped by file, `exact` first, capped with a count; exit codes of plan §2.4. `--json` goldens
   first (`insta` JSON snapshots with redactions; the JSON Schema generated by `schemars`, committed
   and checked). The `e2e-tests` stage joins the CI job LSP-01's `lsp-conformance` started.
+- **Note (IDX-03 review, L4):** a decoded `WireEnvelope` keeps the daemon's `schema_version`; a
+  printer that re-encodes it after dropping a newer minor's unknown members must write
+  `SCHEMA_VERSION`, or forward the daemon's bytes unchanged.
 - **Reuse considered:** `clap`, `schemars`, `insta`, `assert_cmd`, `trycmd`; LSAP's compact "Showing
   2 of 12" output as an idea.
 - **Accept:**

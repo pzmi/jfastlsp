@@ -1,0 +1,1 @@
+{"jsonrpc":"2.0","id":0,"error":{"code":-32010,"message":"protocol 2.0 is not compatible with the daemon's 1.0: restart the daemon","data":{"client":{"major":2,"minor":0},"daemon":{"major":1,"minor":0}}}}

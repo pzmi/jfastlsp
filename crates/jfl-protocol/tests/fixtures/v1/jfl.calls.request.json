@@ -1,0 +1,1 @@
+{"jsonrpc":"2.0","id":6,"method":"jfl/calls","params":{"uri":"file:///repo/.claude/worktrees/a/src/main/java/com/acme/Billing.java","line":40,"col":18,"position_encoding":"utf-16","direction":"incoming"}}

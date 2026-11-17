@@ -11,6 +11,19 @@ description = "The daemon wire protocol and the `--json` schema: versioned messa
 
 [dependencies]
 jfl-domain = { path = "../jfl-domain" }
+serde = { version = "1.0.229", default-features = false, features = ["derive", "alloc"] }
+serde_json = { version = "1.0.154", default-features = false, features = ["alloc"] }
+thiserror = { version = "2.0.21", default-features = false }
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+divan = { version = "0.1.21", default-features = false, features = ["help"] }
+proptest = { version = "1.12.0", default-features = false, features = ["std"] }
+
+# The protocol's share of a query's budget in process (IDX-03): encode, frame decode and envelope
+# decode of a 1k- and a 10k-location response; `just bench-protocol`.
+[[bench]]
+name = "protocol"
+harness = false

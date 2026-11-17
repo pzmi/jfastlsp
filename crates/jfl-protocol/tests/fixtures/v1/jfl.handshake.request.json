@@ -1,0 +1,1 @@
+{"jsonrpc":"2.0","id":0,"method":"jfl/handshake","params":{"protocol":{"major":1,"minor":0},"client":{"kind":"lsp","version":"0.1.0"}}}

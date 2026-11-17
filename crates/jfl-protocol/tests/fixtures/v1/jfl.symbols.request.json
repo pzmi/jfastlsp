@@ -1,0 +1,1 @@
+{"jsonrpc":"2.0","id":4,"method":"jfl/symbols","params":{"worktree":"file:///repo/.claude/worktrees/a","query":"Bill","kind":"class","limit":50,"position_encoding":"utf-8"}}

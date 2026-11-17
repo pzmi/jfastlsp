@@ -1,0 +1,1 @@
+{"jsonrpc":"2.0","method":"jfl/didOpen","params":{"uri":"file:///repo/.claude/worktrees/a/src/main/java/com/acme/Billing.java","version":1,"text":"package com.acme;\n\nclass Billing {}\n"}}

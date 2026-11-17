@@ -94,6 +94,13 @@ jfl-eval = { serde = ["default", "derive"], serde_json = ["default"], toml = ["d
 # (cargo_metadata), MIT OR Apache-2.0, its build script reviewed in deny.toml.
 jfl-domain = { thiserror = [] }
 
+# jfl-protocol (IDX-03): serde (derive) and serde_json for the JSON-RPC payloads, with `alloc` and
+# no default features so the crate stays no_std (the `nostd` stage builds it for
+# x86_64-unknown-none; plan §16.2, the card's "serde_json with alloc"). thiserror for the typed
+# refusals (fnd §4.3). All in the graph already (jfl-architecture, jfl-domain), MIT OR Apache-2.0,
+# their build scripts reviewed in deny.toml's bypass list.
+jfl-protocol = { serde = ["alloc", "derive"], serde_json = ["alloc"], thiserror = [] }
+
 # jfl-process (IDX-04): rustix gives the safe calls std lacks: the group kill (killpg), the
 # leader's exit without reaping it (waitid WNOWAIT), Linux's pidfd and poll(2), so the runner waits
 # on both pipes and the exit with no thread and no sleep (plan §16.2 lists rustix 1.1.6); no
@@ -115,6 +122,10 @@ jfl-conformance = { toml = ["default"] }
 # in-process position benchmark (doc/bench/README.md), without `wrap_help`, whose terminal_size
 # would bring rustix and its build script for a help text. All MIT OR Apache-2.0.
 jfl-domain = { divan = ["help"], line-index = ["default"], proptest = ["std"] }
+# jfl-protocol (IDX-03): proptest for the frame decoder on arbitrary bytes and the encode-then-decode
+# identities (ver §2, §8), divan for the in-process protocol benchmark; the same features as
+# jfl-domain's, for the same reasons.
+jfl-protocol = { divan = ["help"], proptest = ["std"] }
 
 [external.build]
 

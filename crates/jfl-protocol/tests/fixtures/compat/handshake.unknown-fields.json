@@ -1,0 +1,1 @@
+{"jsonrpc":"2.0","id":0,"method":"jfl/handshake","params":{"protocol":{"major":1,"minor":3},"client":{"kind":"ide","version":"0.2.0","features":["streaming"]},"capabilities":{"cancel":true}}}

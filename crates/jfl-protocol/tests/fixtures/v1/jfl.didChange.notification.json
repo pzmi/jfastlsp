@@ -1,0 +1,1 @@
+{"jsonrpc":"2.0","method":"jfl/didChange","params":{"uri":"file:///repo/.claude/worktrees/a/src/main/java/com/acme/Billing.java","version":2,"position_encoding":"utf-16","changes":[{"range":[2,6,2,13],"text":"Invoice"},{"range":null,"text":"package com.acme;\n"}]}}
