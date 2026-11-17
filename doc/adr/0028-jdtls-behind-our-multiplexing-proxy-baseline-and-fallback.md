@@ -32,25 +32,6 @@ no production crate:
   write to disk; the last open buffer wins), cancellation forwarded, a client's exit never stops
   the jdtls others use; `lsp-server` for framing (ADR 0020).
 
-Amended 2026-11-17 (EVAL-11), as built:
-
-- Framing is the tool's own bounded `Content-Length` reader, not `lsp-server`: a proxy forwards
-  raw bodies and must refuse an oversized frame before allocating it, which `lsp-server`'s
-  `Message::read` does not, and `deny.toml` wraps `lsp-server` to the LSP and IPC adapters.
-  Messages are decoded only as far as the JSON-RPC envelope (`serde_json`, `RawValue`):
-  payloads the proxy does not rewrite are forwarded byte for byte.
-- jdtls is pinned at 1.61.0, the newest release that runs on Java 21 (1.62.0 and later need
-  Java 25).
-- Binding is per connection (the proxy's working directory), not per URI; the outer checkout's
-  jdtls excludes `**/.claude/worktrees/**` from its import so nested agent worktrees are not
-  imported twice.
-- The syntax server is a whole-session mode (`--syntax-server`); running it until the import
-  finishes and then switching to the full server is not built.
-- The socket: the `0700` state directory (created so, an existing one refused unless a real
-  directory of mode `0700` owned by the effective uid) is the access control everywhere; the
-  peer-uid check (`SO_PEERCRED`, through `rustix`) runs on Linux only. On macOS it is the
-  directory check only, as `rustix` has no `getpeereid`.
-
 It is the **kill-criterion baseline** (plan §1.3) and an E0 and E4 arm. If DEC-02 stops the
 project, it is the deliverable, promoted from tool to product by that decision.
 
@@ -67,3 +48,35 @@ front that the same way. About a week of phase 0 work.
 - The stock plugin as the baseline: duplicated per subagent and colliding by basename; unfair.
 - Serena (GPL-3.0 application; its jdtls collision fix is an open PR) and Plumb (Go, a shared
   daemon with one LSP per project root, no worktree story): ideas only.
+
+## Amended 2026-11-17 (orchestrator, EVAL-11 and FND-08): as built
+
+This amendment was first written inline in the Decision section (EVAL-11) and moved here by
+FND-08; its last two items are FND-08's.
+
+- Framing is the tool's own bounded `Content-Length` reader, not `lsp-server`: a proxy forwards
+  raw bodies and must refuse an oversized frame before allocating it, which `lsp-server`'s
+  `Message::read` does not, and `deny.toml` wraps `lsp-server` to the LSP and IPC adapters.
+  Messages are decoded only as far as the JSON-RPC envelope (`serde_json`, `RawValue`):
+  payloads the proxy does not rewrite are forwarded byte for byte.
+- jdtls is pinned at 1.61.0, the newest release that runs on Java 21 (1.62.0 and later need
+  Java 25).
+- Binding is per connection (the proxy's working directory), not per URI; the outer checkout's
+  jdtls excludes `**/.claude/worktrees/**` from its import so nested agent worktrees are not
+  imported twice.
+- The syntax server is a whole-session mode (`--syntax-server`); running it until the import
+  finishes and then switching to the full server is not built.
+- The socket (c2668b9): `<state>/sock` when that path fits a socket address (`MAX_SOCKET_PATH`,
+  under macOS's 104 bytes and Linux's 108), else `/tmp/jfl-jdtls-<euid>/<key>.sock`, keyed on
+  the canonical state directory so two state directories never share a socket. A fixed short
+  base, not `$TMPDIR`, which may itself be long (a sandbox's long `TMPDIR` is what broke
+  `land.sh`). The access control is the directory that holds the socket, whichever it is: created
+  `0700`, and an existing one refused unless it is a real directory (not a symlink) of mode
+  `0700` owned by the effective uid (`daemon::prepare_state_dir`), so the short directory under
+  the world-writable `/tmp` is held to the state directory's rules. The peer-uid check
+  (`SO_PEERCRED`, through `rustix`) runs on Linux only; on macOS it is the directory check only,
+  as `rustix` has no `getpeereid`. Plan §5.3 now states this policy, Proposed for the product
+  daemon (IDX-12).
+- The daemon's idle exit and the hand-shake and reply deadlines are timed waits
+  (`recv_timeout`, socket read timeouts), which fnd §2.4 now puts under the `sleep` grant
+  (FND-08, the FND-05 checkpoint's N7): `jfl-jdtls` holds it.

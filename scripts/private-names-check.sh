@@ -23,7 +23,9 @@
 # sha256("<salt>:<candidate>"); a second pass splits camelCase first, so `fooBarService` is also
 # read as foo, bar, service. "Foo Bar", "foo-bar" and "FooBar" therefore match one entry, the one
 # scripts/private-name-add.sh writes, whatever the accents. It needs no secret. No substring,
-# homoglyph or misspelling matching (fnd §7.4).
+# homoglyph or misspelling matching, and (accepted limits, fnd §7.4) no URL-encoded join
+# (`foo%20bar`), no name split across a line break (each line is tokenised alone), and in --all
+# mode no file with a NUL byte in its first 8 KiB (the diff mode reads such files with --text).
 #
 # Usage: scripts/private-names-check.sh [--all] [--hashes FILE] [--base REV]
 # Exit: 0 clean (or no hash file outside CI), 1 a match or a missing or empty hash file under

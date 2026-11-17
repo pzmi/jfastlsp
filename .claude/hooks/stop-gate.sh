@@ -6,9 +6,10 @@
 # on the merged tree when landing; this hook is a backstop, not that gate.
 #
 # Runs only when Rust code, manifests, the lockfile, the architecture policy,
-# `deny.toml`, a `clippy.toml`, the justfile, the tool pins, a Quint model, a
-# golden Java fixture or an LSP transcript changed; a clean tree or a
-# docs-only change stops at once, and so does a repository with no Cargo.toml
+# `deny.toml`, a `clippy.toml`, the justfile, the tool pins (`mise.*`), the
+# gate's configuration (`.config/`, any `.cargo/`, `.gitleaks.toml`), a script,
+# a workflow (`.github/`), a Quint model, a golden Java fixture or an LSP
+# transcript changed (FND-08); a clean tree or a docs-only change stops at once, and so does a repository with no Cargo.toml
 # yet (before FND-01) or a machine without cargo or git. Once the justfile has
 # `quick` (FND-02), a missing `just` is a failure with the install command,
 # never a silent fall back to the cargo-only gate. `stop_hook_active` is true
@@ -33,12 +34,15 @@ command -v git >/dev/null 2>&1 || exit 0
 git rev-parse --is-inside-work-tree >/dev/null 2>&1 || exit 0
 
 changed="$(git status --porcelain --untracked-files=all 2>/dev/null | awk '{print $NF}' \
-  | grep -E '\.rs$|(^|/)Cargo\.toml$|^Cargo\.lock$|^architecture\.toml$|^deny\.toml$|(^|/)clippy\.toml$|^justfile$|^mise\.(toml|lock)$|\.qnt$|^rust-toolchain(\.toml)?$|^\.cargo/config\.toml$|^fixtures/|\.java$' || true)"
+  | grep -E '\.rs$|(^|/)Cargo\.toml$|^Cargo\.lock$|^architecture\.toml$|^deny\.toml$|(^|/)clippy\.toml$|^justfile$|^mise\.|\.qnt$|^rust-toolchain(\.toml)?$|(^|/)\.cargo/|^\.config/|^\.github/|^scripts/|^\.gitleaks\.toml$|^fixtures/|\.java$' || true)"
 [ -z "$changed" ] && exit 0
 
 # The sandbox runs at most two lanes beside this checkout (CLAUDE.md, Sandbox).
 export CARGO_BUILD_JOBS=2 CARGO_INCREMENTAL=0
-case ":$PATH:" in *":$HOME/.local/bin:"*) ;; *) export PATH="$HOME/.local/bin:$PATH" ;; esac
+# The same `just` as scripts/land.sh: the first on PATH (mise's shim when mise is set up), with
+# the bootstrap's ~/.local/bin only as the last resort. Either way the justfile runs the stages'
+# tools from their install directories, and `_preflight` refuses a mise [env] (fnd §3.6).
+case ":$PATH:" in *":$HOME/.local/bin:"*) ;; *) export PATH="$PATH:$HOME/.local/bin" ;; esac
 
 if [ -f justfile ] && grep -qsE '^quick([[:space:]]|:)' justfile; then
   if ! command -v just >/dev/null 2>&1; then

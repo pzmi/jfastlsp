@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
-# The `secrets` stage (FND-04, fnd §7.4): gitleaks over the full history of a repository with the
-# default ruleset and nothing allowlisted. The report is redacted: it names the rule, the file,
-# the line and the commit, never the secret.
+# The `secrets` stage (FND-04, FND-08, fnd §7.4): gitleaks over the full history of a repository
+# with the default ruleset and no path allowlisted. The policy is .gitleaks.toml, which must be
+# exactly what scripts/gitleaks-config.sh derives from the gitleaks on PATH: its default
+# configuration without the global [allowlist] that skips images, PDFs, node_modules/, go.sum,
+# package-lock.json and other lockfiles (rules keep their own value allowlists of placeholders).
+# The report is redacted: it names the rule, the file, the line and the commit, never the secret.
 #
 # Usage: scripts/secrets-check.sh [--config FILE] [REPO]    (default: this repository)
 # Exit: 0 no finding, 1 a finding, a shallow history or a policy that allowlists something,
@@ -29,14 +32,12 @@ command -v gitleaks >/dev/null 2>&1 || {
   exit 1
 }
 [ -f "$config" ] || { echo "secrets: $config is missing" >&2; exit 1; }
-# The policy is exactly `[extend]` and `useDefault = true`: any other key can disable a rule, add an
-# allowlist or redefine one, and a pattern-based refusal misses spellings (indented tables, keys
-# under [extend]). Comments and blank lines are free.
-policy="$(grep -vE '^[[:space:]]*(#|$)' "$config" | sed -E 's/[[:space:]]+/ /g; s/^ //; s/ $//')"
-if [ "$policy" != "$(printf '[extend]\nuseDefault = true')" ]; then
-  echo "secrets: $config must hold only '[extend]' and 'useDefault = true'; the policy allows nothing and disables nothing (fnd §7.4)" >&2
+# The policy is pinned by its shape, not checked for bad keys: byte for byte the generated one, so
+# no edit can disable a rule, add an allowlist or redefine one.
+bash "$root/scripts/gitleaks-config.sh" --check "$config" || {
+  echo "secrets: $config must be exactly the generated policy; it allows no path and disables nothing (fnd §7.4)" >&2
   exit 1
-fi
+}
 # The other two ways to wave a finding through are refused as well: a committed .gitleaksignore
 # (its fingerprints) and `gitleaks:allow` comments in the scanned text.
 if git -C "$repo" log --all --name-only --format= -- '.gitleaksignore' '**/.gitleaksignore' | grep -q .; then

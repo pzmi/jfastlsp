@@ -24,7 +24,7 @@ Verify test coverage and run the gate for the working-tree diff. Read `CLAUDE.md
    - **conformance** (ver §6): Quint traces replayed against the real code, plus the negative control
    - **differential and oracle** (ver §7): the completeness oracle (an inserted caller appears in `exact ∪ possible` or `complete=false`) and the envelope-honesty mutation (a flipped resolver rule makes a wrong `exact` fail the suite)
 3. Conventions: `should_<outcome>_when_<condition>`, `// given / when / then`, real objects over fakes, no mocking frameworks, no `#[ignore]`, no sleeps (fake clock, `tokio::time::pause`; real-OS waits only via the testkit `poll` helper), tempdir sockets, `tempfile` dirs. Never assert on log lines. Never the network or a target Java repository.
-4. Run the gate (`just check`, or the fallback `doc/tasks.md` names) in the foreground with the lane's `CARGO_TARGET_DIR`, never in the background. Iterate to green. A missing tool is installed at its pinned version or reported; a skipped check is never green. Kill any daemon, JVM worker or child you started, by its PID.
+4. Run the gate (`just check`) in the foreground with the lane's `CARGO_TARGET_DIR`, never in the background. Iterate to green. A missing tool is installed at its pinned version or reported; a skipped check is never green. Kill any daemon, JVM worker or child you started, by its PID.
 5. A product task: `just bench <suite>` on the corpus (small at least) and the real-corpus cases (BENCH-05) where they apply; record the metrics it changes, with corpus and machine, for the report.
 6. Failures outside your diff (someone else's WIP): report them, do not fix or hide them.
 

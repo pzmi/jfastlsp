@@ -26,7 +26,10 @@
 //!   as `cargo=true` or a flag); a job with `container:` or `services:`; an allowed action that
 //!   omits an input of [`REQUIRED_INPUTS`];
 //! - `required-checks.md`'s table under "## The checks" and `ci.yml` disagreeing on a job's id,
-//!   display name, runner or the `just` invocations it runs, in order.
+//!   display name, runner or the `just` invocations it runs, in order;
+//! - `on:` other than exactly [`TRIGGERS`]: `push` to `main` with no other filter, and bare
+//!   `pull_request` and `workflow_dispatch` (a `paths-ignore`, a `branches-ignore` or a dropped
+//!   `push` would let a landed commit skip CI; FND-08).
 //!
 //! A stage hidden in a recipe that is not a stage (`platform-tests` excepted, checked above) is not
 //! counted, and the doc comparison fails because the doc names each recipe a job runs.
@@ -144,6 +147,10 @@ pub const REQUIRED_INPUTS: [(&str, &str); 2] = [
     ("actions/checkout@", "persist-credentials"),
 ];
 
+/// `ci.yml`'s `on:`, exactly (FND-08): every push to `main` runs, with no path or branch filter,
+/// and every pull request and manual dispatch, unfiltered.
+pub const TRIGGERS: &str = "push:\n  branches: [main]\npull_request:\nworkflow_dispatch:\n";
+
 /// Runs the rule over the three files of `tree`.
 pub fn check(tree: &dyn Tree) -> Vec<Finding> {
     let mut findings = Vec::new();
@@ -210,6 +217,16 @@ pub fn check_files(workflow: &str, justfile: &str, doc: &str) -> Vec<Finding> {
     }
     for problem in allowed_env(root.get("env"), "the workflow", Level::Workflow) {
         wf(problem);
+    }
+    let triggers: Option<Value> = serde_norway::from_str(TRIGGERS).ok();
+    if root.get("on").is_none() || root.get("on") != triggers.as_ref() {
+        wf(format!(
+            "`on:` must be exactly ci.rs's TRIGGERS (push to main with no filter, pull_request, workflow_dispatch), not {}",
+            root.get("on")
+                .map(scalar)
+                .unwrap_or_default()
+                .replace('\n', " ")
+        ));
     }
 
     let mut ran: BTreeMap<String, Vec<String>> = BTreeMap::new();

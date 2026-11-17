@@ -21,10 +21,11 @@ instruction: "read `.claude/skills/work/stations/<station>.md` and follow it".
 
 Every station that says "the gate" means the command `doc/tasks.md` names as live:
 
-| Stage of the repo | Gate |
-|:--|:--|
-| Before FND-02 (no `just check`) | `cargo fmt --all --check && cargo clippy --workspace --all-targets --locked -- -D warnings && cargo test --workspace --locked` |
-| FND-02 landed | `just quick` while iterating, `just check` before commit (tools from `bash scripts/bootstrap-tools.sh`) |
+`just quick` while iterating, `just check` before commit (tools from
+`bash scripts/bootstrap-tools.sh`); `just ci-parity` too when the task changes tests that start
+cargo, nextest or a scratch workspace. A change to a gate recipe, a gate script or the gate's
+configuration moves its pin in `.config/gate.sha256` in the same commit (fnd §3.6), and every
+new check is an allowlist or a pinned shape, never a list of bad patterns (fnd §3).
 
 `quick` is not `check` (fnd §9). Never report `quick` as the full gate.
 
@@ -71,7 +72,7 @@ Always:
 - Commit with the subject `<ID>: <summary>`, a body with why and an `Impact:` line, `--author "Patryk Żmigrodzki <pzmi@users.noreply.github.com>"`, and a trailer block last, in the order `Signed-off-by`, `Co-Authored-By`, `Claude-Session` (ADR 0003). `git commit -s` appends `Signed-off-by` after an existing trailer block, so write every line by hand and drop `-s`
 - Use the `Co-Authored-By` and `Claude-Session` lines the caller's (or session's) attribution instructions give; add none of your own
 - Stage only files you changed (never `git add -A` or `git add .`)
-- Record an architectural decision as an ADR: a change that adds or reverses one adds a new record with `adrs new "<title>"` (a number the caller reserved: copy `doc/adr/template.md` to `NNNN-title.md`; Nygard format: Status, Context, Decision, Consequences; add the row to `doc/adr/README.md` and run `just adr-index`) or supersedes an existing one, in the same commit. Before FND-03 lands, copy `doc/adr/template.md` by hand and add the index row
+- Record an architectural decision as an ADR: a change that adds or reverses one adds a new record with `adrs new "<title>"` (a number the caller reserved: copy `doc/adr/template.md` to `NNNN-title.md`; Nygard format: Status, Context, Decision, Consequences; add the row to `doc/adr/README.md` and run `just adr-index`) or supersedes an existing one, in the same commit
 - Reuse before building (ADR 0019): before adding a subsystem, read the card's `Reuse considered:` line and plan §16; a hand-built subsystem with a maintained alternative needs an ADR
 - Measure speed (ADR 0031): a product task runs its benchmarks on the bench corpus (small at least, `just bench`) and reports the metrics it changes; never loosen a budget in plan §1.7
 - Stop at every checkpoint task (⛳ in `doc/tasks.md`: FND-05, FORMAL-05, DEC-02, IDX-15, LSP-06, SEM-07, REL-06) after the commit: report that a `/review` range is due, and do not start the next task

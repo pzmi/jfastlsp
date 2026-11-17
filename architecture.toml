@@ -23,7 +23,7 @@ process = ["jfl-process", "jfl-testkit", "jfl-architecture", "jfl-bench", "jfl-e
 socket = ["jfl-adapter-ipc", "jfl-jdtls"]
 fs = ["jfl-adapter-fs", "jfl-adapter-git", "jfl-adapter-store", "jfl-adapter-classfile", "jfl-adapter-javac", "jfl-adapter-gradle", "jfl-adapter-ipc", "jfl-composition", "jfl-testkit", "jfl-conformance", "jfl-architecture", "jfl-bench", "jfl-eval", "jfl-jdtls", "jfl-oracle"]
 spawn = ["jfl-adapter-ipc", "jfl-composition", "jfl-jdtls"]
-sleep = ["jfl-testkit"]
+sleep = ["jfl-testkit", "jfl-jdtls"]
 clock = ["jfl-process", "jfl-composition", "jfl-testkit", "jfl-bench", "jfl-eval", "jfl-jdtls"]
 env = ["jfl-process", "jfl-composition", "jfl-cli", "jfl-conformance", "jfl-architecture", "jfl-bench", "jfl-eval", "jfl-jdtls"]
 independent = ["jfl-oracle", "jfl-eval", "jfl-jdtls", "jfl-bench"]
@@ -61,7 +61,9 @@ jfl-bench = []
 # The architecture test (FND-07): cargo_metadata reads the graph, toml and serde parse the policy
 # and the manifests strictly (`deny_unknown_fields`); ADR 0030. serde_norway reads ci.yml for
 # ARCH-ci-lockstep (FND-05): a maintained serde_yaml fork, MIT OR Apache-2.0, no build script.
-jfl-architecture = { cargo_metadata = ["default"], serde = ["default", "derive"], serde_norway = ["default"], toml = ["default"] }
+# sha2 hashes the gate's pinned recipes and scripts for ARCH-gate-config (FND-08): RustCrypto,
+# MIT OR Apache-2.0, no build script; the SHA-256 lines read the same as `sha256sum`.
+jfl-architecture = { cargo_metadata = ["default"], serde = ["default", "derive"], serde_norway = ["default"], sha2 = ["default"], toml = ["default"] }
 # jfl-jdtls (EVAL-11, ADR 0028): serde_json parses only the JSON-RPC envelope and forwards params,
 # result and error as raw values (raw_value); serde derives the envelope; sha1_smol keys jdtls's
 # -data on the full worktree path; rustix gives the effective uid, the socket peer's uid and the

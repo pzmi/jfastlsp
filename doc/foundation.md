@@ -112,7 +112,10 @@ Plan §6.5's table is enforced per crate, because clippy has no module-level con
   - `fs`: `std::fs` functions and types, the `Path` methods that touch the filesystem, Tokio's fs;
   - `spawn`: `std::thread::spawn`, `Builder::spawn`, `scope`, `Scope::spawn`,
     `Builder::spawn_scoped`, `tokio::spawn` and its `spawn_blocking`/`spawn_local`;
-  - `sleep`: `std::thread::sleep`, `park_timeout`, `tokio::time::sleep`, `sleep_until`;
+  - `sleep`: every timed wait, not only a sleep (FND-08): `std::thread::sleep`, `park_timeout`,
+    `Receiver::recv_timeout`, `Condvar::wait_timeout*`, the Unix sockets' `set_read_timeout` and
+    `set_write_timeout`, crossbeam's `recv_timeout`/`recv_deadline`, and Tokio's `sleep`,
+    `sleep_until`, `timeout`, `timeout_at`, `interval` and `interval_at`;
   - `clock`: `SystemTime::now`, `Instant::now`, `SystemTime::elapsed`, `Instant::elapsed`,
     Tokio's `Instant::now`;
   - `env`: `std::env::var`, `var_os`, `vars`, `vars_os`, `set_var`, `remove_var`, `home_dir`,
@@ -144,7 +147,7 @@ Plan §6.5's table is enforced per crate, because clippy has no module-level con
   | `jfl-conformance` | fs, env | committed traces; seed and step parameters from the recipe |
   | `jfl-architecture` | process, fs, env | runs `cargo metadata`, `git`, `bash scripts/*.sh` on scratch repositories |
   | `jfl-bench`, `jfl-eval` | process, fs, clock, env | drive binaries and JVMs, write results, time runs |
-  | `jfl-jdtls` | process, fs, socket, spawn, clock, env | its per-user daemon on a Unix socket, one jdtls per worktree |
+  | `jfl-jdtls` | process, fs, socket, spawn, sleep, clock, env | its per-user daemon on a Unix socket, one jdtls per worktree; its idle and hand-shake deadlines are timed waits (ADR 0028, amended) |
   | `jfl-oracle` | fs | reads indexes and reports |
 
   Pure and application crates get none. A crate's tests share its `clippy.toml`, so a test that
@@ -200,6 +203,17 @@ crates, `[workspace.lints]`, `trybuild` compile-fail tests for critical APIs), *
 A tool that is absent, a selector that matches nothing, or a file that fails to parse is a
 failure, never a pass.
 
+**Standing principle: allowlists and pinned shapes, never lists of bad patterns** (FND-08). Every
+check of the gate states what may be there, and everything else fails: the environment
+variables `_preflight` lets through, the keys a cargo or mise configuration may hold, the inputs
+of an action, the shape of a `run:` line, the sources a dependency may come from, the keys of
+`.config/nextest.toml`, the bytes of the gitleaks policy, the hashes of the gate's own recipes.
+A list of known-bad spellings (a regex for `runner`, a denylist of TOML forms) is refused in
+review: each of FND-02, FND-07 and FND-05 needed two or three review rounds because a reviewer
+found one more spelling (quoted keys, literal keys, unicode escapes, a C raw string). Where the
+allowed shape cannot be parsed whole, it is a strict subset that fails closed: a line outside
+the subset fails, even when it would have been harmless.
+
 ### 3.1 `architecture.toml` schema
 
 ```toml
@@ -223,7 +237,7 @@ process = ["jfl-process", "jfl-testkit", "jfl-architecture", "jfl-bench", "jfl-e
 socket  = ["jfl-adapter-ipc", "jfl-jdtls"]
 fs      = [ ... ]             # §2.4's table
 spawn   = ["jfl-adapter-ipc", "jfl-composition", "jfl-jdtls"]
-sleep   = ["jfl-testkit"]
+sleep   = ["jfl-testkit", "jfl-jdtls"]
 clock   = ["jfl-process", "jfl-composition", "jfl-testkit", "jfl-bench", "jfl-eval", "jfl-jdtls"]
 env     = ["jfl-process", "jfl-composition", "jfl-cli", "jfl-conformance", "jfl-architecture", "jfl-bench", "jfl-eval", "jfl-jdtls"]
 independent = ["jfl-oracle", "jfl-eval", "jfl-jdtls", "jfl-bench"]
@@ -270,8 +284,12 @@ plus a small source scan:
    `should_<outcome>_when_<condition>` and carry `// given`, `// when`, `// then`; no
    `#[ignore]`; no `#[allow]`/`#[expect]`/`#[macro_export]` without an `[exceptions]` row citing
    an ADR; no `cfg!(target_os…)` branch; `#![no_std]` present in each pure crate's `lib.rs`.
-4. **CI lockstep:** `ci.yml`, the `justfile` (`just --dump --dump-format json`) and
-   `required-checks.md` agree (fnd §7.2).
+4. **CI lockstep:** `ci.yml` (its `on:` triggers included), the `justfile` (read line by line:
+   `check_stages` and the recipe headers) and `required-checks.md` agree (fnd §7.2).
+5. **Gate configuration** (`ARCH-gate-config`, FND-08, §3.6): the gate's own recipes and scripts
+   match their pins in `.config/gate.sha256`; `.config/nextest.toml`, `mise.toml` and
+   `rust-toolchain.toml` keep their allowlisted shapes; the tree holds no cargo configuration
+   file and no other mise or toolchain file.
 
 Diagnostics read `ARCH-<id>: message (at path[:line])` with the full dependency path for a
 transitive edge.
@@ -284,7 +302,7 @@ Each rule names the layer that enforces it and the task that lands it.
 |:--|:--|:--|:--|
 | `ARCH-policy-schema`, `ARCH-metadata`, `ARCH-missing-member`, `ARCH-not-a-member`, `ARCH-missing-crate`, `ARCH-empty-selector`, `ARCH-duplicate-category` | the policy, the metadata or the inventory disagree | architecture test | FND-07 |
 | `ARCH-forbidden-edge`, `ARCH-forbidden-dev-edge`, `ARCH-undeclared-build-dep`, `ARCH-production-closure`, `ARCH-independent-oracle`, `ARCH-layer-isolation`, `ARCH-policy-cycle` | an edge outside plan §6.3; an adapter naming a sibling adapter, composition or the CLI (by any edge, or in the table); a cycle in the table | architecture test | FND-07 |
-| `ARCH-unlisted-external`, `ARCH-external-feature` | §2.5, direct dependencies | architecture test | FND-07 |
+| `ARCH-unlisted-external`, `ARCH-external-feature` | §2.5, direct dependencies, by name and by source (a member's own path or crates.io; FND-08); any package of the graph from elsewhere; `[patch]` or `[replace]` | architecture test | FND-07 |
 | `ARCH-external-source`, `ARCH-anyhow-in-library`, adapter-only crates outside their adapter | §2.5, transitive | cargo-deny | FND-02 |
 | `ARCH-domain-purity` | std or I/O in a pure crate or its closure | compiler (`#![no_std]`) and the `nostd` stage (§2.3) | FND-02 (stage), FND-07 (negative fixture) |
 | `ARCH-pure-clippy-config`, `ARCH-process-authority`, `ARCH-socket-authority`, `ARCH-fs-authority`, `ARCH-clock-authority`, `ARCH-env-authority`, `ARCH-detached-spawn`, `ARCH-unbounded-channel`, `ARCH-test-sleep` | §2.3, §2.4 | clippy lists | FND-02 |
@@ -293,8 +311,9 @@ Each rule names the layer that enforces it and the task that lands it.
 | `ARCH-unsafe-code`, `ARCH-unfinished-code`, `ARCH-nightly-features` | `unsafe`, `todo!`/`unimplemented!`/`dbg!`, `#![feature]` | `[workspace.lints]` (`unsafe_code = "forbid"`, clippy `todo`, `dbg_macro`) and the stable toolchain | FND-01 |
 | `ARCH-lint-config`, `ARCH-lint-suppression` | lints loosened; `#[allow]`/`#[expect]`/`#[macro_export]` without an ADR-cited exception | architecture test (source scan) | FND-07 |
 | `ARCH-ignored-test`, `ARCH-test-name`, `ARCH-test-structure`, `ARCH-platform-branch` | `#[ignore]`; a misnamed test; missing sections; a `cfg!(target_os…)` branch | architecture test (source scan) | FND-07 |
-| `ARCH-hidden-source` | `#[path]`, `include!` or a target root outside its crate's directory: code the source scan would not read | architecture test (source scan, graph) | FND-07 |
-| `ARCH-ci-lockstep` | a stage in no CI job or two; `required` missing a job; a swallowed failure | architecture test | FND-05 |
+| `ARCH-hidden-source` | `#[path]`, `include!`, a target root outside its crate's directory, or a file the scan's lexer cannot follow to its end (it fails closed): code the source scan would not read | architecture test (source scan, graph) | FND-07 |
+| `ARCH-ci-lockstep` | a stage in no CI job or two; `required` missing a job; a swallowed failure; `on:` other than push to main, pull requests and dispatch | architecture test | FND-05 |
+| `ARCH-gate-config` | a gate recipe or script that differs from its pin; `.config/nextest.toml`, `mise.toml` or `rust-toolchain.toml` outside its shape; a cargo, mise or toolchain configuration file elsewhere in the tree | architecture test | FND-08 |
 | `ARCH-fixtures-lock` | a golden fixture whose digest differs from `fixtures.lock` | architecture test | IDX-07 |
 | `ARCH-fuzz-crate` | the fuzz crate outside its policy rows | architecture test | REL-03 |
 
@@ -342,11 +361,26 @@ environment that steers the build, by allowlist: every `CARGO*`, `RUSTC*`, `RUST
 `CARGO_HTTP_*`, `CARGO_REGISTRIES_CRATES_IO_PROTOCOL`, `RUSTUP_HOME` and rustup's download
 settings, `RUSTUP_TOOLCHAIN` naming the pinned toolchain (bare or with one of ADR 0006's host
 triples), `RUSTFLAGS` empty or `-D warnings`, and `NEXTEST_PROFILE` naming a profile of
-`.config/nextest.toml`; `__CARGO_*` and `PROPTEST_*` are refused too (FND-07). It also refuses a
-cargo config file (`.cargo/config{,.toml}` in any ancestor of the working directory, or in `CARGO_HOME`) that sets
-compiler flags, a wrapper, `rustc`/`rustdoc`, a target, runner or linker, a profile, an alias,
-`[env]` or `[unstable]`, in any TOML form (a table header, a dotted key or an inline table,
-quoted or not). Independently, every cargo of the gate runs with `RUSTFLAGS="-D
+`.config/nextest.toml`; `__CARGO_*` and `PROPTEST_*` are refused too (FND-07). Cargo
+configuration files are allowlisted by place and shape (FND-08): inside the repository none may
+exist (tracked or untracked, at any depth, or in an ancestor of the working directory up to the
+root), since one can set a runner, an alias or flags before any check runs (the FND-05
+checkpoint's N1 spelled `target` and `runner` with TOML unicode escapes past a line grep); outside
+it (an ancestor of the working directory, `CARGO_HOME`) a file passes only when every line is a
+comment, a blank, a header of `[net]`, `[http]`, `[term]`, `[build]` or `[registries.crates-io]`,
+or a bare key that table allows with a plain value (`plain_config` in the justfile), so any other
+TOML form fails closed. mise is held the same way: `mise.toml` is only `[tools]` with plain
+version strings, no other mise configuration file inside the repository may load (`mise config
+ls`, failing closed when mise cannot read its configuration), and the stages run the pinned
+tools from their install directories (`mise bin-paths`) rather than through shims, so no mise
+`[env]` reaches a tool after `_preflight` has looked. The architecture test repeats these checks
+with a real TOML parser (`ARCH-gate-config`) and pins the gate itself: the recipes of `check`,
+`quick`, `check-only`, `ci-parity` and `platform-tests`, every stage and their dependencies,
+the justfile's top-level lines and the scripts the stages run are hashed in `.config/gate.sha256`,
+and `.config/nextest.toml` keeps its allowlisted keys (no `default-filter`, no `[scripts]`,
+`retries = 0`). A pin moves only with its line in that file, in the same commit, which review
+reads as a change of the gate (the first FND-05 review found `check: (check-only quick_stages)`
+would have kept every check green). Independently, every cargo of the gate runs with `RUSTFLAGS="-D
 warnings"`, empty `RUSTDOCFLAGS`, `RUSTC_WRAPPER` and `RUSTC_WORKSPACE_WRAPPER` (which beat any
 config file), and nextest with `--retries 0 --no-tests fail`. Never export a steering variable for
 the gate. Each refusal has a negative case in `tools/jfl-architecture/tests/gate_negative_cases.rs`.
@@ -537,10 +571,18 @@ There is no event store (ADR 0008). What persists:
   three targets of ADR 0006.
 - `gitleaks` (the binary, pinned by mise) over the full history (`secrets` stage,
   `scripts/secrets-check.sh`: redacted, and a shallow clone fails rather than scanning part of
-  the history); `.gitleaks.toml` is exactly `[extend]` and `useDefault = true` and nothing else (the
-  script refuses any other non-comment line, a `.gitleaksignore` in the history, and runs gitleaks
-  with `--ignore-gitleaks-allow`, so no inline comment, ignore file, disabled rule or allowlist
-  can wave a finding through); fixtures build fake secrets at run time if they need any. GitHub secret
+  the history); `.gitleaks.toml` is gitleaks' own default configuration without its global
+  `[allowlist]` (FND-08: that table skips images, PDFs, fonts, `node_modules/`, `vendor/`,
+  `go.sum`, `package-lock.json` and other lockfiles, and `useDefault = true` inherited it),
+  generated from the pinned binary by `scripts/gitleaks-config.sh`; the stage refuses a policy
+  that is not byte for byte the generated one, a `.gitleaksignore` in the history, and runs
+  gitleaks with `--ignore-gitleaks-allow`, so no inline comment, ignore file, disabled rule or
+  allowlist can wave a finding through. The one global allowlist entry is the policy's own path
+  (`^\.gitleaks\.toml$`), added by the generator: its rule texts trip its own rules once
+  committed, and a token hidden there cannot land because the stage refuses any byte that
+  differs from the generated file. Each rule keeps its own value allowlist (template
+  placeholders and stopwords, which never match a real token). Fixtures build fake secrets at
+  run time if they need any. GitHub secret
   scanning and push protection are on (owner setting).
 - **Private names** (`private-names` stage, FND-04): the names are never committed, only their
   salted hashes. `.private-names.sha256` (committed since BOOT-02) has a `# salt: <hex>` header
@@ -559,9 +601,12 @@ There is no event store (ADR 0008). What persists:
   the name (a path that holds the name is masked). **Limits, accepted under the accidental-leak
   model:** there is no substring matching (`myquillmarrow` and `quillmarrows` miss), no
   homoglyph or letter-swap matching, no reading of Windows-1250 or other legacy encodings, of
-  UTF-16 without a byte-order mark, of URL-encoded joins (`quill%20marrow`) or of untracked
-  files that contain NUL bytes, and a name of more than 3 words is covered only by its
-  distinctive part. It needs no secret, so
+  UTF-16 without a byte-order mark, of URL-encoded joins (`quill%20marrow`), of a name split
+  across a line break (`quill` at the end of one line, `marrow` at the start of the next: each
+  line is tokenised alone), or of files that contain a NUL byte in their first 8 KiB in `--all`
+  mode (CI on `main`; the diff mode of a lane and of `land.sh` reads them with `--text`), and a
+  name of more than 3 words is covered only by its distinctive part (the FND-05 checkpoint's
+  N8, accepted as limits). It needs no secret, so
   it is a stage of `check` and runs in CI, on fork pull requests and in `land.sh`. A missing or
   empty hash file fails closed in CI (`CI=true`) and in `land.sh`, and only warns elsewhere (a
   downstream fork may not have one). The owner adds a name with `scripts/private-name-add.sh`,
@@ -650,7 +695,7 @@ needs one becomes a recipe parameter (`just conformance seed=42`).
 | `just check-only <stage>…` | named stages through the same recipes (what each CI job runs) | FND-02 |
 | `just --list`, `just --dump --dump-format json` | the stage catalog | FND-02 |
 | `just clippy-lists` | rewrite every crate's `clippy.toml` from the root list and `[grants]` (§2.4); the `clippy` stage fails when one differs | FND-02 |
-| `just doctor` | `mise doctor` and `mise ls --missing` | FND-01 |
+| `just doctor` | `mise doctor`, `mise ls --missing`, `just --version` against the pin, and the five security tools of FND-04 on PATH | FND-01, FND-04 |
 | `adrs new "<title>"`, `just adr-index` (the `docs` stage) | create an ADR from `doc/adr/template.md` (`adrs.toml`); check the index against the files (`scripts/adr-index.sh`) | FND-03 |
 | `just dco [range]` | every commit of the range is signed off by its author (`scripts/dco-check.sh`) | FND-03 |
 | `just dco-event <event> <before> <base> <head>` | the same over the commits a GitHub event brought: a push's before..head, a pull request's base..head, else head~1..head (`ci.yml`'s `dco` job) | FND-05 |

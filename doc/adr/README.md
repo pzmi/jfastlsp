@@ -77,7 +77,7 @@ for the owner's decisions.
 | [0025](0025-storage-rusqlite-fst-postcard-blake3.md) | Storage crates: rusqlite, fst, postcard and blake3 | Proposed (default; owner confirms at FND checkpoint) |
 | [0026](0026-gradle-model-by-wrapping-build-server-for-gradle.md) | Gradle model: wrap microsoft/build-server-for-gradle | Proposed (default; owner confirms at FND checkpoint) |
 | [0027](0027-javac-worker-forked-from-java-language-server-with-scip-java.md) | javac worker: fork java-language-server's compiler core, load scip-java's plugin | Proposed (default; owner confirms at FND checkpoint) |
-| [0028](0028-jdtls-behind-our-multiplexing-proxy-baseline-and-fallback.md) | jdtls behind our multiplexing proxy: the baseline and the fallback product | Proposed (default; owner confirms at FND checkpoint) |
+| [0028](0028-jdtls-behind-our-multiplexing-proxy-baseline-and-fallback.md) | jdtls behind our multiplexing proxy: the baseline and the fallback product | Proposed (default; owner confirms at FND checkpoint); amended 2026-11-17 |
 | [0029](0029-e0-on-harbor-with-a-multi-swe-bench-java-control.md) | E0 on Harbor, with a Multi-SWE-bench Java control | Proposed (default; owner confirms at FND checkpoint) |
 | [0030](0030-foundation-from-maintained-tools.md) | Foundation from maintained tools: just, mise, cargo-deny, no_std and a thin test layer | Proposed (default; owner confirms at FND checkpoint); amended 2026-11-16 and 2026-11-17 |
 | [0031](0031-benchmark-early-on-a-pinned-real-corpus.md) | Benchmark early on a pinned real-repository corpus; regressions over 10 % block | Proposed (default; owner confirms at FND checkpoint); amended 2026-11-16 |

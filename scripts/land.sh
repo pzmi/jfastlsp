@@ -33,6 +33,12 @@
 # Pinned by: tools/jfl-architecture/tests/land_scripts.rs (land cases)
 set -euo pipefail
 
+# The same `just` as the Stop hook (.claude/hooks/stop-gate.sh): the first on PATH, with the
+# bootstrap's ~/.local/bin only as the last resort. The justfile runs the stages' tools from their
+# install directories and `_preflight` refuses a mise [env], so how just is found does not change
+# what the gate sees (fnd §3.6, FND-08).
+case ":$PATH:" in *":$HOME/.local/bin:"*) ;; *) PATH="$PATH:$HOME/.local/bin" ;; esac
+
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 remote=origin
 branch=main

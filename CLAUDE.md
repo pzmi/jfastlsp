@@ -21,14 +21,15 @@ a pinned real-repository corpus (plan §1.7, ADR 0031). Reuse before building (A
 | `doc/foundation.md` | Engineering rules: dependency law and authority (§2), enforcement (§3), language and lints (§4), logging (§5), persistent state (§6), CI (§7), tool pins (§8), commands (§9), commits (§10), agent contract (§11) |
 | `doc/verification.md` | Test levels (§2), determinism (§3), goldens (§4), contract suites (§5), formal models (§6), oracles (§7), fuzz (§8), benchmarks (§10), agent evaluation (§11) |
 | `doc/sdlc.md` | Ready, procedure, Done, the gate, integration, checkpoints, owner decisions |
-| `doc/required-checks.md` | The CI jobs and the `Required` aggregate (planned until FND-05) |
+| `doc/required-checks.md` | The CI jobs and the `Required` aggregate |
 | `doc/tasks.md` | Decisions (ADR numbers), rules for every task, the live gate, lanes and task cards, ⛳ checkpoints |
 | `doc/adr/` | Decisions, Nygard style; the ADR number is the decision id; index in `doc/adr/README.md` |
 | `spikes/e1-parse/` | The archived E1 parse spike: evidence for plan §1.7 and §5.5, the seed of BENCH-02; outside the workspace |
 
 Citations read "plan §4.3", "fnd §3", "ver §6"; read the sections a task cites, not whole
 documents. Decisions in `doc/tasks.md` and Accepted ADRs override earlier plan text. Only ADRs
-0001–0004 are the owner's; the rest are defaults the owner confirms at the FND checkpoint (DEC-07).
+0001–0004 and 0032 are the owner's; the rest are defaults the owner confirms at the FND
+checkpoint (DEC-07).
 
 ## Workflow
 
@@ -43,31 +44,28 @@ documents. Decisions in `doc/tasks.md` and Accepted ADRs override earlier plan t
 
 ## The gate
 
-**Until FND-02 lands, the gate is this fallback** (and until FND-01 there is no workspace):
-
-```bash
-cargo fmt --all --check && cargo clippy --workspace --all-targets --locked -- -D warnings && cargo test --workspace --locked
-```
-
-From FND-02 on (each command exists once the task named in fnd §9 has landed; ADR 0030):
+The gate is `just check` (fnd §9, ADR 0030); CI runs the same stages (`doc/required-checks.md`):
 
 ```bash
 bash scripts/bootstrap-tools.sh      # pinned mise and just, checksum-verified, then `mise install --locked`
-mise install --locked                # every pinned tool from mise.lock (FND-01); `just doctor` checks them
+mise install --locked                # every pinned tool from mise.lock; `just doctor` checks them
 just quick                           # fmt check, architecture, clippy, fast tests: while working
 just check                           # the full blocking gate: before every commit
 just check-only <stage>...           # named stages through the same recipes (what each CI job runs)
 just bench [suite] [corpus=small]    # benchmarks (BENCH-02); reports, never gates; `just bench-corpus` fetches the corpus
-adrs new "<title>"                   # a new ADR (FND-03); `just adr-index` checks the index
-scripts/land.sh <sha>                # orchestrator only (ADR 0002; FND-03)
+just ci-parity                       # the cargo stages with CI's environment, before landing tests that start cargo
+adrs new "<title>"                   # a new ADR; `just adr-index` checks the index
+scripts/land.sh <sha>                # orchestrator only (ADR 0002)
 ```
 
 `quick` is not `check`; never report one as the other. A missing tool fails, never a
 skipped-but-green check. Run the gate in the foreground with `set -o pipefail` semantics (no
 `| tail` in an `&&` chain); commit only on green. A repeatable job becomes a `just` recipe.
 **Never prefix a command with inline `JFL_*`, `QUINT_SEED` or `PROPTEST_*` variables**; a
-scenario that needs one becomes a recipe parameter. Until FND-03, landing is by hand:
-cherry-pick onto a clean `main`, the gate on the merged tree, push only on green (`doc/sdlc.md`).
+scenario that needs one becomes a recipe parameter. The gate's own recipes, scripts and
+configuration are pinned (`.config/gate.sha256`, `ARCH-gate-config`, fnd §3.6): a change to one
+moves its pin in the same commit, and review reads it as a change of the gate. Every check is an
+allowlist or a pinned shape, never a list of bad patterns (fnd §3).
 
 ## Enforced rules
 
@@ -149,12 +147,12 @@ cherry-pick onto a clean `main`, the gate on the merged tree, push only on green
   never needs them to start. Never run Gradle or a build on a target Java repository; use the
   synthetic fixtures. The bench corpus is read from its cache, never committed; building it runs
   only in `bench.yml` or owner-side. `gh` may be absent: use the GitHub MCP tools.
-- Hooks (each a no-op until its prerequisite exists): SessionStart installs the pinned toolchain
+- Hooks: SessionStart installs the pinned toolchain
   and runs `scripts/bootstrap-tools.sh` (mise and just, then `mise install --locked`), reporting
   and never blocking; every edited `*.rs` is rustfmt'ed, so re-read a Rust file before the next
-  Edit of it rather than fight a stale-file refusal; Stop runs `just quick` (or the fallback before
-  FND-02) with `CARGO_BUILD_JOBS=2` when code, manifests, the policy, tool pins, a model or a
-  fixture changed, and fails when the justfile has `quick` but `just` is missing. Stop guards only
+  Edit of it rather than fight a stale-file refusal; Stop runs `just quick` with
+  `CARGO_BUILD_JOBS=2` when code, manifests, the policy, tool pins, the gate's configuration,
+  scripts, workflows, a model or a fixture changed, and fails when `just` is missing. Stop guards only
   the checkout the session started in: in a lane worktree the ship station's gate is the guard.
 - Network (verified 2026-11-16): GitHub release downloads, crates.io files, npm and PyPI pass the
   proxy; `api.github.com` and GitHub pages do not, so tools install from `mise.lock` with

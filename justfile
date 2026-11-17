@@ -4,9 +4,14 @@
 # `just --dump --dump-format json` are the catalog.
 set shell := ["bash", "-euo", "pipefail", "-c"]
 
-# mise's shims, so a recipe finds the pinned tools (cargo-nextest, cargo-deny) in a shell that
-# never activated mise; CI's mise-action puts the same tools on PATH.
-export PATH := env("MISE_DATA_DIR", env("XDG_DATA_HOME", env("HOME") / ".local/share") / "mise") / "shims" + ":" + env("PATH")
+# The pinned tools (cargo-nextest, cargo-deny, gitleaks, ...) by their install directories
+# (`mise bin-paths`), so a stage runs the real binary and never a mise shim, which would apply a
+# mise `[env]` after `_preflight` has looked (fnd §3.6, FND-08); then mise's shims, for a shell
+# without mise's tools installed (`doctor` says what is missing). CI's mise-action installs the
+# same tools.
+mise_bins := shell('cd "$1" && { mise bin-paths 2>/dev/null || true; } | paste -s -d : -', justfile_directory())
+mise_shims := env("MISE_DATA_DIR", env("XDG_DATA_HOME", env("HOME") / ".local/share") / "mise") / "shims"
+export PATH := if mise_bins == "" { mise_shims + ":" + env("PATH") } else { mise_bins + ":" + mise_shims + ":" + env("PATH") }
 
 # Every cargo of the gate runs with the compiler flags set here, not taken from the environment or
 # from a cargo config file: RUSTFLAGS and an empty RUSTC_WRAPPER beat `build.rustflags` and
@@ -45,9 +50,9 @@ check-only +stages:
     exec {{quote(just_executable())}} --justfile {{quote(justfile())}} --working-directory "$PWD" "${names[@]}"
 
 # Refuse an environment that steers the build (fnd §3.6); every stage depends on it. Variables
-# of cargo, rustc, rustup, clippy and nextest are refused unless allowlisted here, and so is a
-# cargo config file, in the working directory's ancestors or in CARGO_HOME, that sets compiler
-# flags, a wrapper, a runner, a linker, a profile, an alias, `[env]` or unstable features.
+# of cargo, rustc, rustup, clippy and nextest are refused unless allowlisted here; so is any
+# cargo config file inside the repository, one outside it (an ancestor of the working directory,
+# CARGO_HOME) beyond a pinned plain shape, and a mise configuration beyond `[tools]`.
 _preflight:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -75,28 +80,76 @@ _preflight:
       esac
     done < <(compgen -e)
     # Cargo reads .cargo/config{,.toml} in every ancestor of the working directory and in
-    # CARGO_HOME; a steering key in any of them is refused: a steering table header, a steering
-    # top-level key in dotted or inline-table form (`profile = { dev = ... }`), quoted (basic or
-    # literal) or not,
-    # and a steering key anywhere on a line (`build = { rustflags = [...] }`).
-    table='(alias|env|profile|target|unstable)'
-    key='(rustflags|rustdocflags|rustc-wrapper|rustc-workspace-wrapper|rustc|rustdoc|target|runner|linker)'
-    q="[\"']?"
-    steering="^[[:space:]]*\\[[[:space:]]*$q$table$q[[:space:]]*([].]|\$)|^[[:space:]]*$q$table$q[[:space:]]*[.=]|(^|[[:space:]{,.\"'])$key$q[[:space:]]*="
-    configs=()
+    # CARGO_HOME. Its allowlist (fnd §3.6, FND-08): inside the repository, no such file at all
+    # (tracked or untracked, at any depth, and in the working directory's ancestors up to the
+    # root); outside it, a file whose every line is a comment, a blank, one of the headers [net],
+    # [http], [term], [build] or [registries.crates-io], or `key = value` with a bare key that
+    # table allows (plain_config below) and a plain value: a string without escapes, a boolean
+    # or a number. Anything else, valid TOML or not (a quoted or escaped key, an inline table, a
+    # dotted key, a multi-line value), is refused: the shape is pinned, no bad key is listed.
+    root={{quote(justfile_directory())}}
+    plain_config() {
+      awk '
+        function allowed(table, key) {
+          if (table == "net") return key ~ /^(retry|git-fetch-with-cli|offline)$/
+          if (table == "http") return key ~ /^(proxy|timeout|cainfo|check-revoke|low-speed-limit|multiplexing|user-agent)$/
+          if (table == "term") return key ~ /^(quiet|verbose|color)$/
+          if (table == "build") return key ~ /^(jobs|target-dir)$/
+          if (table == "registries.crates-io") return key == "protocol"
+          return 0
+        }
+        /^[[:space:]]*(#.*)?$/ { next }
+        /^\[(net|http|term|build|registries\.crates-io)\][[:space:]]*(#.*)?$/ {
+          table = $0; sub(/^\[/, "", table); sub(/\].*$/, "", table); next
+        }
+        /^[a-z][a-z0-9-]*[[:space:]]*=[[:space:]]*("[^"\\]*"|true|false|[0-9]+)[[:space:]]*(#.*)?$/ {
+          key = $0; sub(/[[:space:]]*=.*$/, "", key)
+          if (allowed(table, key)) next
+        }
+        { bad = 1; exit }
+        END { exit bad }' "$1"
+    }
+    git -C "$root" rev-parse --git-dir >/dev/null 2>&1 || { echo "preflight: $root is not a git work tree" >&2; exit 1; }
+    while IFS= read -r -d '' file; do refused+=("$root/$file"); done < <(
+      git -C "$root" ls-files -z --cached --others --exclude-standard -- \
+        ':(glob)**/.cargo/config' ':(glob)**/.cargo/config.toml')
     dir="$PWD"
     while :; do
-      configs+=("$dir/.cargo/config" "$dir/.cargo/config.toml")
+      for file in "$dir/.cargo/config" "$dir/.cargo/config.toml"; do
+        [ -f "$file" ] || continue
+        case "$dir/" in
+          "$root"/*) refused+=("$file") ;;
+          *) plain_config "$file" || refused+=("$file") ;;
+        esac
+      done
       [ "$dir" = / ] && break
       dir="$(dirname "$dir")"
     done
     home="${CARGO_HOME:-$HOME/.cargo}"
-    configs+=("$home/config" "$home/config.toml")
-    for file in "${configs[@]}"; do
-      if [ -f "$file" ] && grep -Eq "$steering" "$file"; then refused+=("$file"); fi
+    for file in "$home/config" "$home/config.toml"; do
+      if [ -f "$file" ] && ! plain_config "$file"; then refused+=("$file"); fi
     done
+    # mise (fnd §3.6, FND-08): the root mise.toml is only [tools] with plain version strings, and
+    # mise loads no other configuration file from inside the repository (an [env], a [hooks] or
+    # a task there would reach the tools of the gate).
+    mise_toml="$root/mise.toml"
+    if [ -f "$mise_toml" ] && ! awk '
+        /^[[:space:]]*(#.*)?$/ { next }
+        /^\[tools\][[:space:]]*(#.*)?$/ { tools = 1; next }
+        tools && /^("[A-Za-z0-9:\/._@-]+"|[A-Za-z0-9_-]+)[[:space:]]*=[[:space:]]*"[A-Za-z0-9._+-]+"[[:space:]]*(#.*)?$/ { next }
+        { bad = 1; exit }
+        END { exit bad }' "$mise_toml"; then
+      refused+=("$mise_toml")
+    fi
+    if command -v mise >/dev/null 2>&1; then
+      # A configuration mise cannot load (an untrusted one with [env], say) fails closed.
+      listing="$(mise config ls --json 2>/dev/null)" || listing='"path": "mise config ls failed"'
+      while IFS= read -r file; do
+        case "$file" in "$mise_toml") ;; "$root"/* | "mise config ls failed") refused+=("$file") ;; esac
+      done < <(sed -n 's/^[[:space:]]*"path":[[:space:]]*"\(.*\)",\{0,1\}$/\1/p' <<<"$listing")
+    fi
     if [ "${#refused[@]}" -gt 0 ]; then
-      echo "preflight: refusing to run the gate: ${refused[*]} steers the build (fnd §3.6); unset or remove it" >&2
+      echo "preflight: refusing to run the gate: ${refused[*]} is outside the allowlist of what may steer the build (fnd §3.6); unset or remove it" >&2
       exit 1
     fi
 
@@ -107,10 +160,11 @@ fmt-check: _preflight
 # The architecture test (fnd §3.2, FND-07): the dependency law over `cargo metadata` for each
 # target of ADR 0006, the clippy lists against `[grants]` and the source scan, over the tree
 # (tests/architecture.rs, with ARCH-ci-lockstep over ci.yml); plus the checker's own table-driven
-# negative cases and the meta-test (tests/rules.rs) and the lockstep's (tests/ci_lockstep.rs). The
-# fixture workspaces run in `integration-tests`.
+# negative cases and the meta-test (tests/rules.rs), the lockstep's (tests/ci_lockstep.rs) and the
+# gate configuration's (tests/gate_config.rs, ARCH-gate-config). The fixture workspaces run in
+# `integration-tests`.
 architecture: _preflight (_require "cargo-nextest")
-    {{cargo}} nextest run --locked --retries 0 --no-tests fail -p jfl-architecture --test architecture --test rules --test ci_lockstep
+    {{cargo}} nextest run --locked --retries 0 --no-tests fail -p jfl-architecture --test architecture --test rules --test ci_lockstep --test gate_config
 
 # Clippy with the authority lists (fnd §2.4): the per-crate lists must match the root one first,
 # and a list entry naming a path that does not exist fails the stage (clippy only warns, and
@@ -191,8 +245,9 @@ dco-event event before base head:
 deny: _preflight (_require "cargo-deny")
     {{cargo}} deny --locked check
 
-# gitleaks over the full history, default rules, nothing allowlisted (FND-04, fnd §7.4;
-# scripts/secrets-check.sh). A shallow clone fails: fetch the history in full.
+# gitleaks over the full history with its default rules and none of its default path allowlist
+# (FND-04, FND-08, fnd §7.4; scripts/secrets-check.sh, scripts/gitleaks-config.sh). A shallow
+# clone fails: fetch the history in full.
 secrets: _preflight
     bash scripts/secrets-check.sh
 

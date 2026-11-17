@@ -9,6 +9,25 @@ use cargo_metadata::{DependencyKind, Metadata};
 use crate::Finding;
 use crate::policy::{self, Policy};
 
+/// The one registry a third-party crate may come from (fnd §2.5, §7.4): `cargo metadata` names
+/// crates.io by this id whatever protocol fetched it.
+pub const CRATES_IO: &str = "registry+https://github.com/rust-lang/crates.io-index";
+
+/// Where a direct dependency comes from: an allowlist of two, a workspace member by its own path
+/// or crates.io (FND-08, the checkpoint's N4: a path dependency named like an allowed crate once
+/// carried unscanned code past every check).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Origin {
+    /// A path dependency on a workspace member's own directory.
+    Member,
+    /// crates.io.
+    CratesIo,
+    /// A path dependency on a directory that is no workspace member.
+    Path(String),
+    /// A git repository or another registry.
+    Other(String),
+}
+
 /// An edge kind, as `cargo metadata` names it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Kind {
@@ -49,6 +68,8 @@ pub struct Direct {
     pub kind: Kind,
     /// Whether it names a workspace member (a path dependency on one).
     pub workspace: bool,
+    /// Where it comes from.
+    pub origin: Origin,
     /// The features it enables, `default` included when default features are on.
     pub features: BTreeSet<String>,
 }
@@ -81,6 +102,9 @@ pub struct Workspace {
     pub ids: BTreeMap<String, String>,
     /// Whether `cargo metadata` resolved the graph.
     pub resolved: bool,
+    /// Every package of the graph that is no member and does not come from crates.io (a
+    /// `[patch]`, a `[replace]`, a path or git dependency anywhere in the graph): name and source.
+    pub foreign: Vec<(String, String)>,
 }
 
 impl Workspace {
@@ -104,12 +128,28 @@ impl Workspace {
             .filter(|p| member_ids.contains(p.id.repr.as_str()))
             .map(|p| p.name.as_str())
             .collect();
+        let member_dirs: BTreeSet<String> = data
+            .packages
+            .iter()
+            .filter(|p| member_ids.contains(p.id.repr.as_str()))
+            .filter_map(|p| p.manifest_path.parent().map(|d| d.as_str().to_owned()))
+            .collect();
         let mut workspace = Self::default();
         for package in &data.packages {
             workspace
                 .names
                 .insert(package.id.repr.clone(), package.name.to_string());
             if !member_ids.contains(package.id.repr.as_str()) {
+                let source = package.source.as_ref().map(|s| s.repr.as_str());
+                if source != Some(CRATES_IO) {
+                    workspace.foreign.push((
+                        package.name.to_string(),
+                        source.map_or_else(
+                            || format!("path {}", package.manifest_path),
+                            str::to_owned,
+                        ),
+                    ));
+                }
                 continue;
             }
             let manifest = relative(package.manifest_path.as_str());
@@ -145,10 +185,25 @@ impl Workspace {
                             features.extend(enabled.iter().cloned());
                         }
                     }
+                    let origin = match (&dep.source, &dep.path) {
+                        (None, Some(path))
+                            if member_dirs.contains(path.as_str())
+                                && member_names.contains(dep.name.as_str()) =>
+                        {
+                            Origin::Member
+                        }
+                        (None, path) => Origin::Path(
+                            path.as_ref()
+                                .map_or_else(|| "(no path)".to_owned(), |p| relative(p.as_str())),
+                        ),
+                        (Some(source), _) if source.repr == CRATES_IO => Origin::CratesIo,
+                        (Some(source), _) => Origin::Other(source.repr.clone()),
+                    };
                     Some(Direct {
                         name: dep.name.clone(),
                         kind,
-                        workspace: dep.source.is_none() && member_names.contains(dep.name.as_str()),
+                        workspace: origin == Origin::Member,
+                        origin,
                         features,
                     })
                 })
@@ -256,6 +311,13 @@ pub fn check(policy: &Policy, workspace: &Workspace) -> Vec<Finding> {
     edges(policy, workspace, &mut findings);
     closure(policy, workspace, &mut findings);
     externals(policy, workspace, &mut findings);
+    for (name, source) in &workspace.foreign {
+        findings.push(Finding::new(
+            "ARCH-unlisted-external",
+            "Cargo.toml",
+            format!("the graph holds `{name}` from {source}: every package is a workspace member or comes from crates.io (fnd §2.5; no [patch], [replace], path or git source)"),
+        ));
+    }
     findings
 }
 
@@ -403,6 +465,26 @@ fn externals(policy: &Policy, workspace: &Workspace, findings: &mut Vec<Finding>
         let at = member.manifest.as_str();
         for dep in member.direct.iter().filter(|d| !d.workspace) {
             let kind = dep.kind.key();
+            match &dep.origin {
+                Origin::CratesIo => {}
+                Origin::Member => continue,
+                Origin::Path(path) => {
+                    findings.push(Finding::new(
+                        "ARCH-unlisted-external",
+                        at,
+                        format!("`{from}` names `{}` ({kind}) by the path `{path}`, which is no workspace member: a path dependency is a member, a third-party crate comes from crates.io (fnd §2.5)", dep.name),
+                    ));
+                    continue;
+                }
+                Origin::Other(source) => {
+                    findings.push(Finding::new(
+                        "ARCH-unlisted-external",
+                        at,
+                        format!("`{from}` names `{}` ({kind}) from `{source}`: a third-party crate comes from crates.io only (fnd §2.5)", dep.name),
+                    ));
+                    continue;
+                }
+            }
             let allowed = policy
                 .external
                 .get(kind)

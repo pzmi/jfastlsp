@@ -622,6 +622,44 @@ fn should_fail_lockstep_when_the_shell_is_not_bash() -> TestResult {
 }
 
 #[test]
+fn should_fail_lockstep_when_the_triggers_filter_or_drop_a_run() -> TestResult {
+    // given: FND-08 (the first review's MEDIUM): a landed commit must never skip CI
+    let edits = [
+        (
+            "    branches: [main]\n",
+            "    branches: [main]\n    paths-ignore: ['doc/**']\n",
+        ),
+        ("  push:\n    branches: [main]\n", ""),
+        (
+            "  push:\n    branches: [main]\n",
+            "  push:\n    branches-ignore: [main]\n",
+        ),
+        (
+            "  pull_request:\n",
+            "  pull_request:\n    paths: ['crates/**']\n",
+        ),
+        (
+            "  workflow_dispatch:\n",
+            "  workflow_dispatch:\n  schedule:\n    - cron: '0 0 * * 0'\n",
+        ),
+    ];
+
+    // when
+    let mut found = Vec::new();
+    for (from, to) in edits {
+        let mut files = baseline()?;
+        edit(&mut files.workflow, from, to)?;
+        found.push(findings(&files));
+    }
+
+    // then
+    for findings in found {
+        assert_reported(&findings, WORKFLOW, "`on:` must be exactly");
+    }
+    Ok(())
+}
+
+#[test]
 fn should_fail_lockstep_when_the_doc_and_the_workflow_disagree() -> TestResult {
     // given: the doc still says `static` runs `docs`, the workflow moved it
     let mut moved = baseline()?;

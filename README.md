@@ -43,10 +43,10 @@ Linux (x86-64, arm64) and macOS (arm64). Windows is out of scope for now
 ## Development
 
 The work is planned as small tasks in [doc/tasks.md](doc/tasks.md) and carried out by coding
-agents under the process in [doc/sdlc.md](doc/sdlc.md). Once the workspace exists (task FND-01),
-the Rust toolchain is pinned in `rust-toolchain.toml` and every other tool in `mise.toml`
-(`bash scripts/bootstrap-tools.sh` installs mise and just, then `mise install --locked` the rest); `just check` is the gate and `just quick` the faster loop (task
-FND-02). See [CONTRIBUTING.md](CONTRIBUTING.md).
+agents under the process in [doc/sdlc.md](doc/sdlc.md). The Rust toolchain is pinned in
+`rust-toolchain.toml` and every other tool in `mise.toml` (`bash scripts/bootstrap-tools.sh`
+installs mise and just, then `mise install --locked` the rest); `just check` is the gate, `just
+quick` the faster loop, and CI runs the same stages. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Licence
 

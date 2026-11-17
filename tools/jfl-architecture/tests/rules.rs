@@ -2,8 +2,8 @@
 //! workspace (`cargo metadata` JSON, the policy and the files in memory), each a small change to a
 //! clean baseline that must produce its rule's id at its path; the clean baseline itself and a
 //! few look-alikes must produce nothing. The meta-test fails when a rule fnd §3.3 assigns to
-//! FND-07 or FND-05 has no negative case here, in `tests/fixture_workspaces.rs` or in
-//! `tests/ci_lockstep.rs`.
+//! FND-07, FND-05 or FND-08 has no negative case here, in `tests/fixture_workspaces.rs`,
+//! `tests/ci_lockstep.rs` or `tests/gate_config.rs`.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
@@ -24,6 +24,9 @@ struct Dep {
     kind: Option<&'static str>,
     external: bool,
     features: Vec<&'static str>,
+    /// Where the manifest says it comes from, when not the default (crates.io for a third-party
+    /// crate, the member's own directory for a workspace crate): `path:<dir>` or a source id.
+    source: Option<&'static str>,
 }
 
 fn dep(name: &'static str) -> Dep {
@@ -32,6 +35,7 @@ fn dep(name: &'static str) -> Dep {
         kind: None,
         external: false,
         features: Vec::new(),
+        source: None,
     }
 }
 
@@ -69,6 +73,8 @@ struct World {
     scratch: Vec<Dep>,
     /// Per member: its own `[features]` and its targets, as `cargo metadata` JSON.
     package_fields: BTreeMap<&'static str, Vec<(&'static str, Value)>>,
+    /// Per third-party package: the source `cargo metadata` reports, when not crates.io.
+    package_sources: BTreeMap<&'static str, Value>,
 }
 
 const POLICY: &str = r#"schema = 1
@@ -243,6 +249,7 @@ fn baseline() -> World {
         broken: Vec::new(),
         scratch: Vec::new(),
         package_fields: BTreeMap::new(),
+        package_sources: BTreeMap::new(),
     }
 }
 
@@ -263,9 +270,17 @@ fn package(name: &str, deps: &[Dep], external: bool) -> Value {
     let dependencies: Vec<Value> = deps
         .iter()
         .map(|d| {
+            let (source, path) = match d.source {
+                Some(custom) => match custom.strip_prefix("path:") {
+                    Some(dir) => (Value::Null, json!(dir)),
+                    None => (json!(custom), Value::Null),
+                },
+                None if d.external => (json!(REGISTRY), Value::Null),
+                None => (Value::Null, json!(format!("/ws/{}", dir(d.name)))),
+            };
             json!({
                 "name": d.name,
-                "source": if d.external { json!(REGISTRY) } else { Value::Null },
+                "source": source,
                 "req": "*",
                 "kind": d.kind,
                 "optional": false,
@@ -274,7 +289,7 @@ fn package(name: &str, deps: &[Dep], external: bool) -> Value {
                 "target": null,
                 "rename": null,
                 "registry": null,
-                "path": if d.external { Value::Null } else { json!(format!("/ws/{}", dir(d.name))) },
+                "path": path,
             })
         })
         .collect();
@@ -323,7 +338,13 @@ impl World {
             nodes.push(node(name, deps, false));
         }
         for (name, deps) in &self.externals {
-            packages.push(package(name, deps, true));
+            let mut value = package(name, deps, true);
+            if let (Some(source), Some(object)) =
+                (self.package_sources.get(name), value.as_object_mut())
+            {
+                object.insert("source".to_owned(), source.clone());
+            }
+            packages.push(value);
             nodes.push(node(name, deps, true));
         }
         let members: Vec<String> = self.members.iter().map(|(n, _)| id(n, false)).collect();
@@ -858,6 +879,104 @@ fn cases() -> Vec<Case> {
         case("ARCH-external-feature", "crates/ad1/Cargo.toml", |w| {
             w.field("ad1", "features", json!({ "fast": ["ext?/simd"] }));
         }),
+        // FND-08 (the FND-05 checkpoint's N4): a dependency is matched by its source, not only
+        // its name.
+        case("ARCH-unlisted-external", "crates/ad1/Cargo.toml", |w| {
+            // The reviewer's bypass: a vendored copy named like an allowed crate.
+            let Some(e) = w.deps("ad1").iter_mut().find(|d| d.name == "ext") else {
+                return;
+            };
+            e.source = Some("path:/ws/vendor/ext");
+            w.package_sources.insert("ext", Value::Null);
+        }),
+        case("ARCH-unlisted-external", "Cargo.toml", |w| {
+            w.package_sources.insert("ext", Value::Null);
+        }),
+        case("ARCH-unlisted-external", "Cargo.toml", |w| {
+            w.package_sources
+                .insert("ext", json!("git+https://example.invalid/ext#0000000"));
+        }),
+        case("ARCH-unlisted-external", "crates/ad1/Cargo.toml", |w| {
+            let Some(e) = w.deps("ad1").iter_mut().find(|d| d.name == "ext") else {
+                return;
+            };
+            e.source = Some("git+https://example.invalid/ext#0000000");
+        }),
+        case("ARCH-unlisted-external", "crates/ad2/Cargo.toml", |w| {
+            // A path dependency named like a member, on another directory.
+            w.deps("ad2").push(Dep {
+                source: Some("path:/ws/vendor/dom"),
+                ..dep("dom")
+            });
+        }),
+        case("ARCH-unlisted-external", "Cargo.toml", |w| {
+            w.edit(
+                "Cargo.toml",
+                "[workspace.lints.rust]",
+                "[patch.crates-io]\next = { path = \"vendor/ext\" }\n\n[workspace.lints.rust]",
+            );
+        }),
+        case("ARCH-unlisted-external", "crates/app/Cargo.toml", |w| {
+            w.edit(
+                "crates/app/Cargo.toml",
+                "[lints]",
+                "[replace]\n\"ext:1.0.0\" = { path = \"../../vendor/ext\" }\n\n[lints]",
+            );
+        }),
+        case("ARCH-not-a-member", "Cargo.toml", |w| {
+            w.edit(
+                "Cargo.toml",
+                "\"tools/orc\"]",
+                "\"tools/orc\"]\nexclude = [\"spikes\", \"vendor\"]",
+            );
+        }),
+        case("ARCH-not-a-member", "Cargo.toml", |w| {
+            w.edit(
+                "Cargo.toml",
+                "[workspace.lints.rust]",
+                "[profile.dev]\noverflow-checks = false\n\n[workspace.lints.rust]",
+            );
+        }),
+        case("ARCH-not-a-member", "Cargo.toml", |w| {
+            w.edit(
+                "Cargo.toml",
+                "\"tools/orc\"]",
+                "\"tools/orc\"]\ndefault-members = [\"crates/dom\"]",
+            );
+        }),
+        case("ARCH-not-a-member", "crates/app/Cargo.toml", |w| {
+            w.edit("crates/app/Cargo.toml", "[lints]", "[workspace]\n\n[lints]");
+        }),
+        // FND-08 (N2): the lexer follows every literal prefix and fails closed.
+        case("ARCH-lint-suppression", "crates/app/src/lib.rs:3", |w| {
+            // The reviewer's bypass: a C raw string ending in a backslash hid the attribute.
+            w.edit(
+                "crates/app/src/lib.rs",
+                "//! A crate.\n",
+                "//! A crate.\npub const MARKER: &core::ffi::CStr = cr\"\\\";\n#[allow(clippy::disallowed_types)]\nfn f() {}\n",
+            );
+        }),
+        case("ARCH-hidden-source", "crates/app/src/lib.rs:2", |w| {
+            w.edit(
+                "crates/app/src/lib.rs",
+                "//! A crate.\n",
+                "//! A crate.\npub const X: &str = z\"\\\";\n#[allow(dead_code)]\nfn f() {}\n",
+            );
+        }),
+        case("ARCH-hidden-source", "crates/app/src/lib.rs:3", |w| {
+            w.edit(
+                "crates/app/src/lib.rs",
+                "//! A crate.\n",
+                "//! A crate.\npub const X: &str = \"never closed;\n",
+            );
+        }),
+        case("ARCH-hidden-source", "crates/app/src/lib.rs:2", |w| {
+            w.edit(
+                "crates/app/src/lib.rs",
+                "//! A crate.\n",
+                "//! A crate.\npub const X: char = '\\u{41};\n#[allow(dead_code)]\nfn f() {}\n",
+            );
+        }),
     ]
 }
 
@@ -1031,7 +1150,7 @@ fn should_report_arch_metadata_when_the_root_sits_inside_another_workspace() -> 
 /// The negative cases that live outside the table: (rule, test function) in
 /// `tests/fixture_workspaces.rs`, `tests/ci_lockstep.rs` and this file. The meta-test checks only that each function
 /// exists; that it asserts its rule is the function's own business (and review's).
-const OTHER_CASES: [(&str, &str); 8] = [
+const OTHER_CASES: [(&str, &str); 9] = [
     (
         "ARCH-forbidden-edge",
         "should_fail_forbidden_edge_when_the_domain_depends_on_the_application",
@@ -1064,10 +1183,14 @@ const OTHER_CASES: [(&str, &str); 8] = [
         "ARCH-ci-lockstep",
         "should_fail_lockstep_when_a_stage_runs_in_two_jobs",
     ),
+    (
+        "ARCH-gate-config",
+        "should_fail_gate_config_when_a_stage_recipe_changes_without_its_pin",
+    ),
 ];
 
-/// The rule ids of fnd §3.3's rows whose Task column names FND-07 or FND-05 (the tasks that put
-/// rules in this crate).
+/// The rule ids of fnd §3.3's rows whose Task column names FND-07, FND-05 or FND-08 (the tasks
+/// that put rules in this crate).
 fn fnd_rules() -> Result<BTreeSet<String>, Box<dyn Error>> {
     let fnd = std::fs::read_to_string(
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../../doc/foundation.md"),
@@ -1087,7 +1210,10 @@ fn fnd_rules() -> Result<BTreeSet<String>, Box<dyn Error>> {
         let (Some(ids), Some(task)) = (cells.first(), cells.last()) else {
             continue;
         };
-        if !task.contains("FND-07") && !task.contains("FND-05") {
+        if !["FND-07", "FND-05", "FND-08"]
+            .iter()
+            .any(|t| task.contains(t))
+        {
             continue;
         }
         for id in ids.split('`').filter(|part| part.starts_with("ARCH-")) {
@@ -1103,6 +1229,7 @@ fn should_cover_every_rule_of_fnd_3_3_when_the_negative_cases_are_counted() -> T
     let fnd = fnd_rules()?;
     let fixture_source = include_str!("fixture_workspaces.rs");
     let ci_source = include_str!("ci_lockstep.rs");
+    let gate_source = include_str!("gate_config.rs");
     let this_source = include_str!("rules.rs");
     let mut covered: BTreeSet<String> = cases().iter().map(|c| c.rule.to_owned()).collect();
     for (rule, test) in OTHER_CASES {
@@ -1110,6 +1237,7 @@ fn should_cover_every_rule_of_fnd_3_3_when_the_negative_cases_are_counted() -> T
         assert!(
             fixture_source.contains(&declared)
                 || ci_source.contains(&declared)
+                || gate_source.contains(&declared)
                 || this_source.contains(&declared),
             "{test} is listed for {rule} but does not exist"
         );
@@ -1123,18 +1251,21 @@ fn should_cover_every_rule_of_fnd_3_3_when_the_negative_cases_are_counted() -> T
     let unreported: Vec<&String> = fnd.difference(&reported).collect();
 
     // then
-    assert!(!fnd.is_empty(), "fnd §3.3 names no FND-07 or FND-05 rule");
+    assert!(
+        !fnd.is_empty(),
+        "fnd §3.3 names no FND-07, FND-05 or FND-08 rule"
+    );
     assert!(
         uncovered.is_empty(),
         "rules without a negative case: {uncovered:?}"
     );
     assert!(
         undocumented.is_empty(),
-        "rules the test reports but fnd §3.3 does not assign to FND-07 or FND-05: {undocumented:?}"
+        "rules the test reports but fnd §3.3 does not assign to FND-07, FND-05 or FND-08: {undocumented:?}"
     );
     assert!(
         unreported.is_empty(),
-        "rules fnd §3.3 assigns to FND-07 or FND-05 that the test never reports: {unreported:?}"
+        "rules fnd §3.3 assigns to FND-07, FND-05 or FND-08 that the test never reports: {unreported:?}"
     );
     Ok(())
 }
@@ -1347,4 +1478,91 @@ fn should_walk_a_nested_target_directory_when_only_the_root_one_is_build_output(
     // then
     assert_eq!(files, vec!["crates/a/src/target/mod.rs".to_owned()]);
     Ok(())
+}
+
+/// Literals and comments the lexer must read whole (FND-08, the checkpoint's N2): every literal
+/// prefix, escapes and backslashes at the end, hashes, quotes inside, char literals and lifetimes.
+const TRICKY: [&str; 27] = [
+    r#""plain""#,
+    r#""an escaped \" quote""#,
+    r#""ends in a backslash \\""#,
+    r#"b"bytes \x7f""#,
+    r#"c"a C string \0""#,
+    r#"r"raw \""#,
+    r##"r#"raw "with" quotes and a # inside"#"##,
+    r###"r##"two "# hashes"##"###,
+    r#"br"byte raw \""#,
+    r##"br#"byte raw "q"#"##,
+    r#"cr"C raw \""#,
+    r##"cr#"C raw "q"#"##,
+    "'x'",
+    r"'\''",
+    "'\"'",
+    r"'\\'",
+    r"'\u{1F600}'",
+    r"b'\''",
+    "b'x'",
+    "'é'",
+    "'static",
+    "'a",
+    "r#type",
+    "\"two\nlines\"",
+    "/* block /* nested */ \" */",
+    "// a comment with \" and r\"",
+    "x /* \"#[allow(dead_code)]\" */",
+];
+
+#[test]
+fn should_see_the_attribute_after_each_tricky_literal_when_the_lexer_reads_it() {
+    // given: every ordered pair of the corpus, then an attribute the scan must see
+    let mut missed = Vec::new();
+
+    // when
+    for a in TRICKY {
+        for b in TRICKY {
+            let text = format!(
+                "//! A crate.\nconst A: () = {a}\n;\nconst B: () = {b}\n;\n#[allow(dead_code)]\nfn f() {{}}\n"
+            );
+            let line = 6 + a.matches('\n').count() + b.matches('\n').count();
+            let found = jfl_architecture::scan::source("x.rs", &text, &[], &mut BTreeSet::new());
+            let hit = found
+                .iter()
+                .any(|f| f.rule == "ARCH-lint-suppression" && f.at == format!("x.rs:{line}"));
+            if !hit || found.iter().any(|f| f.rule == "ARCH-hidden-source") {
+                missed.push(format!("{a} then {b}: {found:?}"));
+            }
+        }
+    }
+
+    // then
+    assert!(missed.is_empty(), "{}", missed.join("\n"));
+}
+
+#[test]
+fn should_return_without_panicking_when_the_lexer_reads_any_prefix_of_a_tricky_literal() {
+    // given: every truncation of every literal, as a whole file
+    let mut cut_strings = 0_usize;
+
+    // when
+    for literal in TRICKY {
+        for (end, _) in literal.char_indices().skip(1) {
+            let prefix = literal.get(..end).unwrap_or_default();
+            let result = jfl_architecture::lexer::lines(prefix);
+            if result.is_err() {
+                cut_strings += 1;
+            }
+        }
+    }
+
+    // then: the truncations that end inside a string fail closed, and the whole literals read
+    assert!(
+        cut_strings > TRICKY.len(),
+        "{cut_strings} prefixes failed closed"
+    );
+    for literal in TRICKY {
+        assert!(
+            jfl_architecture::lexer::lines(&format!("{literal}\n")).is_ok(),
+            "{literal}"
+        );
+    }
 }

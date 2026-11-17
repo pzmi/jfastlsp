@@ -17,10 +17,25 @@ disallowed-methods = [
   { path = "tokio::task::spawn_blocking", reason = "spawning a task needs the spawn grant (fnd §2.4, ARCH-detached-spawn)", allow-invalid = true },
   { path = "tokio::task::spawn_local", reason = "spawning a task needs the spawn grant (fnd §2.4, ARCH-detached-spawn)", allow-invalid = true },
   # grant: sleep
+  { path = "crossbeam_channel::Receiver::recv_deadline", reason = "a timed wait is a sleep: it needs the sleep grant (fnd §2.4, ver §3, ARCH-test-sleep)", allow-invalid = true },
+  { path = "crossbeam_channel::Receiver::recv_timeout", reason = "a timed wait is a sleep: it needs the sleep grant (fnd §2.4, ver §3, ARCH-test-sleep)", allow-invalid = true },
+  { path = "std::os::unix::net::UnixDatagram::set_read_timeout", reason = "a timed wait is a sleep: it needs the sleep grant (fnd §2.4, ver §3, ARCH-test-sleep)" },
+  { path = "std::os::unix::net::UnixDatagram::set_write_timeout", reason = "a timed wait is a sleep: it needs the sleep grant (fnd §2.4, ver §3, ARCH-test-sleep)" },
+  { path = "std::os::unix::net::UnixStream::set_read_timeout", reason = "a timed wait is a sleep: it needs the sleep grant (fnd §2.4, ver §3, ARCH-test-sleep)" },
+  { path = "std::os::unix::net::UnixStream::set_write_timeout", reason = "a timed wait is a sleep: it needs the sleep grant (fnd §2.4, ver §3, ARCH-test-sleep)" },
+  { path = "std::sync::Condvar::wait_timeout", reason = "a timed wait is a sleep: it needs the sleep grant (fnd §2.4, ver §3, ARCH-test-sleep)" },
+  { path = "std::sync::Condvar::wait_timeout_ms", reason = "a timed wait is a sleep: it needs the sleep grant (fnd §2.4, ver §3, ARCH-test-sleep)" },
+  { path = "std::sync::Condvar::wait_timeout_while", reason = "a timed wait is a sleep: it needs the sleep grant (fnd §2.4, ver §3, ARCH-test-sleep)" },
+  { path = "std::sync::mpsc::Receiver::recv_timeout", reason = "a timed wait is a sleep: it needs the sleep grant (fnd §2.4, ver §3, ARCH-test-sleep)" },
   { path = "std::thread::park_timeout", reason = "no sleeps: wait on channels or fake time, or jfl_testkit::poll::wait_until (fnd §2.4, ver §3, ARCH-test-sleep)" },
+  { path = "std::thread::park_timeout_ms", reason = "a timed wait is a sleep: it needs the sleep grant (fnd §2.4, ver §3, ARCH-test-sleep)" },
   { path = "std::thread::sleep", reason = "no sleeps: wait on channels or fake time, or jfl_testkit::poll::wait_until (fnd §2.4, ver §3, ARCH-test-sleep)" },
+  { path = "tokio::time::interval", reason = "a timed wait is a sleep: it needs the sleep grant (fnd §2.4, ver §3, ARCH-test-sleep)", allow-invalid = true },
+  { path = "tokio::time::interval_at", reason = "a timed wait is a sleep: it needs the sleep grant (fnd §2.4, ver §3, ARCH-test-sleep)", allow-invalid = true },
   { path = "tokio::time::sleep", reason = "no sleeps: wait on channels or fake time, or jfl_testkit::poll::wait_until (fnd §2.4, ver §3, ARCH-test-sleep)", allow-invalid = true },
   { path = "tokio::time::sleep_until", reason = "no sleeps: wait on channels or fake time, or jfl_testkit::poll::wait_until (fnd §2.4, ver §3, ARCH-test-sleep)", allow-invalid = true },
+  { path = "tokio::time::timeout", reason = "a timed wait is a sleep: it needs the sleep grant (fnd §2.4, ver §3, ARCH-test-sleep)", allow-invalid = true },
+  { path = "tokio::time::timeout_at", reason = "a timed wait is a sleep: it needs the sleep grant (fnd §2.4, ver §3, ARCH-test-sleep)", allow-invalid = true },
   # grant: clock (granted to this crate: lifted)
   # grant: env (granted to this crate: lifted)
   # grant: none

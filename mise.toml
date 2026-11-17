@@ -24,6 +24,6 @@ just = "1.59.0"
 "aqua:suzuki-shunsuke/pinact" = "5.0.2"
 "aqua:koalaman/shellcheck" = "0.11.0"
 
-# The benchmark harness's timer and its `rg` floor (BENCH-02); pinned here, no recipe yet.
+# The benchmark harness's timer and its `rg` floor (BENCH-02, `just bench`).
 "aqua:sharkdp/hyperfine" = "2.0.0"
 "aqua:BurntSushi/ripgrep" = "15.2.0"

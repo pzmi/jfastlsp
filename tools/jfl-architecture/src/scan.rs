@@ -14,7 +14,8 @@
 //! - `ARCH-platform-branch`: no `cfg!(...)` on the platform (`target_os`, `target_family`,
 //!   `target_arch`, `target_env`, `target_vendor`, `unix`, `windows`): `#[cfg]` items instead;
 //! - `ARCH-hidden-source`: no `#[path = ...]` and no `include!`, which would compile code the
-//!   scan does not read (a target's root outside its crate is the graph check's);
+//!   scan does not read (a target's root outside its crate is the graph check's), and no file the
+//!   lexer cannot follow to its end ([`crate::lexer::LexError`]: it fails closed);
 //! - `ARCH-domain-purity`: a pure crate's `src/lib.rs` opens with `#![no_std]` (fnd §2.3).
 //!
 //! The scan reads code with literals and comments removed ([`crate::lexer`]), joined into one
@@ -285,7 +286,19 @@ pub fn source(
     exceptions: &[LintException],
     used: &mut BTreeSet<usize>,
 ) -> Vec<Finding> {
-    let lines = lexer::lines(text);
+    let lines = match lexer::lines(text) {
+        Ok(lines) => lines,
+        Err(error) => {
+            return vec![Finding::new(
+                "ARCH-hidden-source",
+                format!("{path}:{}", error.line),
+                format!(
+                    "the source scan cannot read this file past here ({}): every rule would be blind to the code after it",
+                    error.reason
+                ),
+            )];
+        }
+    };
     let code = Code::new(&lines);
     let mut findings = Vec::new();
     let mut test_pending = false;

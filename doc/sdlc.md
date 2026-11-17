@@ -55,15 +55,12 @@ are the real procedure; this section summarises it.
    it; HIGH and MEDIUM findings go back to the task's agent.
 5. **Land.** `scripts/land.sh <sha>`: one commit at a time, the next only after the previous
    commit's CI is green; `just check` on the merged tree; push only on green (ADR 0002, ADR 0030).
-   Before `ci.yml` exists (FND-05) there is no CI run to wait for: the gate on the merged tree is
-   the only gate, and the next commit may land once the previous one is pushed.
    `land.sh` refuses a dirty checkout, resolves only `Cargo.lock` and the ADR index, checks each
    commit's sign-off and signature, and takes `--no-push` for a dry run; any other conflict aborts
-   and names its files. Before FND-03 the orchestrator did the same by hand (`git fetch`,
-   `git cherry-pick`, the gate on the merged tree, `git push origin main` only on green).
-6. **Watch CI.** From FND-05 on, the orchestrator waits for the run of the pushed commit and
-   reads the `Required` result. Without `gh` it uses the GitHub MCP tools. Before FND-05 it
-   records `ci: none (pre-FND-05)` and moves on.
+   and names its files.
+6. **Watch CI.** The orchestrator waits for the run of the pushed commit and reads the
+   `Required` result. Without `gh` it uses the GitHub MCP tools. The `linux-arm` and `macos`
+   jobs run only after the push (ADR 0002), so a platform failure is found there.
 
 Agents never suppress a failing test, widen a lint exemption, remove a modelled invariant,
 loosen a budget or rewrite a golden fixture to obtain green. A missing pinned tool is an
@@ -78,7 +75,7 @@ A task is done when:
 - the live gate exits 0 on the merged tree (`quick` is never reported as `check`);
 - the architecture rules and their negative fixtures pass;
 - the commit is signed off, has the task's subject, and states its impact;
-- it is on `main` and `Required` is green for that commit (once FND-05 has landed);
+- it is on `main` and `Required` is green for that commit;
 - the report names the gates that ran, their versions and seeds, the `(owner)` items left
   pending, and anything that did not run.
 
@@ -87,10 +84,12 @@ reported as green. A ⛳ task is done only after the checkpoint review below.
 
 ## 4. The gate
 
-| Stage of the repository | Gate |
-|:--|:--|
-| Before FND-02 | the fallback: `cargo fmt --all --check && cargo clippy --workspace --all-targets --locked -- -D warnings && cargo test --workspace --locked` |
-| From FND-02 | `just quick` while working; `just check` before every commit and in `scripts/land.sh` |
+`just quick` while working; `just check` before every commit and in `scripts/land.sh`; `just
+ci-parity` before landing a change to tests that start cargo, nextest or a scratch workspace.
+The gate's own recipes, scripts and configuration are pinned (`.config/gate.sha256`,
+`ARCH-gate-config`, fnd §3.6): a diff that moves a pin is a change of the gate and is reviewed
+line by line as one. Every check of the gate is an allowlist or a pinned shape, never a list of
+bad patterns (fnd §3).
 
 Tools come from `bash scripts/bootstrap-tools.sh` (mise and just) and `mise install --locked`
 (the rest). The stages of `check` are listed in fnd §9 and by `just --list`; each CI job runs
@@ -121,8 +120,8 @@ tracked metric that regresses by more than 10 % (plan §1.7, fnd §9).
   aimed at the checkpoint's named risks, has HIGH and MEDIUM findings fixed as a follow-up commit,
   tags `checkpoint-<ID>` locally, reports to the owner and waits for a go.
 - Owner decisions are batched into each checkpoint report: Proposed ADRs to accept or override,
-  `(owner)` acceptance items pending, `DEC-` tasks ready for a decision. Only ADRs 0001–0004 are
-  Accepted; every other record, including the licence (0005), the platforms (0006), Quint (0007),
+  `(owner)` acceptance items pending, `DEC-` tasks ready for a decision. Only ADRs 0001–0004 and 0032
+  are Accepted (owner); every other record, including the licence (0005), the platforms (0006), Quint (0007),
   no event sourcing (0008), phase 0 (0009) and the reuse decisions (0019–0031), is an orchestrator
   default the owner confirms at the FND checkpoint (DEC-07).
 - **`DEC-` tasks** record an owner decision as an ADR. An agent may prepare the inputs (a

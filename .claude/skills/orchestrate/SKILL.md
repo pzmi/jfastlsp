@@ -26,7 +26,7 @@ GitHub Actions run or job URL (a failure to fix), or nothing (the next ready tas
 ## Startup
 
 1. Read `CLAUDE.md`, the top of `doc/tasks.md` (Decisions, Rules for every task, the live gate:
-   the fallback before FND-02, then `just check`) and the overview rows of the tasks in
+   `just check`) and the overview rows of the tasks in
    scope with their dependencies, model, size, ⛳ mark and "Parallel with" column.
 2. A task is **ready** when every dependency has a commit and the task has none yet. Subjects
    are `<ID>: summary`, so: `git log --oneline main | grep " <dep>:"`. A `DEC-` dependency counts
@@ -109,7 +109,7 @@ decisions already made, files another lane is changing right now, shared registr
 contract suites this lane owns or must not touch>.
 ADR numbers reserved for you: <NNNN, ... | none>; create them with
 copying doc/adr/template.md to doc/adr/NNNN-<kebab-title>.md and adding the index row.
-Gate: <`just check` | the fallback in CLAUDE.md>, as doc/tasks.md says. A product task
+Gate: `just check`, as doc/tasks.md says. A product task
 also runs `just bench` on the corpus (small at least) and reports the metrics it changed.
 Run it in the foreground with CARGO_TARGET_DIR=<lane target dir>, CARGO_BUILD_JOBS=2 and
 CARGO_INCREMENTAL=0, keeping its exit code (set -o pipefail; no `| tail` in an && chain);
@@ -145,9 +145,7 @@ resetting the worktree"; never discard its uncommitted change without reading it
    findings go back to the task's agent by `SendMessage`; land only a clean or fixed commit.
    For the socket, the lock, `jfl-process`, the Gradle model (trusted code) and every parser of
    untrusted input, the review finishes before `land` starts, never alongside it.
-3. Land **one commit at a time**, and, once `ci.yml` exists (FND-05), the next only after the
-   previous commit's CI run is green; before FND-05 there is no run to wait for, the gate on the
-   merged tree is the only gate, and the next commit may land once the previous one is pushed.
+3. Land **one commit at a time**, the next only after the previous commit's CI run is green.
    Before landing a task sized `L`, or one touching `jfl-domain`, `jfl-protocol` or
    `jfl-application`, run `just mutants-diff` in its worktree once FND-06 has landed (20-minute
    cap; fnd §9). Then: `scripts/land.sh <sha>` (`--no-push` for a dry run). It refuses a dirty
@@ -155,10 +153,9 @@ resetting the worktree"; never discard its uncommitted change without reading it
    `Cargo.lock` and the ADR index, aborts on any other conflict, runs `just check` (with
    `private-names` failing closed) on the merged tree and pushes only when it is green.
    Integration is direct on `main` (ADR 0002); there is no PR phase. Never land on red CI.
-   `bench-gate` is not part of landing: it runs only in `bench.yml` on its runner class. Before
-   FND-03 lands `land` does not exist: cherry-pick onto a clean `main`, run the gate (the
-   fallback before FND-02) on the merged tree in the foreground, and push with
-   `git push origin main` only on green.
+   `bench-gate` is not part of landing: it runs only in `bench.yml` on its runner class. A
+   commit that moves a line of `.config/gate.sha256` changes the gate itself (fnd §3.6): review
+   each moved pin as such before landing.
 4. An aborted land: a conflict in code the agent wrote goes back to that agent via
    `SendMessage` (rebase its lane, re-run the gate); a shared file follows the table above.
    Red `check` on the merged tree but green in the lane is an interaction bug: hand it to the
@@ -175,8 +172,7 @@ resetting the worktree"; never discard its uncommitted change without reading it
 
 ## After the push
 
-- **CI**, after every push and before the next land, from FND-05 on (before it there is no
-  workflow: record `ci: none (pre-FND-05)`; `gh` may be unavailable, so use MCP):
+- **CI**, after every push and before the next land (`gh` may be unavailable, so use MCP):
   `actions_list` (workflow runs for the branch, match the head sha), `actions_get` until
   `completed`, then `get_job_logs` with `failed_only` and `tail_lines` 60 to 120 (a large log
   lands in a file: grep it). Red is work now: name the failing line, hand the fix to a work

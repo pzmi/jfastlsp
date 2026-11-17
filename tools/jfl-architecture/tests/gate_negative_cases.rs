@@ -136,16 +136,22 @@ fn should_fail_clippy_when_a_test_sleeps_outside_poll() -> TestResult {
     // then
     let text = printed(&output);
     assert!(!output.status.success(), "clippy passed:\n{text}");
-    assert!(
-        text.contains("disallowed method `std::thread::sleep`"),
-        "{text}"
-    );
+    for path in [
+        "std::thread::sleep",
+        "std::sync::mpsc::Receiver::recv_timeout",
+        "std::sync::Condvar::wait_timeout",
+    ] {
+        assert!(
+            text.contains(&format!("disallowed method `{path}`")),
+            "{path}:\n{text}"
+        );
+    }
     Ok(())
 }
 
 #[test]
 fn should_pass_clippy_when_the_sleeping_crate_holds_the_sleep_grant() -> TestResult {
-    // given: jfl-testkit's list, the only one that lifts the sleep grant
+    // given: jfl-testkit's list, which lifts the sleep grant
     let granted = repo_root().join("crates/jfl-testkit");
 
     // when
@@ -589,5 +595,153 @@ fn should_name_the_valid_stages_when_check_only_gets_an_unknown_one() -> TestRes
         text.contains("valid stages: fmt-check architecture clippy nostd"),
         "{text}"
     );
+    Ok(())
+}
+
+/// A scratch git repository holding a copy of the repository's justfile, rust-toolchain.toml
+/// and mise.toml, so a case can commit the file `_preflight` must refuse without touching the
+/// real tree (`_preflight` takes the justfile's directory as the repository root).
+fn scratch_repository(case: &str) -> Result<PathBuf, Box<dyn Error>> {
+    let root = fresh_target(case)?.join("repo");
+    std::fs::create_dir_all(&root)?;
+    for file in ["justfile", "rust-toolchain.toml", "mise.toml"] {
+        std::fs::copy(repo_root().join(file), root.join(file))?;
+    }
+    let init = Command::new("git")
+        .args(["init", "-q"])
+        .current_dir(&root)
+        .output()?;
+    assert!(init.status.success(), "{}", printed(&init));
+    Ok(root)
+}
+
+/// `_preflight` of the scratch repository's own justfile, run there.
+fn scratch_preflight(root: &Path) -> Command {
+    let mut command = Command::new("just");
+    command
+        .arg("--justfile")
+        .arg(root.join("justfile"))
+        .arg("--working-directory")
+        .arg(root)
+        .env_clear();
+    for name in PASSED_THROUGH {
+        if let Some(value) = std::env::var_os(name) {
+            command.env(name, value);
+        }
+    }
+    command.arg("_preflight");
+    command
+}
+
+/// The reviewer's runner (the FND-05 checkpoint's N1): TOML unicode escapes spell `target` and
+/// `runner`, which a line grep never matched; the runner passes every test without running it.
+const ESCAPED_RUNNER: &str = "[\"t\\u0061rget\".x86_64-unknown-linux-gnu]\n\"r\\u0075nner\" = [\"bash\", \"-c\", \"exit 0\"]\n";
+
+#[test]
+fn should_pass_preflight_when_the_scratch_repository_holds_only_the_gate_files() -> TestResult {
+    // given: the control for the scratch cases below
+    let root = scratch_repository("scratch-clean")?;
+
+    // when
+    let output = scratch_preflight(&root).output()?;
+
+    // then
+    assert!(output.status.success(), "{}", printed(&output));
+    Ok(())
+}
+
+#[test]
+fn should_refuse_the_gate_when_the_repository_holds_any_cargo_config() -> TestResult {
+    // given: the escaped runner at the root, and an alias in a nested directory
+    let mut accepted = Vec::new();
+    let cases = [
+        (".cargo/config.toml", ESCAPED_RUNNER),
+        (
+            "crates/x/.cargo/config",
+            "[\"\\u0061lias\"]\nxyzzy = \"build\"\n",
+        ),
+        (".cargo/config.toml", "[net]\nretry = 2\n"),
+    ];
+
+    // when
+    for (index, (path, contents)) in cases.iter().enumerate() {
+        let root = scratch_repository(&format!("repo-cargo-config-{index}"))?;
+        let file = root.join(path);
+        std::fs::create_dir_all(file.parent().ok_or("no parent")?)?;
+        std::fs::write(&file, contents)?;
+        let output = scratch_preflight(&root).output()?;
+        if output.status.success() || !printed(&output).contains(path) {
+            accepted.push(format!("{path}: {}", printed(&output)));
+        }
+    }
+
+    // then: inside the repository the allowlist is empty, a harmless key included
+    assert!(accepted.is_empty(), "preflight accepted {accepted:?}");
+    Ok(())
+}
+
+#[test]
+fn should_refuse_the_gate_when_a_cargo_home_config_leaves_the_plain_shape() -> TestResult {
+    // given: the escaped runner, an escaped alias table and a dotted key in CARGO_HOME
+    let forms = [
+        ESCAPED_RUNNER,
+        "[\"\\u0061lias\"]\nxyzzy = \"build\"\n",
+        "net.retry = 2\n",
+        "[net]\nretry = \"\\u0032\"\n",
+        "[paths]\n",
+        "[source.crates-io]\nreplace-with = \"vendored\"\n",
+    ];
+    let mut accepted = Vec::new();
+
+    // when
+    for (index, form) in forms.iter().enumerate() {
+        let cargo_home = fresh_target(&format!("cargo-home-shape-{index}"))?;
+        std::fs::write(cargo_home.join("config.toml"), form)?;
+        let output = just(&repo_root())
+            .arg("_preflight")
+            .env("CARGO_HOME", &cargo_home)
+            .output()?;
+        if output.status.success() {
+            accepted.push(*form);
+        }
+    }
+
+    // then
+    assert!(accepted.is_empty(), "preflight accepted {accepted:?}");
+    Ok(())
+}
+
+#[test]
+fn should_refuse_the_gate_when_mise_toml_has_more_than_tools() -> TestResult {
+    // given: the reviewer's N6, an [env] that would reach every tool through its shim
+    let root = scratch_repository("mise-env")?;
+    let mise = root.join("mise.toml");
+    let mut text = std::fs::read_to_string(&mise)?;
+    text.push_str("\n[env]\nNEXTEST_PROFILE = \"evil\"\n");
+    std::fs::write(&mise, text)?;
+
+    // when
+    let output = scratch_preflight(&root).output()?;
+
+    // then
+    let text = printed(&output);
+    assert!(!output.status.success(), "preflight passed:\n{text}");
+    assert!(text.contains("mise.toml"), "{text}");
+    Ok(())
+}
+
+#[test]
+fn should_refuse_the_gate_when_another_mise_config_sits_in_the_repository() -> TestResult {
+    // given: a second configuration mise would load, tools only
+    let root = scratch_repository("mise-local")?;
+    std::fs::write(root.join("mise.local.toml"), "[tools]\njust = \"1.59.0\"\n")?;
+
+    // when
+    let output = scratch_preflight(&root).output()?;
+
+    // then
+    let text = printed(&output);
+    assert!(!output.status.success(), "preflight passed:\n{text}");
+    assert!(text.contains("mise.local.toml"), "{text}");
     Ok(())
 }

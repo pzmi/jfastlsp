@@ -411,8 +411,16 @@ daemon are the closest published shapes (§16).
   other user can traverse the directory; macOS ignores socket-file permissions on `connect`
   anyway. Each connection's peer uid (`SO_PEERCRED` on Linux, `getpeereid` on macOS) must equal
   the daemon's: the backstop if the directory check is ever wrong.
-- Socket paths are limited to about 104 bytes on macOS and 108 on Linux: a state directory whose
-  socket path would be longer is refused with the limit named, never truncated.
+- Socket paths are limited to about 104 bytes on macOS and 108 on Linux, and a state directory
+  under a long `$XDG_STATE_HOME` or a sandbox's long `$TMPDIR` can exceed that. **Proposed
+  (FND-08, for IDX-12), the policy `jfl-jdtls` built and ADR 0028's amendment records:** the
+  socket is `<state>/sock` when that path fits; otherwise it moves to a short private directory,
+  `/tmp/jfl-<euid>/<key>.sock` (a fixed short base, not `$TMPDIR`), keyed on a digest of the
+  canonical state directory so two state directories never share a socket. That directory is
+  held to the state directory's rules: created `0700`, and an existing one refused unless it is a
+  real directory (not a symlink) of mode `0700` owned by the daemon's uid; the peer-uid check
+  applies as above. A path that does not fit even there is refused with the limit named, never
+  truncated. The lock stays in the state directory.
 - Frames are JSON-RPC 2.0 with the LSP base protocol's `Content-Length` framing, so the CLI, the
   LSP proxy and the daemon share one frame decoder (`jfl-protocol`'s, which checks the length
   before allocating), one message type (`lsp_server::Message`) and one trace format (ADR 0021);

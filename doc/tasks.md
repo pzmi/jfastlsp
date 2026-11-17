@@ -8,112 +8,10 @@ file owns *order* and *size*. Each task is one focused commit that a fresh agent
 session after reading only what the card names.
 
 **Live gate:** `just check` (and `just quick` while iterating), with tools from
-`mise install --locked`, since FND-02; before it, the fallback gate (`cargo fmt --all --check &&
-cargo clippy --workspace --all-targets --locked -- -D warnings && cargo test --workspace --locked`).
-Since FND-03 the orchestrator lands commits with `scripts/land.sh` ([`sdlc.md`](sdlc.md) §2). mise and just come from `scripts/bootstrap-tools.sh` (fnd §8), which
-the SessionStart hook runs in cloud sessions. Until FND-01 lands there is no Cargo workspace and
-the gate is vacuous; BOOT-00 (plan, process and agent instructions), BOOT-01 (the reuse survey
-and early benchmarks applied) and BOOT-02 (the bootstrap review applied) are the only commits.
-
-## Decisions
-
-The ADR number is the decision id (ADR 0001). **Proposed** decisions are orchestrator or planner
-defaults the owner may override; until then tasks follow them as written. Only ADRs 0001–0004
-and 0032 are the owner's decisions so far; DEC-07 puts the rest to the owner at the FND checkpoint. Only
-the owner flips a decision to Accepted or decides a `DEC-` task.
-
-| ADR | Decision | Status |
-|---|---|---|
-| [0001](adr/0001-record-architecture-decisions.md) | Decisions are Nygard ADRs; the ADR number is the decision id; records, not rules | Accepted; amendment proposed (`adrs`) |
-| [0002](adr/0002-integrate-on-main-one-signed-off-commit-per-task.md) | Trunk: one DCO-signed commit per task on `main`, reviewed and landed by the orchestrator (by hand until FND-03) | Accepted; amendment proposed (`scripts/land.sh`) |
-| [0003](adr/0003-commit-identity-subject-and-trailer-order.md) | Author and sign-off `Patryk Żmigrodzki <pzmi@users.noreply.github.com>`; subject `<ID>: summary`; `Impact:` line; trailers `Signed-off-by`, `Co-Authored-By`, `Claude-Session` | Accepted |
-| [0004](adr/0004-public-repository-no-private-projects.md) | Public repository: never name or allude to private projects; nothing from a private target repository | Accepted |
-| [0005](adr/0005-dual-licence-mit-or-apache-2-0.md) | `MIT OR Apache-2.0` | Proposed (DEC-07) |
-| [0006](adr/0006-platforms-linux-x86-64-and-arm64-macos-arm64.md) | Linux x86-64 and arm64, macOS arm64; Windows out of scope | Proposed (DEC-07) |
-| [0007](adr/0007-formal-methods-required-quint-with-itf-conformance.md) | Quint models (views, daemon, diagnostics) with ITF conformance against the real code | Proposed (DEC-07) |
-| [0008](adr/0008-no-event-sourcing-the-index-is-a-rebuildable-cache.md) | No event sourcing; caches are versioned and rebuilt | Proposed (DEC-07) |
-| [0009](adr/0009-phase-0-first-owner-run-evaluations-and-decision-tasks.md) | Phase 0 first; `(owner)` items and `DEC-` tasks for owner decisions | Proposed (DEC-07) |
-| [0010](adr/0010-workspace-crate-map-and-dependency-law.md) | The crate map and dependency law of plan §6, in `architecture.toml`, enforced by tools (amended) | Proposed |
-| [0011](adr/0011-pinned-toolchains-rust-1-97-0-and-tools-versions-toml.md) | Rust 1.97.0; tools in `tools/versions.toml` | Superseded by 0030 |
-| [0012](adr/0012-port-xtask-from-mayfly.md) | `tools/xtask` ported from mayfly | Superseded by 0030 |
-| [0013](adr/0013-two-carriers-over-one-query-engine-cli-first.md) | JSON CLI first, LSP second, over one engine | Proposed |
-| [0014](adr/0014-result-envelope-exact-possible-complete.md) | The result envelope; `complete=true` never wrong | Proposed |
-| [0015](adr/0015-no-jvm-and-no-build-on-the-request-path.md) | No JVM and no build on the request path | Proposed |
-| [0016](adr/0016-one-daemon-per-user-with-thin-proxies.md) | One daemon per user, thin proxies, single owner by lock | Proposed |
-| [0017](adr/0017-bind-views-per-request-uri-exclude-nested-worktrees.md) | Views per request URI; nested worktrees excluded | Proposed |
-| [0018](adr/0018-agent-sandbox-and-fail-closed-tools.md) | Agent sandbox, hooks and fail-closed tools | Proposed |
-| [0019](adr/0019-build-or-reuse-per-subsystem.md) | Reuse by default; build only what nothing maintained does; `Reuse considered:` on every card | Proposed |
-| [0020](adr/0020-lsp-stack-lsp-server-gen-lsp-types-line-index.md) | `lsp-server` + `gen-lsp-types` + `line-index` | Proposed |
-| [0021](adr/0021-daemon-ipc-lsp-framing-over-a-unix-socket.md) | IPC is JSON-RPC with LSP framing over the Unix socket; std file lock; sccache's handshake | Proposed |
-| [0022](adr/0022-java-grammar-tree-sitter-java-orchard-with-own-queries.md) | `tree-sitter-java-orchard` with our own queries | Proposed |
-| [0023](adr/0023-class-files-cafebabe-and-ct-sym.md) | `cafebabe` + `zip`; the JDK API from `ct.sym` | Proposed |
-| [0024](adr/0024-git-cli-on-the-reconcile-path-not-gitoxide.md) | The `git` CLI on the reconcile path; stat-only freshness | Proposed |
-| [0025](adr/0025-storage-rusqlite-fst-postcard-blake3.md) | `rusqlite`, `fst`, `postcard`, `blake3` (the tier stays DEC-03) | Proposed |
-| [0026](adr/0026-gradle-model-by-wrapping-build-server-for-gradle.md) | Gradle model by wrapping microsoft/build-server-for-gradle | Proposed |
-| [0027](adr/0027-javac-worker-forked-from-java-language-server-with-scip-java.md) | javac worker forked from java-language-server, with scip-java's plugin | Proposed |
-| [0028](adr/0028-jdtls-behind-our-multiplexing-proxy-baseline-and-fallback.md) | jdtls behind our multiplexing proxy: baseline and fallback product | Proposed |
-| [0029](adr/0029-e0-on-harbor-with-a-multi-swe-bench-java-control.md) | E0 on Harbor with a Multi-SWE-bench Java control | Proposed |
-| [0030](adr/0030-foundation-from-maintained-tools.md) | Foundation from maintained tools: just, mise, cargo-deny, `no_std`, one architecture test | Proposed |
-| [0031](adr/0031-benchmark-early-on-a-pinned-real-corpus.md) | Benchmarks from FND-01 on a pinned real corpus; >10 % regressions block from M1 | Proposed |
-| [0032](adr/0032-evaluation-target-spring-framework-at-the-bench-pin.md) | E0 to E4 target: spring-framework (public, Apache-2.0) at the bench pin `4cb62d893e09e23791d661e8d9b35aedee7006d0` (DEC-01) | Accepted (owner, 2026-11-17) |
-
-`DEC-` tasks add rows here when the owner decides (DEC-01 target repository, DEC-03 storage tier,
-DEC-04 resolver and the SCIP baseline, DEC-05 diagnostics scope, DEC-06 `referencesMode` and
-operation priority, DEC-02 go/no-go and the speed targets, DEC-07 the Proposed defaults, DEC-08
-the skills plugin).
-
-## Rules for every task
-
-1. **Read first:** this file's Decisions, then the sections the card cites, then the existing
-   files it changes. Do not read the documents whole.
-2. **Green after every task:** the live gate passes on the exact tree you commit.
-3. **Commit:** exactly one DCO-signed commit per task, subject `<ID>: <summary>`, body says why and
-   carries an `Impact:` line, trailer block last (`Signed-off-by`, `Co-Authored-By`,
-   `Claude-Session`, written by hand). Implementing agents never push, tag or change remote
-   settings.
-4. **Tests:** `should_<outcome>_when_<condition>`, `// given` / `// when` / `// then`. No sleeps
-   (fake clock, `tokio::time::pause`, channels, the testkit `poll` helper); no mocking frameworks;
-   tempdirs. A test lives at the lowest level that can fail for the reason it exists (ver §2).
-5. **No silencing:** no `#[ignore]`, no `#[allow]`/`#[expect]` without an `architecture.toml`
-   exception citing an ADR, no production `todo!`/`unimplemented!`/`dbg!`. Never delete a failing
-   test, weaken a modelled invariant, loosen a budget or rewrite a golden fixture to get green.
-6. **New crate or dependency:** `members`, `architecture.toml`, `deny.toml` and the crate's
-   `clippy.toml` in the same commit; third-party crates added with `cargo add` (latest stable,
-   locked) and listed in the crate's external allowlist; named with its reason in the commit
-   message. New tools are pinned in `mise.toml`.
-7. **Model first:** a change to views and generations, the daemon lifecycle or diagnostics
-   publication updates the Quint model, its scenarios and the conformance driver before the Rust
-   code (ADR 0007).
-8. **Golden first:** a change to a protocol message, the `--json` output or an LSP response
-   writes or extends the golden fixture before the code (fnd §11.2).
-9. **Decisions:** a new or reversed architectural decision adds an ADR (`adrs new`, or the
-   template copied by hand for a reserved number), or amends or supersedes one,
-   in the same commit, with the tests and rules that pin it. Agents never flip Proposed to
-   Accepted and never decide a `DEC-` task.
-10. **Scope:** do not edit `CLAUDE.md` or `.claude/` (the orchestrator's); report a needed change.
-11. **Owner-only items** start with `(owner)`: deliver everything up to them and report them as
-    pending. Nothing from a private target repository is committed (ADR 0004).
-12. **Parallelism:** sequential by default. Only tasks whose "Parallel with" cells name each other
-    run concurrently, in separate worktrees with disjoint file sets; at most two at once. Shared
-    files (`Cargo.toml`, `Cargo.lock`, `architecture.toml`, `deny.toml`, the `clippy.toml` lists,
-    the `justfile`, `mise.toml`, `mise.lock`, `tools/jfl-architecture/`, `formal/models.toml`,
-    protocol goldens, `fixtures.lock`, `doc/bench-corpus.md`) follow the orchestrator's
-    serialisation table; the later lane rebases.
-13. **Reuse first** (ADR 0019): a card that adds a subsystem says what it reused or why not
-    (`Reuse considered:`); a hand-built subsystem with a maintained alternative needs an ADR.
-14. **Speed is measured, always** (ADR 0031): every product task runs on the bench corpus (small
-    at least, `just bench`) and reports the metrics it affects; its correctness tests also run
-    against the real-corpus cases that apply (BENCH-05). From M1 on, a tracked metric that
-    regresses by more than 10 % fails `bench.yml`'s `bench-gate` on its fixed runner class; a
-    local or sandbox run reports and never gates (fnd §9).
-
-**Model key:** `deep` — design, protocols, concurrency, the envelope, Quint models, the
-architecture test, untrusted-input parsers. `standard` — well-specified implementation.
-`light` — mechanical docs and config. The orchestrator maps them to the strongest, middle and
-fastest model it has.
-
-**Size key:** `S` — under an hour of agent work, one module. `M` — one crate, up to about five
-`Accept:` items. `L` — a full session; the upper bound for one task (split it if it grows).
+`mise install --locked`; mise and just come from `scripts/bootstrap-tools.sh` (fnd §8), which the
+SessionStart hook runs in cloud sessions. The orchestrator lands commits with `scripts/land.sh`
+([`sdlc.md`](sdlc.md) §2), and CI (`ci.yml`, [`required-checks.md`](required-checks.md)) runs
+the same stages on every push to `main`.
 
 **Review checkpoints (⛳):** after a ⛳ task lands green, the orchestrator runs `/review` plus an
 adversarial second review over the range since the previous `checkpoint-*` tag, lands the fixes,
@@ -133,6 +31,7 @@ targets), **IDX-15** (M1 and the blocking bench gate), **LSP-06** (M2), **SEM-07
 | FND-03 | ADR tooling, `scripts/land.sh`, DCO check | FND-07 | standard | M |  | EVAL-01, BENCH-02, EVAL-11 |
 | FND-04 | Security and supply chain: gitleaks, zizmor, pinact, actionlint, private names | FND-03 | standard | S |  | EVAL-11 |
 | FND-05 | CI workflows and required checks | FND-04 | standard | M | ⛳ | EVAL-02, EVAL-06 |
+| FND-08 | Checkpoint fixes: close the gate bypasses found at the FND-05 ⛳ | FND-05 | deep | L |  | FND-06, BENCH-03 |
 | FND-06 | Coverage, changed lines, mutation in the diff | FND-05 | standard | M |  | EVAL-03, EVAL-10, BENCH-03 |
 | DEC-07 | (owner) Confirm the Proposed defaults | FND-05 | light | S |  | DEC-08 |
 | DEC-08 | (owner) Shared skills plugin or repo-local skills | FND-05 | light | S |  | DEC-07 |
@@ -213,7 +112,8 @@ targets), **IDX-15** (M1 and the blocking bench gate), **LSP-06** (M2), **SEM-07
 Seven small tasks assemble the foundation from maintained tools (ADR 0030): mise pins, a `just`
 gate, the compiler, clippy and cargo-deny for the dependency law (FND-02), one architecture test
 (FND-07), adrs and a land script, the security scanners, CI, coverage and mutation in the diff. The FND checkpoint (FND-05)
-puts the Proposed defaults and the skills question to the owner (DEC-07, DEC-08).
+puts the Proposed defaults and the skills question to the owner (DEC-07, DEC-08); FND-08 lands
+the checkpoint reviews' fixes.
 
 #### FND-01: Workspace, toolchain, crate stubs, mise
 - **Depends on:** none. **Model:** standard. **Size:** M. **Parallel with:** DEC-01.
@@ -242,12 +142,12 @@ puts the Proposed defaults and the skills question to the owner (DEC-07, DEC-08)
   `install-tools`), bootstrapped by `scripts/bootstrap-tools.sh` (BOOT-02); `#![no_std]` plus a
   no-std target build instead of a purity checker; `cargo-run-bin` rejected (Rust tools only).
 - **Accept:**
-  - [ ] the fallback gate is green; `cargo build --locked --workspace` succeeds
-  - [ ] `cargo metadata --format-version 1 --no-deps` lists exactly the crates of plan §6.1 (minus `jfl-fuzz` and `jfl-resolve`), and nothing under `spikes/`
-  - [ ] `grep -L 'publish = false' crates/*/Cargo.toml tools/*/Cargo.toml` prints nothing; every member has `[lints] workspace = true`
-  - [ ] `target/debug/jfl --version` prints `jfl 0.1.0`; `rustc --version` inside the repository reports 1.97.0
-  - [ ] `bash scripts/bootstrap-tools.sh` succeeds in the sandbox, then `mise install --locked` succeeds from an empty mise data directory and `just doctor` exits 0
-  - [ ] each pure crate's `lib.rs` starts with `#![no_std]` (a grep in the commit body; FND-07 makes it a rule) and `cargo build --locked -p jfl-domain -p jfl-protocol --target x86_64-unknown-none` succeeds
+  - [x] the fallback gate is green; `cargo build --locked --workspace` succeeds
+  - [x] `cargo metadata --format-version 1 --no-deps` lists exactly the crates of plan §6.1 (minus `jfl-fuzz` and `jfl-resolve`), and nothing under `spikes/`
+  - [x] `grep -L 'publish = false' crates/*/Cargo.toml tools/*/Cargo.toml` prints nothing; every member has `[lints] workspace = true`
+  - [x] `target/debug/jfl --version` prints `jfl 0.1.0`; `rustc --version` inside the repository reports 1.97.0
+  - [x] `bash scripts/bootstrap-tools.sh` succeeds in the sandbox, then `mise install --locked` succeeds from an empty mise data directory and `just doctor` exits 0
+  - [x] each pure crate's `lib.rs` starts with `#![no_std]` (a grep in the commit body; FND-07 makes it a rule) and `cargo build --locked -p jfl-domain -p jfl-protocol --target x86_64-unknown-none` succeeds
 - **Impact:** dependency graph (initial).
 
 #### FND-02: `just` gate, nextest, cargo-deny, clippy authority lists, `nostd` stage
@@ -270,12 +170,12 @@ puts the Proposed defaults and the skills question to the owner (DEC-07, DEC-08)
   `cargo-pup` (0.1, too young) and `dylint` (only for a rule clippy cannot express) were weighed;
   `cargo-make` is stale.
 - **Accept:**
-  - [ ] `just quick` and `just check` exit 0 on the tree; `just check-only nope` exits non-zero naming the valid recipes
-  - [ ] a path crate wrapped to the wrong parent fails `cargo deny check bans` (confirms `wrappers` on workspace crates)
-  - [ ] `std::process::Command` in a crate without the `process` grant, and `std::thread::sleep` in a test outside `poll`, each fail clippy; `poll` times out with its reason in the message
-  - [ ] a pure fixture crate with a path dependency on a std crate builds on the host and fails the `nostd` stage
-  - [ ] `_preflight` refuses `RUSTC_WRAPPER` (a test that sets it on the child process, not an inline variable in a script)
-  - [ ] `tasks.md`'s live gate line still holds: the fallback until this commit, `just check` from it
+  - [x] `just quick` and `just check` exit 0 on the tree; `just check-only nope` exits non-zero naming the valid recipes
+  - [x] a path crate wrapped to the wrong parent fails `cargo deny check bans` (confirms `wrappers` on workspace crates)
+  - [x] `std::process::Command` in a crate without the `process` grant, and `std::thread::sleep` in a test outside `poll`, each fail clippy; `poll` times out with its reason in the message
+  - [x] a pure fixture crate with a path dependency on a std crate builds on the host and fails the `nostd` stage
+  - [x] `_preflight` refuses `RUSTC_WRAPPER` (a test that sets it on the child process, not an inline variable in a script)
+  - [x] `tasks.md`'s live gate line still holds: the fallback until this commit, `just check` from it
 - **Impact:** none (tooling); the tool-enforced dependency law and authority now in force.
 
 #### FND-07: Architecture test (`jfl-architecture`) and its negative fixtures
@@ -288,10 +188,10 @@ puts the Proposed defaults and the skills question to the owner (DEC-07, DEC-08)
 - **Reuse considered:** `cargo_metadata` and `toml` with `deny_unknown_fields`; the ported
   `syn` checker rejected (ADR 0030).
 - **Accept:**
-  - [ ] each rule fnd §3.3 assigns to FND-07 fails its negative case with its id and path; a rule without a negative case fails the meta-test
-  - [ ] `pure-uses-std` (a `#![no_std]` crate naming `std::fs`) is built by a test and fails to compile
-  - [ ] a crate's `clippy.toml` that drops a lint its grants do not cover fails `ARCH-clippy-lists`
-  - [ ] `just quick` runs the stage; the tree is green
+  - [x] each rule fnd §3.3 assigns to FND-07 fails its negative case with its id and path; a rule without a negative case fails the meta-test
+  - [x] `pure-uses-std` (a `#![no_std]` crate naming `std::fs`) is built by a test and fails to compile
+  - [x] a crate's `clippy.toml` that drops a lint its grants do not cover fails `ARCH-clippy-lists`
+  - [x] `just quick` runs the stage; the tree is green
 - **Impact:** none (tooling); the dependency law now enforced.
 
 #### FND-03: ADR tooling, `scripts/land.sh`, DCO check
@@ -313,10 +213,10 @@ puts the Proposed defaults and the skills question to the owner (DEC-07, DEC-08)
   organisation-owned repository and a PR flow is not ADR 0002's choice. DCO: the DCO app
   (cncf/dco2) or an inline step; `committed` for message shape where its options fit.
 - **Accept:**
-  - [ ] `just adr-index` is clean over ADRs 0001–0031 as committed (fix the index or the check, never the records' decisions)
-  - [ ] `adrs new "Test"` in a scratch copy creates the next record from the template and the index check passes after the row is added
-  - [ ] `land.sh --no-push` on a scratch repository lands a clean commit, refuses a dirty checkout, aborts on a non-lockfile conflict naming the files, and moves nothing when `just check` fails
-  - [ ] `dco-check.sh` fails on a commit without a matching sign-off; the `docs` stage fails when an index row and a file disagree
+  - [x] `just adr-index` is clean over ADRs 0001–0031 as committed (fix the index or the check, never the records' decisions)
+  - [x] `adrs new "Test"` in a scratch copy creates the next record from the template and the index check passes after the row is added
+  - [x] `land.sh --no-push` on a scratch repository lands a clean commit, refuses a dirty checkout, aborts on a non-lockfile conflict naming the files, and moves nothing when `just check` fails
+  - [x] `dco-check.sh` fails on a commit without a matching sign-off; the `docs` stage fails when an index row and a file disagree
 - **Impact:** none (tooling).
 
 #### FND-04: Security and supply chain: gitleaks, zizmor, pinact, actionlint, private names
@@ -337,10 +237,10 @@ puts the Proposed defaults and the skills question to the owner (DEC-07, DEC-08)
   accounts); trufflehog (AGPL), `cargo-audit` (redundant with cargo-deny) and `cargo-vet` (heavy
   for one maintainer; optional later) were weighed.
 - **Accept:**
-  - [ ] the stages, `private-names` included, are in `check` and green on the tree
-  - [ ] each fixture fails its stage with the offending file named
-  - [ ] `just private-names` finds the planted name written as `Foo Bar`, `foo-bar` and `FooBar` in a changed line and in a commit message, naming the path and line but never printing the name; a missing hash file fails under `CI=true` and in `land.sh` and only warns otherwise
-  - [ ] `just doctor` lists the five tools
+  - [x] the stages, `private-names` included, are in `check` and green on the tree
+  - [x] each fixture fails its stage with the offending file named
+  - [x] `just private-names` finds the planted name written as `Foo Bar`, `foo-bar` and `FooBar` in a changed line and in a commit message, naming the path and line but never printing the name; a missing hash file fails under `CI=true` and in `land.sh` and only warns otherwise
+  - [x] `just doctor` lists the five tools
   - [ ] (owner) further private names added with `scripts/private-name-add.sh` and committed (only hashes)
 - **Impact:** none (tooling).
 
@@ -361,12 +261,58 @@ puts the Proposed defaults and the skills question to the owner (DEC-07, DEC-08)
   truth with local runs); `Swatinem/rust-cache`; the OpenSSF Scorecard action; Dependabot rather
   than Renovate (no extra app).
 - **Accept:**
-  - [ ] every workflow green on `main` for this commit; `Required` green
-  - [ ] zizmor, pinact and actionlint clean; every `uses:` pinned by SHA
-  - [ ] the lockstep test fails on a fixture `ci.yml` with a stage in two jobs, with `continue-on-error`, and with `|| true`
+  - [x] every workflow green on `main` for this commit; `Required` green
+  - [x] zizmor, pinact and actionlint clean; every `uses:` pinned by SHA
+  - [x] the lockstep test fails on a fixture `ci.yml` with a stage in two jobs, with `continue-on-error`, and with `|| true`
   - [ ] (owner) GitHub secret scanning and push protection on
   - [ ] (owner) a branch ruleset on `main` requiring only `Required`, if the owner wants one
 - **Impact:** CI topology.
+
+#### FND-08: Checkpoint fixes: close the gate bypasses found at the FND-05 ⛳
+- **Depends on:** FND-05. **Model:** deep. **Size:** L. **Parallel with:** FND-06, BENCH-03.
+- **Cites:** fnd §2.4, §2.5, §3, §3.2, §3.3, §3.6, §7.4, §9; plan §5.3; ADR 0028, ADR 0030; the
+  FND-05 checkpoint review and its adversarial second review.
+- The fixes of the two FND-05 checkpoint reviews, each written as an allowlist or a pinned shape
+  (never a list of bad patterns: fnd §3's standing principle, added here, after FND-02, FND-07
+  and FND-05 each needed two or three review rounds for denylist checks), each with a negative
+  case that reproduces the reviewer's bypass:
+  - **N1** (HIGH): no cargo configuration file inside the repository, at any depth; outside it a
+    strict plain shape (`_preflight`), and the same in `CARGO_HOME`; the unicode-escaped runner
+    and alias refused.
+  - **N3** and the first review's "`check:` not pinned": `ARCH-gate-config` pins the gate's own
+    recipes (`check`, `quick`, `check-only`, `ci-parity`, `platform-tests`, every stage and their
+    dependencies, the justfile's top-level lines) and the scripts the stages run by SHA-256 in
+    `.config/gate.sha256`; `.config/nextest.toml`, `mise.toml` and `rust-toolchain.toml` keep
+    allowlisted shapes; the lockstep reads `ci.yml`'s `on:`.
+  - **N2**: the source scan's lexer reads every literal prefix (`b`, `c`, `r`, `br`, `cr`) and
+    fails closed (`ARCH-hidden-source`) on what it cannot lex; a corpus test over every pair of
+    tricky literals and every truncation.
+  - **N4**: dependencies matched by source: a member's own path or crates.io, for direct
+    dependencies and every package of the graph; no `[patch]`, `[replace]`, `workspace.exclude`
+    other than `spikes`, or profile other than `bench-tool`.
+  - **N5**: `.gitleaks.toml` is gitleaks' default configuration without its global path
+    allowlist, generated from the pinned binary (`scripts/gitleaks-config.sh`) and compared byte
+    for byte.
+  - **N6**: `mise.toml` is only `[tools]`; no other mise configuration may load; the stages run the
+    tools from their install directories, not through shims; the Stop hook and `land.sh` resolve
+    `just` the same way.
+  - **N7**: the sleep grant covers every timed wait (`recv_timeout`, `Condvar::wait_timeout*`,
+    socket read and write timeouts, Tokio's `timeout` and `interval`); `jfl-jdtls` holds it.
+  - **N8**, **N9** (LOW): the private-names limits documented; the Stop hook also triggers on
+    `.config/`, `.cargo/`, `scripts/`, `.github/`, `.gitleaks.toml` and `mise.*`.
+  - Docs: the pre-FND-02/03/05 conditionals of `CLAUDE.md`, `sdlc.md`, `README.md` and the skills
+    replaced by the current state; the Accept boxes of the landed tasks ticked; ADR 0028's
+    amendment in the `## Amended` form and plan §5.3 stating the socket-path policy that was built
+    (Proposed for the product daemon, IDX-12).
+- **Reuse considered:** `sha2` (RustCrypto) for the pins, the `toml` crate already in the checker,
+  gitleaks' own embedded default configuration rather than a hand-kept copy, `mise bin-paths` and
+  `mise config ls` rather than re-implementing mise's search; Python's `tomllib` in `_preflight`
+  rejected (not a pinned tool), so the shell half is a strict line subset that fails closed.
+- **Accept:**
+  - [ ] each finding above has its negative case, which fails before the fix and passes after
+  - [ ] `just check` and `just ci-parity` are green on the tree
+  - [ ] fnd §3 states the allowlist principle; fnd §3.3 has the `ARCH-gate-config` row and the meta-test covers it
+- **Impact:** none (tooling); the gate's configuration is pinned.
 
 #### FND-06: Coverage, changed lines, mutation in the diff
 - **Depends on:** FND-05. **Model:** standard. **Size:** M. **Parallel with:** EVAL-03, EVAL-10, BENCH-03.
@@ -445,9 +391,9 @@ dispatch jobs or `(owner)` items.
 - **Reuse considered:** `git fetch --depth 1 <sha>`; Multi-SWE-bench images (built for
   evaluation, not benchmarks); git-annex or DVC (nothing to version but pins).
 - **Accept:**
-  - [ ] `just bench-corpus small` fetches and verifies into an empty cache, and is a no-op on the second run; a wrong commit fails verification
-  - [ ] the file counts match `doc/bench-corpus.md`; `git status` is clean after a fetch
-  - [ ] the helper creates 10 linked worktrees of the small repository
+  - [x] `just bench-corpus small` fetches and verifies into an empty cache, and is a no-op on the second run; a wrong commit fails verification
+  - [x] the file counts match `doc/bench-corpus.md`; `git status` is clean after a fetch
+  - [x] the helper creates 10 linked worktrees of the small repository
 - **Impact:** none (tooling).
 
 #### BENCH-02: Bench harness: `jfl-bench`, hyperfine, divan, the `rg` floor
@@ -471,11 +417,11 @@ dispatch jobs or `(owner)` items.
 - **Reuse considered:** hyperfine, divan, criterion, github-action-benchmark's JSON; a bespoke
   timer was rejected.
 - **Accept:**
-  - [ ] `just bench rg-floor small` writes JSON with machine facts and p50 and p95 per query
-  - [ ] `just bench e1 small` reproduces the spike's junit-framework row of `doc/bench-corpus.md` within the noise band the report states (same machine class), or the commit body says why not
-  - [ ] two runs on the same machine agree within that noise band
-  - [ ] the JSON is accepted by the history tool's format (a test against its schema or examples)
-  - [ ] `jfl-bench` imports no production crate
+  - [x] `just bench rg-floor small` writes JSON with machine facts and p50 and p95 per query
+  - [x] `just bench e1 small` reproduces the spike's junit-framework row of `doc/bench-corpus.md` within the noise band the report states (same machine class), or the commit body says why not
+  - [x] two runs on the same machine agree within that noise band
+  - [x] the JSON is accepted by the history tool's format (a test against its schema or examples)
+  - [x] `jfl-bench` imports no production crate
 - **Impact:** none (tooling).
 
 #### BENCH-03: Comparison arms and the first baseline
@@ -725,9 +671,9 @@ target repository is private, only aggregated reports under `doc/eval/` are comm
   proxy and Serena's collision fix (ideas only); the stock `jdtls-lsp` plugin as is (unfair
   baseline, ADR 0028).
 - **Accept:**
-  - [ ] two clients in one worktree share one backend and each sees only its own responses with its own ids (fake backend)
-  - [ ] two worktrees with the same basename get different `-data` directories
-  - [ ] a client that exits mid-request leaves the backend serving the others
+  - [x] two clients in one worktree share one backend and each sees only its own responses with its own ids (fake backend)
+  - [x] two worktrees with the same basename get different `-data` directories
+  - [x] a client that exits mid-request leaves the backend serving the others
   - [ ] (owner) with Claude Code and three subagents in one worktree, one jdtls process runs for it
 - **Impact:** none (tooling; the fallback product if DEC-02 says stop).
 

@@ -1,0 +1,35 @@
+# The gate's own configuration, pinned (fnd §3.6, FND-08; ARCH-gate-config in
+# tools/jfl-architecture/src/gate.rs): one SHA-256 per justfile recipe of the gate, the
+# justfile's top-level lines and each script the gate runs. A change to any of them fails the
+# architecture stage until its line here changes in the same commit, so the gate cannot be
+# neutered without a visible edit of this file; review reads every changed line as a change of
+# the gate itself. The failure names the line to write.
+f29ab63ad85facafe3d29fa9c88eba4eb5f56c99e5b2b2f6e69fd7a68f5c6c0c  justfile::(top-level)
+ffdcafa03ac8bbeae0918432858bbe59be8ca593c7c33399a3001784dd8aecd9  justfile::_preflight
+9dba69f6b0b357b699cc5bf1c69614c5fe3b734f385cc23d2a79f4987c694e6c  justfile::_require
+0d72f547b6425c6cb785f9a18996d64cafed4c396bf03fbdd5964386dccd5c41  justfile::architecture
+7761a8e4405aad0b60c6c88516d3578c3391ab9c21403c164efa28cb784fc123  justfile::check
+0188053f655288610a79e6d192c6146310dbdf6971b75b6e1dddc47507d30a6c  justfile::check-only
+6fc351ec1785ab8da75cd9d2c4dcf45be8ee4eb5e91dc57b2103cc672aaeb936  justfile::ci-parity
+886ff8d83cc0722c36a2cdd761f2b0610a8eb941236dc50abb32971fdf73490a  justfile::clippy
+e56661e3804c2cac1c699aa0c4000f84ad9fd2524c7607fb51397a99b2d062c8  justfile::deny
+033c5690d6c72222374960f18b8143dfb5ea31585bac6283bed38aac3d72cd2c  justfile::docs
+32a478974bd8b45b726914c59d14d8b6b224bb10a4bef3f3ea3a370c268c1ea7  justfile::doctests
+b3ece7f0fc656649e570d2d262d05e7c16fe6d3dd5a0ad2e772dc99be2efe084  justfile::fmt-check
+9305d0265cf8be60b56be288112e4743934d713fd2bae9b7f305806d645974e4  justfile::integration-tests
+44f61c60765b83c7bca637148b93b5f8bff31404b4f31fa8b3afd7084eda4ad8  justfile::nostd
+164ba2d6f1d705f48e95bfaae5efe76ce48d01330b693c04b221f0e0b3e2c157  justfile::platform-tests
+b3926208ff721cb9c70c23b63e383449bab76a3a92bd9114d7af48ca53d7cc58  justfile::private-names
+ed42d0aac4e8bc9d23f06bd7735674751c09f5585fd44cc87b0a5dc5308b42eb  justfile::quick
+b8bf3b5085067ae5a376c07e29721150a0cd2b2bae88f7e312483e38b1a6b9a9  justfile::script-tests
+47ab8ada3cf628fa277b9da1c17081962ddcc5be0a6e29c9c11908c8ba33853a  justfile::secrets
+4c95a24085c064793213d39baf29a01304bff3f7579deb974818b893ca41623b  justfile::unit-tests
+de4d8630b3a3617ef52886ff29383145d42f04e5b7cfef2ed576cdfb8f6979f8  justfile::workflows
+d1d095b275741a3a7d99a90678ebab77a06ea0088f0d6e5a4a4a76dc341d0a45  scripts/adr-index.sh
+3a8752bde62b697b0d35a96a623224645215b2b0f2e83c0ff00fa40fbf19c1e4  scripts/bootstrap-tools.sh
+948f24f7356c375c4d37181de24d47fbda594e631c4935ca22ac95b0d58b83f6  scripts/clippy-lists.sh
+14beeb9ec3b3b3e235c3a8775adfb0a4113979e34930b624e1dae4d82e426841  scripts/gitleaks-config.sh
+af2223db8d3d4253e7dc645c53c97b3319acb655e7716f48705bb1e4b038d420  scripts/private-names-check.sh
+4f1e4eef1d49d28c5130b6b9f3ffa7eb75ee911ba8cd7eebeece85dc331b7212  scripts/private-names-fold.pl
+56d0208bdb1f695e697abf8c10a679727cfb6d073305560a63daa8de33894449  scripts/secrets-check.sh
+0968bb67780e9222d6dbb1c346e849b38b028a6043511c51a011f2d26bc5215b  scripts/workflows-check.sh

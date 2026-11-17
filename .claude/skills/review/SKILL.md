@@ -29,7 +29,7 @@ range and stop.
    Read those sections, and the ADRs in `doc/adr/` that touch the changed crates. Decisions in
    `doc/tasks.md` and later ADRs override earlier plan text.
 3. Read every changed file in full (not just the hunks), plus the tests beside it.
-4. Run the live gate (`just check`, or the fallback in `CLAUDE.md` before FND-02) in the
+4. Run the live gate (`just check`) in the
    foreground and record pass/fail and the test count. If it rewrites tracked files, report
    which as a finding; do not revert or keep them yourself.
 5. Walk the checklist below. Only report what you verified in the code; cite `file:line`.
