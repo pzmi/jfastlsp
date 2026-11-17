@@ -89,12 +89,23 @@ xtask = { regex = ["default"], sha2 = ["default"] }
 # graph already (jfl-bench, jfl-architecture); MIT OR Apache-2.0, no build script.
 jfl-eval = { serde = ["default", "derive"], serde_json = ["default"], toml = ["default"] }
 
+# jfl-domain (IDX-01): thiserror for its typed refusals (fnd §4.3), without default features so it
+# stays no_std (the `nostd` stage builds it for x86_64-unknown-none); already in the graph
+# (cargo_metadata), MIT OR Apache-2.0, its build script reviewed in deny.toml.
+jfl-domain = { thiserror = [] }
+
 jfl-bench = { blake3 = ["default"], ignore = ["default"], rayon = ["default"], serde = ["default", "derive"], serde_json = ["default"], toml = ["default"], tree-sitter = ["default"], tree-sitter-java-orchard = ["default"] }
 
 [external.dev]
 # xtask (XT-02): toml reads tools/versions.toml, mise.toml and mise.lock in tests/versions.rs, an
 # oracle independent of xtask's own pinned-shape reader; in the graph already (jfl-architecture).
 xtask = { toml = ["default"] }
+# jfl-domain (IDX-01): proptest (std only: no fork, no timeout, so no tempfile or rusty-fork) for
+# the property tests (ver §2); line-index (rust-analyzer, ADR 0020) as their independent oracle,
+# since it is not no_std and cannot be a normal dependency of a pure crate; divan for the
+# in-process position benchmark (doc/bench/README.md), without `wrap_help`, whose terminal_size
+# would bring rustix and its build script for a help text. All MIT OR Apache-2.0.
+jfl-domain = { divan = ["help"], line-index = ["default"], proptest = ["std"] }
 
 [external.build]
 

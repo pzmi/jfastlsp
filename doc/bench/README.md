@@ -16,6 +16,7 @@ just bench kmp-lsp medium          # the kmp-lsp arm (builds the pinned kmp-lsp 
 just bench jdtls fixture           # the stock jdtls arm, on the synthetic fixture
 just bench path/to/suite.toml small
 jfl-bench compare a/e1-small.json b/e1-small.json     # two runs of one suite (default band 20 %)
+just bench-domain small            # jfl-domain's position conversions in process (divan), after a corpus round-trip check
 ```
 
 `just bench [suite] [corpus] [out]` builds `jfl-bench` with the `bench-tool` profile (thin LTO, one
@@ -204,7 +205,8 @@ owns it. The convention, for the first product task with a hot path (IDX-07 onwa
   reports a change with a confidence interval).
 - Inputs are synthetic or generated in the benchmark, never the corpus (nothing from it enters
   this repository), unless the benchmark takes a corpus path from an argument, as `jfl-bench`
-  does. A benchmark function is named for what it measures (`parse_declarations_of_a_large_file`),
+  does, or the corpus files on stdin from a recipe, as `jfl-domain`'s `positions` does (a pure
+  crate holds no filesystem grant; `just bench-domain`). A benchmark function is named for what it measures (`parse_declarations_of_a_large_file`),
   not `should_...`: benchmarks are not tests, and `check` never runs them.
 - Tracked in-process suites gate on instruction counts where available (`gungraun` or cachegrind,
   BENCH-04), which do not depend on a noisy neighbour, with wall time reported beside them.

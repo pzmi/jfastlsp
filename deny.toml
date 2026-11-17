@@ -131,6 +131,12 @@ bypass = [
   { crate = "tree-sitter-java-orchard", build-script = "1c8e689d24768981ddd36565e57655216cbe63c9117fc53d03d80973b7f74006" },
   # tree-sitter-language: emits wasm header paths only when TARGET is wasm32-unknown.
   { crate = "tree-sitter-language", build-script = "6d00d018c0917c1561428210e5cf17e87425efd0c989c29fae2c190c0d9b8ad2" },
+  # IDX-01: jfl-domain's property tests (proptest, a dev-dependency) bring two more, read at the
+  # versions pinned in Cargo.lock; neither reaches a production crate's normal closure.
+  # getrandom: reads CARGO_CFG_SANITIZE and sets a memory-sanitizer cfg; rand's closure.
+  { crate = "getrandom", build-script = "662faa06d7b2a9c5bea2c17a127a90e00b9f9b31105b0360da516e47cf816e95" },
+  # num-traits: one autocfg probe (`f64::total_cmp`), cfgs only; proptest's closure.
+  { crate = "num-traits", build-script = "d3969209fc1c9d201c66ed11820d0b328600d75b3971f8ceebeab04900bc0587" },
 ]
 
 [sources]

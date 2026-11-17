@@ -188,8 +188,9 @@ The envelope is a `jfl-domain` type; its JSON form is a `jfl-protocol` golden (ย
 
 - `jfl-domain` stores byte offsets into the file's UTF-8 bytes plus a line index. Conversions to
   and from (line, UTF-16 code unit), (line, UTF-8 byte) and (line, Unicode scalar) are pure
-  functions in `jfl-domain`, property-tested for round trips, surrogate pairs, CRLF and a final
-  line without a newline.
+  functions in `jfl-domain`, property-tested for round trips, surrogate pairs, the three line
+  terminators of LSP 3.17 (and JLS ยง3.4: `\n`, `\r\n` and a lone `\r`) and a final line without a
+  newline.
 - The LSP carrier negotiates `positionEncoding` (LSP 3.17): `utf-16` unless the client offers
   `utf-8`. The CLI takes and prints `file:line:col` with 1-based lines and 1-based UTF-8 byte
   columns, matching `rg --column`; `--json` ranges are 0-based (line, UTF-16 column) like LSP, and

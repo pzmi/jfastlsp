@@ -156,6 +156,19 @@ bench suite="rg-floor" corpus="small" out="target/bench": _preflight (_require "
     PATH="$(dirname "$(mise which hyperfine)"):$(dirname "$(mise which rg)"):$PATH" \
       "${CARGO_TARGET_DIR:-target}/bench-tool/jfl-bench" run "$suite" "$corpus" --out {{quote(out)}}
 
+# jfl-domain's in-process position benchmark (IDX-01, divan): synthetic text, then every tracked
+# `.java` file of the pinned corpus, streamed on stdin with a NUL after each (jfl-domain holds no
+# filesystem grant), after checking that every char boundary of every file round-trips and agrees
+# with line-index. Reports, never gates. `just bench-domain small`.
+bench-domain corpus="small": _preflight
+    #!/usr/bin/env bash
+    set -euo pipefail
+    bash scripts/bench-corpus.sh fetch {{quote(corpus)}}
+    root="$(bash scripts/bench-corpus.sh path {{quote(corpus)}})"
+    git -C "$root" ls-files -z -- '*.java' \
+      | while IFS= read -r -d '' file; do cat -- "$root/$file"; printf '\0'; done \
+      | {{cargo}} bench --locked -p jfl-domain --bench positions
+
 # Every tool of tools/versions.toml on the stages' PATH at its pinned version (xtask's cache first,
 # then mise's install directories), and versions.toml agreeing with mise.toml and mise.lock;
 # fails naming each missing or wrong tool and the fix (XT-02, fnd §8).

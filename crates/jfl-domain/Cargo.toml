@@ -11,3 +11,16 @@ description = "Paths and URIs, positions and encodings, symbols, file summaries,
 
 [lints]
 workspace = true
+
+[dependencies]
+thiserror = { version = "2.0.21", default-features = false }
+
+[dev-dependencies]
+divan = { version = "0.1.21", default-features = false, features = ["help"] }
+line-index = "0.1.2"
+proptest = { version = "1.12.0", default-features = false, features = ["std"] }
+
+# Offset <-> position conversion in process (doc/bench/README.md); `just bench-domain SIZE`.
+[[bench]]
+name = "positions"
+harness = false

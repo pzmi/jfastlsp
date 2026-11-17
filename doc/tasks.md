@@ -56,7 +56,7 @@ CLI carrier), **SEM-07** (M4),
 | BENCH-06 | Lombok repository in the corpus and as a second evaluation target | BENCH-01 | standard | S |  | BENCH-05 |
 | FORMAL-01 | Formal toolchain: Quint, Apalache, JDK pins, `MODELS`, formal stages | FND-05 | standard | M |  | EVAL-12, BENCH-04 |
 | FORMAL-02 | Conformance harness: quint-connect drivers, committed-trace replay, negative controls | FORMAL-01 | deep | M |  | EVAL-07, EVAL-05 |
-| FORMAL-03 | `views.qnt`: generations, freshness, completeness | FORMAL-02, DEC-02 | deep | M |  | IDX-01, IDX-04 |
+| FORMAL-03 | `views.qnt`: generations, freshness, completeness | FORMAL-02, DEC-02; started before DEC-02 by the owner's delegation (2026-11-17); DEC-02 still gates work beyond the walking skeleton | deep | M |  | IDX-01, IDX-04 |
 | FORMAL-04 | `daemon.qnt`: single owner, spawn, reconnect, no ghost buffers | FORMAL-03 | deep | M |  | IDX-02 |
 | FORMAL-05 | `diagnostics.qnt`: staleness | FORMAL-04 | deep | M | ⛳ | IDX-03 |
 | DEC-01 | (owner) Choose the target Java repository | — | light | S |  | FND-01, FND-02 |
@@ -77,10 +77,10 @@ CLI carrier), **SEM-07** (M4),
 | DEC-05 | Semantic diagnostics in v1 (from E3) | EVAL-10 | deep | S |  | DEC-03, DEC-04, DEC-06 |
 | DEC-06 | `referencesMode` default and operation priority (from E0) | EVAL-04 | deep | S |  | DEC-03, DEC-04, DEC-05 |
 | DEC-02 | Go/no-go memo, the kill criterion and the speed targets | DEC-03, DEC-04, DEC-05, DEC-06, DEC-07, EVAL-06, BENCH-03 | deep | M | ⛳ | — |
-| IDX-01 | Domain: paths, positions and encodings | DEC-02 | standard | M |  | IDX-04, FORMAL-03 |
-| IDX-02 | Domain: summaries, symbols, cache keys, the envelope | IDX-01 | deep | M |  | IDX-04, FORMAL-04 |
-| IDX-03 | Protocol v1: messages, versions, frame decoder, goldens | IDX-02 | deep | M |  | IDX-05, IDX-06, FORMAL-05 |
-| IDX-04 | `jfl-process`: argv-only child runner | DEC-02 | deep | M |  | IDX-01, IDX-02, FORMAL-03 |
+| IDX-01 | Domain: paths, positions and encodings | DEC-02; started before DEC-02 by the owner's delegation (2026-11-17); DEC-02 still gates work beyond the walking skeleton | standard | M |  | IDX-04, FORMAL-03 |
+| IDX-02 | Domain: summaries, symbols, cache keys, the envelope | IDX-01; started before DEC-02 by the owner's delegation (2026-11-17); DEC-02 still gates work beyond the walking skeleton | deep | M |  | IDX-04, FORMAL-04 |
+| IDX-03 | Protocol v1: messages, versions, frame decoder, goldens | IDX-02; started before DEC-02 by the owner's delegation (2026-11-17); DEC-02 still gates work beyond the walking skeleton | deep | M |  | IDX-05, IDX-06, FORMAL-05 |
+| IDX-04 | `jfl-process`: argv-only child runner | DEC-02; started before DEC-02 by the owner's delegation (2026-11-17); DEC-02 still gates work beyond the walking skeleton | deep | M |  | IDX-01, IDX-02, FORMAL-03 |
 | IDX-05 | Git adapter: roots, identity, freshness stat, changed files | IDX-01, IDX-04 | standard | M |  | IDX-03, IDX-06 |
 | IDX-06 | FS adapter: scanning, nested-worktree exclusion, watcher hints | IDX-01 | standard | M |  | IDX-03, IDX-05 |
 | IDX-07 | Syntax adapter: tree-sitter summaries and the golden Java corpus | IDX-02 | deep | L |  | IDX-08 |
@@ -89,7 +89,7 @@ CLI carrier), **SEM-07** (M4),
 | IDX-10 | Queries: `sym`, `def`, `hover` | IDX-09 | deep | L |  | LSP-01 |
 | IDX-11 | Queries: `refs`, the `possible` superset, completeness | IDX-10 | deep | L |  | IDX-12 |
 | IDX-12 | Daemon and IPC: lock, socket, spawn, reconnect (daemon driver) | IDX-03, IDX-09, FORMAL-04 | deep | L |  | IDX-11 |
-| LSP-01 | LSP adapter on `lsp-server` and the LSP conformance harness | IDX-03 | deep | L |  | IDX-09, IDX-10 |
+| LSP-01 | LSP adapter on `lsp-server` and the LSP conformance harness | IDX-03; started before DEC-02 by the owner's delegation (2026-11-17); DEC-02 still gates work beyond the walking skeleton | deep | L |  | IDX-09, IDX-10 |
 | LSP-02 | `jfl lsp`: lifecycle, encodings, document sync, deadlines | LSP-01, IDX-12 | deep | L |  | IDX-11 |
 | LSP-03 | Navigation methods | LSP-02, IDX-11, DEC-06 | standard | L |  | LSP-04 |
 | LSP-04 | Syntax diagnostics and the coordinator (diagnostics driver) | LSP-02, FORMAL-05 | deep | L |  | LSP-03, LSP-05 |
@@ -873,6 +873,7 @@ before LSP-04.
 
 #### FORMAL-03: `views.qnt`: generations, freshness, completeness
 - **Depends on:** FORMAL-02, DEC-02. **Model:** deep. **Size:** M. **Parallel with:** IDX-01, IDX-04.
+- **Ordering:** started before DEC-02 by the owner's delegation (2026-11-17); DEC-02 still gates work beyond the walking skeleton.
 - **Cites:** plan §4, §7.1, §2.1; ver §6.1; ADR 0007, ADR 0014, ADR 0017.
 - The model of plan §7.1: worktrees with files and versions, `HEAD` changes touching many files,
   watcher hints that can be lost, duplicated or reordered, reconcile steps, atomic publish,
@@ -1250,24 +1251,26 @@ but follow in lane CLI (M2). Starts after the go decision.
 
 #### IDX-01: Domain: paths, positions and encodings
 - **Depends on:** DEC-02. **Model:** standard. **Size:** M. **Parallel with:** IDX-04, FORMAL-03.
+- **Ordering:** started before DEC-02 by the owner's delegation (2026-11-17); DEC-02 still gates work beyond the walking skeleton.
 - **Cites:** plan §2.3, §6.1; fnd §2.3, §4.3; ver §2, §3.
 - In `jfl-domain`: validated value types for worktree-relative paths and `file://` URIs (percent
-  encoding, no `..` escape), a `LineIndex` over UTF-8 bytes (LF and CRLF, a final line without a
-  newline), and pure conversions between byte offset, (line, UTF-16 unit), (line, UTF-8 byte) and
-  (line, scalar) in `#![no_std]` code (with `line-index` used directly if it builds under `no_std` +
+  encoding, no `..` escape), a `LineIndex` over UTF-8 bytes (LF, CRLF and a lone CR, LSP 3.17's
+  set and JLS §3.4; a final line without a newline), and pure conversions between byte offset,
+  (line, UTF-16 unit), (line, UTF-8 byte) and (line, scalar) in `#![no_std]` code (with `line-index` used directly if it builds under `no_std` +
   `alloc`, otherwise as the property-test oracle, ADR 0020), with typed refusals for positions past
   a line or file end and inside a surrogate pair or a multi-byte sequence. `Range` and an encoding
   tag. No I/O.
 - **Reuse considered:** `line-index` (rust-analyzer) for UTF-8 ↔ UTF-16; `text-size`.
 - **Accept:**
-  - [ ] property tests: round trips over arbitrary UTF-8 including astral characters and CRLF; offsets never split a character
-  - [ ] unit tests for each refusal and for the CLI's 1-based byte column (plan §2.3)
-  - [ ] `ARCH-domain-purity` green; no `unwrap`, indexing or unchecked arithmetic on inputs
-  - [ ] runs on the bench corpus (small at least, `just bench`) and reports the metrics it affects; its correctness tests also run against the real-corpus cases that apply (BENCH-05)
+  - [x] property tests: round trips over arbitrary UTF-8 including astral characters and CRLF; offsets never split a character (`crates/jfl-domain/tests/properties.rs`, seeded, `line-index` as the oracle: it is not `no_std`)
+  - [x] unit tests for each refusal and for the CLI's 1-based byte column (plan §2.3)
+  - [x] `ARCH-domain-purity` green; no `unwrap`, indexing or unchecked arithmetic on inputs
+  - [x] runs on the bench corpus (small at least, `just bench`) and reports the metrics it affects; its correctness tests also run against the real-corpus cases that apply (BENCH-05): BENCH-05 has no cases yet, so `just bench-domain SIZE` (divan, in process) first checks every char boundary of every corpus file against `line-index`, then times the conversions
 - **Impact:** public API (domain types).
 
 #### IDX-02: Domain: summaries, symbols, cache keys, the envelope
 - **Depends on:** IDX-01. **Model:** deep. **Size:** M. **Parallel with:** IDX-04, FORMAL-04.
+- **Ordering:** started before DEC-02 by the owner's delegation (2026-11-17); DEC-02 still gates work beyond the walking skeleton.
 - **Cites:** plan §2.1, §2.2, §5.4; ADR 0014.
 - In `jfl-domain`: `FileSummary` (package, imports, declarations with kind, name, signature,
   modifiers, Javadoc range, supertypes by name; reference sites by simple name, arity and syntactic
@@ -1288,6 +1291,7 @@ but follow in lane CLI (M2). Starts after the go decision.
 
 #### IDX-03: Protocol v1: messages, versions, frame decoder, goldens
 - **Depends on:** IDX-02. **Model:** deep. **Size:** M. **Parallel with:** IDX-05, IDX-06, FORMAL-05.
+- **Ordering:** started before DEC-02 by the owner's delegation (2026-11-17); DEC-02 still gates work beyond the walking skeleton.
 - **Cites:** plan §2.4, §5.3, §6.6; ver §4; fnd §6; ADR 0021.
 - `jfl-protocol`: the handshake (protocol major and minor, client kind), request and response
   messages for every operation of plan §2.4 and document sync (open, change, close with versions),
@@ -1307,6 +1311,7 @@ but follow in lane CLI (M2). Starts after the go decision.
 
 #### IDX-04: `jfl-process`: argv-only child runner
 - **Depends on:** DEC-02. **Model:** deep. **Size:** M. **Parallel with:** IDX-01, IDX-02, FORMAL-03.
+- **Ordering:** started before DEC-02 by the owner's delegation (2026-11-17); DEC-02 still gates work beyond the walking skeleton.
 - **Cites:** plan §6.2, §6.5, §11; fnd §2.4, §4.4; ver §5.
 - `jfl-process` (support): run a child from a program path and argv (no shell, no string splitting),
   a cleared environment plus an explicit allowlist, a working directory, a deadline, its own process
@@ -1383,6 +1388,11 @@ but follow in lane CLI (M2). Starts after the go decision.
   list; the grammar's crate name and exact version in `SyntaxKey`.
 - **Reuse considered:** `tree-sitter` + `tree-sitter-java-orchard` (ADR 0022); `tree-sitter-tags`
   rejected (hides ranges and scopes); `java-lang` too new.
+- **Decided (orchestrator, IDX-01 review):** check the grammar for a CRLF-terminated line comment: a
+  token ending on the `\n` of a `\r\n` is refused by `LineIndex` (`InsideLineTerminator`), so the
+  adapter ends such a range at the line end (before the `\r`), with a test on a CRLF fixture.
+- **Decided (orchestrator, IDX-01 review):** strip a leading UTF-8 BOM when reading a file from disk,
+  before indexing, as editors drop it from document text; a test with a BOM fixture.
 - **Accept:**
   - [ ] summary goldens match for every file of `fixtures/java/projects/` and `fixtures/java/resolution/`
   - [ ] property test: arbitrary bytes and mutated corpus files never panic and finish within a bound
@@ -1499,6 +1509,7 @@ plugin; LSP-06 is M1's gate and makes the bench gate blocking.
 
 #### LSP-01: LSP adapter on `lsp-server` and the LSP conformance harness
 - **Depends on:** IDX-03. **Model:** deep. **Size:** L. **Parallel with:** IDX-09, IDX-10.
+- **Ordering:** started before DEC-02 by the owner's delegation (2026-11-17); DEC-02 still gates work beyond the walking skeleton.
 - **Cites:** plan §2.5, §6.2, §11; ver §2, §4, §8; ADR 0020, ADR 0021.
 - `jfl-adapter-lsp` on `lsp-server` 0.10 and `gen-lsp-types` 0.11 (exact pin): the synchronous main
   loop (notifications applied in order, requests on a bounded pool against a snapshot), framing
@@ -1511,6 +1522,11 @@ plugin; LSP-06 is M1's gate and makes the bench gate blocking.
 - **Reuse considered:** `lsp-server` + `gen-lsp-types` (ADR 0020); `tower-lsp-server` 0.24 the
   runner-up; `lsp-types`, `tower-lsp` and `async-lsp` rejected; `pytest-lsp` (Python in CI) not
   needed.
+- **Decided (orchestrator, IDX-01 review):** the LSP server clamps a column past the line end to the
+  line end, as LSP 3.17's `Position.character` requires (`ColumnPastLineEnd` carries
+  `line_length`); the CLI refuses it (plan §2.3).
+- **Decided (orchestrator, IDX-01 review):** echo the client's URI string as sent for a document it
+  opened or named, not `FileUri`'s canonical form; a transcript test with `+` or `@` in a directory.
 - **Accept:**
   - [ ] property tests: arbitrary byte streams never panic the framer and never allocate past the limit
   - [ ] transcripts for malformed headers, an oversized frame, an unknown request (`MethodNotFound`) and an unknown notification (ignored) pass
