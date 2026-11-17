@@ -1,8 +1,8 @@
-# jdtls behind our proxy (jfl-jdtls, EVAL-11, ADR 0028), the kill-criterion baseline, over LSP.
+# The pinned stock jdtls (ADR 0028, amended 2026-11-17), the kill-criterion baseline, over LSP.
 # In the sandbox only on the synthetic fixture (`jfl-bench run jdtls fixture`) with the build
 # imports off; a corpus run needs `--trusted-build` (a bench.yml dispatch job or the owner).
 name = "jdtls"
-description = "jdtls behind jfl-jdtls: initialize, time to ServiceReady, definition, references, hover and workspace/symbol at usage sites, backend RSS."
+description = "stock jdtls, a fresh -data per run: initialize, time to ServiceReady, definition, references, hover and workspace/symbol at usage sites, backend RSS."
 kind = "jdtls"
 
 [run]

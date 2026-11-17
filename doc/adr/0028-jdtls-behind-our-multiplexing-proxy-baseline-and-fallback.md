@@ -4,8 +4,8 @@ Date: 2026-11-16
 
 ## Status
 
-Accepted (owner, 2026-11-17); amended 2026-11-17 (as built) and 2026-11-17 (owner: testing and
-comparison only).
+Accepted (owner, 2026-11-17); amended 2026-11-17 (as built), 2026-11-17 (owner: testing and
+comparison only) and 2026-11-17 (owner: the proxy removed; stock jdtls a comparison arm only).
 
 ## Context
 
@@ -92,3 +92,23 @@ title (the file keeps its name so links stay valid). The kill criterion becomes:
 measurements show jfastlsp cannot beat this baseline on speed with honest envelopes, the project
 stops or is rescoped (plan §1.3, DEC-02); it does not become "ship jdtls". `jfl-jdtls` stays a
 tool-only crate that imports no production crate.
+
+## Amended 2026-11-17 (owner, FND-12): a comparison arm only; nothing of ours wraps jdtls
+
+jdtls is for testing and comparison only and is never included in anything jfastlsp ships. The
+proxy decided above (pooling, per-worktree workspaces keyed on the full path, a shared index, a
+daemon and its lifecycle) only made sense for shipping it, so `tools/jfl-jdtls`, its plugin and
+`doc/eval/jfl-jdtls.md` are deleted (FND-12); the Decision, the as-built amendment and the
+fallback discussion above are the record of what was built and why, and no longer describe the
+repository. What remains:
+
+- **Stock jdtls is the comparison arm and the kill-criterion baseline** (plan §1.3): the pinned
+  release (1.61.0, the newest on Java 21), fetched and checksum-verified by
+  `scripts/jdtls-fetch.sh`, started by `jfl-bench`'s own small launcher (`tools/jfl-bench/src/jdtls.rs`)
+  with a fresh `-data` and configuration per run, a heap cap, argv only, a cleared environment
+  and a deadline, and driven over the harness's LSP client. Nothing of ours sits between the
+  client and jdtls.
+- **E4 measures stock jdtls only** at 1, 3 and 10 worktrees, one per client, as a user gets it
+  (EVAL-06); E0's jdtls arm is the stock `jdtls-lsp` plugin (EVAL-03).
+- The socket policy first built here stays where plan §5.3 records it, Proposed for the product
+  daemon (IDX-12).

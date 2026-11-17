@@ -107,15 +107,12 @@ mod tests {
     #[test]
     fn should_split_arm_and_task_when_the_name_was_generated() {
         // given
-        let name = "jdtls-proxy__fix-rounding";
+        let name = "jdtls__fix-rounding";
         // when
         let split = split_task_name(name);
         // then
         let (arm, task) = split.unwrap();
-        assert_eq!(
-            (arm.as_str(), task.as_str()),
-            ("jdtls-proxy", "fix-rounding")
-        );
+        assert_eq!((arm.as_str(), task.as_str()), ("jdtls", "fix-rounding"));
     }
 
     #[test]

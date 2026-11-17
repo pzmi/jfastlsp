@@ -1,17 +1,19 @@
 #!/usr/bin/env bash
-# Fetch the pinned Eclipse JDT Language Server for jfl-jdtls (EVAL-11, ADR 0028): download from
+# Fetch the pinned Eclipse JDT Language Server for the bench's jdtls arm (BENCH-03, ADR 0028
+# amended 2026-11-17: stock jdtls, a comparison arm only, wrapped by nothing): download from
 # the official milestone site, verify the pinned SHA-256 before extracting anything, extract into
 # a temporary directory and move it into place, so a cached install is always a verified one.
 # jdtls is EPL-2.0: it is run as a separate process, never vendored or linked.
 #
 #   scripts/jdtls-fetch.sh [--dest DIR] [--archive FILE]
 #
-# --dest     where to install (default: ${XDG_CACHE_HOME:-$HOME/.cache}/jfl-jdtls/jdtls-<version>,
-#            which is where `jfl-jdtls` looks when --jdtls-home is not given)
+# --dest     where to install (default: ${XDG_CACHE_HOME:-$HOME/.cache}/jfastlsp/arms/jdtls-<version>,
+#            which is where `jfl-bench` looks when --jdtls-home is not given)
 # --archive  verify and extract this file instead of downloading (offline use, the self-test)
 #
-# The version below must match JDTLS_VERSION in tools/jfl-jdtls/src/launch.rs
-# (scripts/test-jdtls-fetch.sh checks it). 1.61.0 is the newest release that runs on Java 21:
+# The version and digest below must match JDTLS_VERSION and JDTLS_SHA256 in
+# tools/jfl-bench/src/jdtls.rs, which refuses an install whose .verified is another digest
+# (scripts/test-jdtls-fetch.sh checks both). 1.61.0 is the newest release that runs on Java 21:
 # from 1.62.0 the Eclipse platform bundles require JavaSE-25.
 set -euo pipefail
 
@@ -29,14 +31,14 @@ while [ "$#" -gt 0 ]; do
   case "$1" in
     --dest) [ "$#" -ge 2 ] || die "--dest needs a value"; dest="$2"; shift 2 ;;
     --archive) [ "$#" -ge 2 ] || die "--archive needs a value"; archive="$2"; shift 2 ;;
-    -h | --help) sed -n '2,13p' "$0"; exit 0 ;;
+    -h | --help) sed -n '2,15p' "$0"; exit 0 ;;
     *) die "unknown argument: $1" ;;
   esac
 done
 if [ -z "$dest" ]; then
   cache="${XDG_CACHE_HOME:-}"
   [ -n "$cache" ] || cache="${HOME:?HOME is not set}/.cache"
-  dest="$cache/jfl-jdtls/jdtls-$JDTLS_VERSION"
+  dest="$cache/jfastlsp/arms/jdtls-$JDTLS_VERSION"
 fi
 
 if [ -f "$dest/.verified" ] && [ "$(cat "$dest/.verified")" = "$JDTLS_SHA256" ]; then

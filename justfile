@@ -21,7 +21,7 @@ mise_bins := shell('cd "$1" && bash scripts/xtask.sh tool-config "$1" && { mise 
 mise_shims := env("MISE_DATA_DIR", env("XDG_DATA_HOME", env("HOME") / ".local/share") / "mise") / "shims"
 export PATH := if mise_bins == "" { mise_shims + ":" + env("PATH") } else { mise_bins + ":" + mise_shims + ":" + env("PATH") }
 
-# The cargo of the recipes outside the gate (bench, jdtls-it), with the compiler flags set here,
+# The cargo of the recipes outside the gate (bench), with the compiler flags set here,
 # not taken from the environment or a cargo config file: RUSTFLAGS and an empty RUSTC_WRAPPER beat
 # `build.rustflags` and `build.rustc-wrapper` in any `.cargo/config.toml` (fnd §3.6). The gate's
 # stages set the same in xtask (tools/xtask/src/catalog.rs, CARGO_ENV).
@@ -148,18 +148,13 @@ bench suite="rg-floor" corpus="small" out="target/bench": _preflight (_require "
     packages=(-p jfl-bench)
     case "$suite" in
       kmp-lsp) bash scripts/kmp-lsp-fetch.sh ;;
-      jdtls) bash scripts/jdtls-fetch.sh; packages+=(-p jfl-jdtls) ;;
+      jdtls) bash scripts/jdtls-fetch.sh ;;
     esac
     {{cargo}} build --locked --profile bench-tool "${packages[@]}"
     # The real binaries first on PATH: a mise shim in front of rg or hyperfine adds its own launcher's
     # start-up time and memory to every timed run.
     PATH="$(dirname "$(mise which hyperfine)"):$(dirname "$(mise which rg)"):$PATH" \
       "${CARGO_TARGET_DIR:-target}/bench-tool/jfl-bench" run "$suite" "$corpus" --out {{quote(out)}}
-
-# The pinned jdtls behind jfl-jdtls on the synthetic fixture (EVAL-11); needs Java 21+ and the download.
-jdtls-it:
-    bash scripts/jdtls-fetch.sh
-    {{cargo}} nextest run -p jfl-jdtls --locked --retries 0 --features real-jdtls --test real_jdtls
 
 # Every tool of tools/versions.toml on the stages' PATH at its pinned version (xtask's cache first,
 # then mise's install directories), and versions.toml agreeing with mise.toml and mise.lock;

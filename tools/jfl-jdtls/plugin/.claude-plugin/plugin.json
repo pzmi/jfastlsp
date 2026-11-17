@@ -1,5 +1,0 @@
-{
-  "name": "jfl-jdtls",
-  "description": "jdtls behind a multiplexing proxy: one jdtls per worktree, shared by the session and its subagents (the E0 and E4 arm of ADR 0028).",
-  "version": "0.1.0"
-}

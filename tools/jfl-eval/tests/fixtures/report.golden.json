@@ -439,7 +439,7 @@
       ]
     },
     {
-      "arm": "jdtls-proxy",
+      "arm": "jdtls",
       "runs": 3,
       "successes": 1,
       "no_verdict": 1,

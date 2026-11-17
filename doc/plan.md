@@ -44,18 +44,20 @@ Success is measured on agent tasks first and machine economics second.
 
 ### 1.3 Kill criterion
 
-The baseline is **jdtls behind our multiplexing proxy** (ADR 0028), built in phase 0 as
-`jfl-jdtls` (EVAL-11): one jdtls per worktree root shared by every client in it, `-data` keyed on
-the full worktree path, a shared library index (`-Djdt.core.sharedIndexLocation`), a heap cap and
-a warm Gradle. The stock `jdtls-lsp` plugin is not a fair baseline: every subagent starts its own
-jdtls of 2–3 GB ([claude-code#64536](https://github.com/anthropics/claude-code/issues/64536)) and
-worktrees with the same basename share one workspace directory
+The baseline is **stock jdtls** at a pinned release (ADR 0028, amended 2026-11-17), configured
+only through its own launch options: a `-data` workspace per worktree, a heap cap and a warm
+Gradle. Nothing of ours wraps it: jdtls is for testing and comparison only and is never included
+in what ships, so the multiplexing proxy first built for it (`jfl-jdtls`, EVAL-11) was removed by
+FND-12. The bench's jdtls arm starts it directly (`tools/jfl-bench`, BENCH-03), and E4 measures
+what a user gets at 1, 3 and 10 worktrees, including that every subagent starts its own jdtls of
+2–3 GB ([claude-code#64536](https://github.com/anthropics/claude-code/issues/64536)) and that the
+stock `jdtls-lsp` plugin keys `-data` on the worktree's basename
 ([claude-code#67182](https://github.com/anthropics/claude-code/issues/67182)).
 
 **The kill criterion:** if phase 0 measurements show that jfastlsp cannot beat that baseline on
 speed (the §1.7 rows, at 10 worktrees) while giving honest envelopes (§2.1), the project stops or
-is rescoped. It does not become "ship jdtls": `jfl-jdtls` is for testing and comparison only,
-never a shipped fallback product (ADR 0028, amended 2026-11-17). The owner decides at DEC-02
+is rescoped. It does not become "ship jdtls": jdtls is for testing and comparison only, never a
+shipped fallback product (ADR 0028, amended 2026-11-17). The owner decides at DEC-02
 (ADR 0009).
 
 ### 1.4 Non-goals (v1)
@@ -102,17 +104,17 @@ the table at DEC-02; a target is changed only by the owner, never loosened to ma
 | Full syntax index, cold, 4 cores (medium: spring-framework, 9.3k files) | ≤ 2.5 s | 1.42 s cold, 1.04 s warm (kafka 1.76 s / 1.59 s) | kmp-lsp; jdtls import |
 | Parse and declaration extract per file | p95 ≤ 5 ms, max ≤ 200 ms | p95 ≤ 3.4 ms everywhere; max 138 ms (kafka's 1.6 MB test file) | — |
 | Unchanged-file check: warm re-hash of the large repository | ≤ 0.2 s | about 0.1 s (blake3 with the walk) | — |
-| Peak RSS of the syntax tier (large) | ≤ 250 MB | 153 MB with 1.2 M declarations and imports | jdtls behind proxy (2–3 GB per worktree) |
-| Marginal extra worktree at a nearby commit (medium) | < 50 MB RSS and < 2 s (*proposed*) | spring-framework, 150 commits apart: blob-id diff 20–30 ms, re-hash 0.05–0.08 s warm, about 270 of 9.3k files to re-parse | jdtls behind proxy (one JVM and import per worktree) |
+| Peak RSS of the syntax tier (large) | ≤ 250 MB | 153 MB with 1.2 M declarations and imports | stock jdtls (2–3 GB per worktree) |
+| Marginal extra worktree at a nearby commit (medium) | < 50 MB RSS and < 2 s (*proposed*) | spring-framework, 150 commits apart: blob-id diff 20–30 ms, re-hash 0.05–0.08 s warm, about 270 of 9.3k files to re-parse | stock jdtls (one JVM and import per worktree) |
 | `initialize` against a warm daemon | < 200 ms (*v3*) | — | — |
-| `jfl def` / `jfl hover`, CLI end to end, warm (medium) | p50 < 20 ms, p95 < 50 ms (*proposed*); internal deadline 300 ms (*v3*) | — | jdtls behind proxy |
-| `jfl refs`, warm, a widely used method (medium) | p50 < 100 ms, p95 < 300 ms (*proposed*); deadline 2 s (*v3*) | `rg` floor: 0.04 s warm on spring-framework, 0.18 s on elasticsearch | `rg` floor; jdtls behind proxy |
-| `jfl sym` prefix query, warm (large) | p95 < 50 ms (*proposed*) | — | jdtls behind proxy |
-| Time to first useful answer on a fresh worktree (medium) | < 2 s (*proposed*; syntax answers that say how complete they are) | — | jdtls behind proxy |
+| `jfl def` / `jfl hover`, CLI end to end, warm (medium) | p50 < 20 ms, p95 < 50 ms (*proposed*); internal deadline 300 ms (*v3*) | — | stock jdtls |
+| `jfl refs`, warm, a widely used method (medium) | p50 < 100 ms, p95 < 300 ms (*proposed*); deadline 2 s (*v3*) | `rg` floor: 0.04 s warm on spring-framework, 0.18 s on elasticsearch | `rg` floor; stock jdtls |
+| `jfl sym` prefix query, warm (large) | p95 < 50 ms (*proposed*) | — | stock jdtls |
+| Time to first useful answer on a fresh worktree (medium) | < 2 s (*proposed*; syntax answers that say how complete they are) | — | stock jdtls |
 | Warm reopen of an indexed worktree (large) | < 1 s (*proposed*) | walk and hash alone: 0.1 s warm, about 1.5 s cold | — |
 | Freshness lag: a disk edit seen by the next request | the request's own stat (§4.3); p95 < 100 ms to a published generation (*proposed*) | — | — |
-| Branch switch or rebase between two pinned commits (medium; lombok: fineract) | < 2 s to a published generation that answers (*proposed*) | proxies only (BENCH-03): blob-id diff 20–30 ms, re-hash 0.05–0.08 s, about 270 files to re-parse for 150 commits | jdtls behind proxy (re-import) |
-| Change to a widely used type: files re-resolved (fan-out) and time (medium; lombok) | fan-out reported per case; p95 < 1 s until the dependants answer again (*proposed*) | — (needs IDX and SEM) | jdtls behind proxy |
+| Branch switch or rebase between two pinned commits (medium; lombok: fineract) | < 2 s to a published generation that answers (*proposed*) | proxies only (BENCH-03): blob-id diff 20–30 ms, re-hash 0.05–0.08 s, about 270 files to re-parse for 150 commits | stock jdtls (re-import) |
+| Change to a widely used type: files re-resolved (fan-out) and time (medium; lombok) | fan-out reported per case; p95 < 1 s until the dependants answer again (*proposed*) | — (needs IDX and SEM) | stock jdtls |
 | References postings update after an edit (medium) | p95 < 50 ms per edited file (*proposed*) | — (needs IDX-11) | — |
 | Single-file semantic diagnostics (E3) | p95 < 3 s (*v3*, §9.3) | — | ECJ arm |
 
@@ -432,7 +434,8 @@ daemon are the closest published shapes (§16).
   the daemon's: the backstop if the directory check is ever wrong.
 - Socket paths are limited to about 104 bytes on macOS and 108 on Linux, and a state directory
   under a long `$XDG_STATE_HOME` or a sandbox's long `$TMPDIR` can exceed that. **Proposed
-  (FND-08, for IDX-12), the policy `jfl-jdtls` built and ADR 0028's amendment records:** the
+  (FND-08, for IDX-12), the policy the since-removed `jfl-jdtls` built and ADR 0028's amendment
+  records:** the
   socket is `<state>/sock` when that path fits; otherwise it moves to a short private directory,
   `/tmp/jfl-<euid>/<key>.sock` (a fixed short base, not `$TMPDIR`), keyed on a digest of the
   canonical state directory so two state directories never share a socket. That directory is
@@ -566,7 +569,6 @@ migrated, when its version changes.
 | `jfl-testkit` | test only | fakes for every port, the contract suites, fixture builders, the `poll` helper |
 | `jfl-conformance` | test only | the Quint ITF replay harness and the drivers (§7) |
 | `jfl-architecture` (`tools/jfl-architecture`) | test only | the architecture test over `cargo_metadata`, the source scan and the CI lockstep (ADR 0030); its checks move into `cargo xtask architecture` (ADR 0035, lane XT) |
-| `jfl-jdtls` (`tools/jfl-jdtls`) | tool only, independent | phase 0: jdtls behind our multiplexing proxy, the kill-criterion baseline, for testing and comparison only (ADR 0028) |
 | `jfl-bench` (`tools/jfl-bench`) | tool only, independent | the benchmark harness over the pinned corpus and the comparison arms (ADR 0031) |
 | `jfl-oracle` (`tools/jfl-oracle`) | tool only, independent | SCIP reader, differential and completeness oracles (ver §7); imports no production crate |
 | `jfl-eval` (`tools/jfl-eval`) | tool only, independent | the agent-evaluation harness and phase 0 measurements (§9) |
@@ -618,7 +620,7 @@ between workspace crates (`[dependencies.normal]` in `architecture.toml`, ADR 00
 | `jfl-testkit` | `jfl-domain`, `jfl-protocol`, `jfl-application` |
 | `jfl-conformance` | `jfl-testkit`, the pure and application crates, `jfl-adapter-ipc`, `jfl-composition` |
 | `jfl-architecture` | — (reads `cargo metadata`; no workspace crate) |
-| `jfl-oracle`, `jfl-eval`, `jfl-jdtls`, `jfl-bench`, `xtask` | — (no workspace crate) |
+| `jfl-oracle`, `jfl-eval`, `jfl-bench`, `xtask` | — (no workspace crate) |
 
 Rules: acyclic; explicit `members`; adapters never name a sibling adapter, composition or the CLI;
 production crates never reach a test-only or tool-only crate; a dev edge targets a test-only crate
@@ -660,8 +662,7 @@ proxies (`jfl lsp`, CLI) speak `jfl-protocol` through the IPC client.
 job needs, each listed in `architecture.toml`'s `[grants]` (fnd §2.4): `jfl-testkit` (processes
 and files for fixture builders; sleep and clock inside `poll` only), `jfl-conformance` (files,
 environment), `jfl-architecture` (processes and files: `cargo metadata`, `git`, the scripts it
-tests), `jfl-bench` and `jfl-eval` (processes, files, clock, environment), `jfl-jdtls`
-(processes, files, Unix sockets, spawns, clock, environment: it is a daemon), `jfl-oracle`
+tests), `jfl-bench` and `jfl-eval` (processes, files, clock, environment), `jfl-oracle`
 (files), `xtask` (processes, files, environment: it runs the gate's tools and judges its
 environment). TCP stays denied everywhere.
 
@@ -771,11 +772,11 @@ owner's machine, and only aggregated numbers come back (ADR 0004, ADR 0009).
 
 | Id | Experiment | Output | Decision it drives |
 |---|---|---|---|
-| **E0** | **Agent eval** on [Harbor](https://github.com/harbor-framework/harbor) (ADR 0029). 15 to 20 real tasks from the target repository's history (bug fixes, signature changes, cross-module features, a rename) plus 10 to 20 Gradle instances from [Multi-SWE-bench](https://github.com/multi-swe-bench/multi-swe-bench)'s Java set as an external control. Arms: grep only; the stock `jdtls-lsp` plugin; jdtls behind our proxy (§1.3, EVAL-11); `kmp-lsp` at a pinned commit. 3 runs per task per arm | success, tool calls, tokens, broken-build edits, a histogram of the LSP operations Claude actually calls, its reaction to empty references, diagnostics wait time, whether the server starts on the first `.java` touch | kill criterion (§1.3); operation priority; `referencesMode` default (DEC-06) |
+| **E0** | **Agent eval** on [Harbor](https://github.com/harbor-framework/harbor) (ADR 0029). 15 to 20 real tasks from the target repository's history (bug fixes, signature changes, cross-module features, a rename) plus 10 to 20 Gradle instances from [Multi-SWE-bench](https://github.com/multi-swe-bench/multi-swe-bench)'s Java set as an external control. Arms: grep only; the stock `jdtls-lsp` plugin (the jdtls baseline, §1.3); `kmp-lsp` at a pinned commit. 3 runs per task per arm | success, tool calls, tokens, broken-build edits, a histogram of the LSP operations Claude actually calls, its reaction to empty references, diagnostics wait time, whether the server starts on the first `.java` touch | kill criterion (§1.3); operation priority; `referencesMode` default (DEC-06) |
 | **E1** | Absolute parse + summarise time for a full worktree (cold and warm file cache), RSS of the in-memory summary index, and the parse-error rate of both Java grammars (ADR 0022), on the bench corpus and the target. **Spike done 2026-11-16** (§1.7, §5.5); EVAL-05 re-runs it in the harness | seconds, files per second, MB, error rate | storage tier (DEC-03) |
 | **E2** | **Resolver bake-off** (§5.6) on 200+ golden cases, the real-corpus cases and the target repository against a SCIP index from `scip-java` | precision, coverage by construct, latency, cost | resolver (DEC-04) |
 | **E3** | `javac` worker spike, our own worker with one warm javac context (ADR 0036): single-file compile latency with `-sourcepath`, per module; ECJ batch (`-proceedOnError`) as a comparison arm; whether javac checks dependency bodies under `-implicit:none`; the scip-java plugin's attribution cost and its output on files with errors | p50, p95, RSS, false errors, `EnvironmentKey` count across 10 worktrees | diagnostics in v1 (DEC-05) |
-| **E4** | jdtls at 1, 3 and 10 worktrees, stock and behind our proxy, on the bench corpus and the target | RSS, time to first useful answer, import count | kill criterion |
+| **E4** | stock jdtls at 1, 3 and 10 worktrees, on the bench corpus and the target | RSS, time to first useful answer, import count | kill criterion |
 
 **Already answered** (2026-11-16): subagents do **not** share the parent's language server;
 Claude Code starts one per process subtree with no plugin setting to change it
@@ -789,7 +790,7 @@ servers at all; whether `${CLAUDE_PROJECT_DIR}` is substituted inside `.lsp.json
 ### 9.3 Go/no-go
 
 Proceed (DEC-02, owner) if (a) E0 shows a gap the design can close (an LSP or CLI arm beats grep on
-rows 1 to 3 of §1.2, and jdtls behind our proxy does not already win at 10 worktrees on memory and
+rows 1 to 3 of §1.2, and stock jdtls does not already win at 10 worktrees on memory and
 latency), (b) E2 shows a path to ≥ 70 % `exact` coverage of call sites with ≥ 99.5 % precision, the
 rest covered soundly by `possible`, and (c) E3's single-file p95 is under 3 s (otherwise diagnostics
 fall back per DEC-05, which does not by itself stop the project), and (d) the BENCH baseline
@@ -900,8 +901,8 @@ update check, no crash upload.
 | `javac` workers eat memory with many environments | cap workers, LRU-evict, share by `EnvironmentKey` |
 | Subagents start their own LSP proxies (confirmed: claude-code#64536) | proxies are thin and the daemon is shared: the cost is per process, not per index |
 | The server starts mid-task and the first answers are slow | fast `initialize`, partial answers with `complete=false`, a SessionStart hook can warm the daemon |
-| `jdtls` is good enough | kill criterion §1.3 against jdtls behind our proxy; if jfastlsp cannot beat it on speed with honest envelopes, stop or rescope (never ship jdtls) |
-| JetBrains ships a headless, agent-licensed IntelliJ LSP ([IDEA-393669](https://youtrack.jetbrains.com/projects/IDEA/issues/IDEA-393669)) | keep the proxy's backend pluggable (ADR 0028), so it could front that server as it fronts jdtls; recheck at each milestone |
+| `jdtls` is good enough | kill criterion §1.3 against stock jdtls; if jfastlsp cannot beat it on speed with honest envelopes, stop or rescope (never ship jdtls) |
+| JetBrains ships a headless, agent-licensed IntelliJ LSP ([IDEA-393669](https://youtrack.jetbrains.com/projects/IDEA/issues/IDEA-393669)) | it would be one more comparison arm beside stock jdtls (ADR 0028, amended); recheck at each milestone |
 | `kmp-lsp` (MIT, active) converges on the same niche | it is an E0 arm and a bench arm; forking its resolver or JAR cache is the mitigation |
 | A reused upstream stalls (tree-sitter-java-orchard and build-server-for-gradle have small teams; `quint-connect`, `gen-lsp-types` and `ristretto_jimage` are 0.x) | pin exact versions or commits, name a runner-up in each ADR (§16); for the grammar, the switch-back boundary and both-grammar corpus tests of ADR 0022 (amended) |
 | A speed regression lands unnoticed | the BENCH lane from FND-01 on; the >10 % gate from M1 (§1.7) |
@@ -961,9 +962,9 @@ tools instead of a ported `xtask`.
 v3.2 (BOOT-02, 2026-11-17) records the owner's decisions at the FND checkpoint: MIT only (ADR
 0033); the LSP carrier first and the CLI second (ADR 0034, M1 and M2 swapped); mayfly's `xtask`
 ported piece by piece after all (ADR 0035, lane XT); our own javac worker instead of a fork (ADR
-0036); jdtls behind our proxy for testing and comparison only, so the kill criterion is "stop or
-rescope", never "ship jdtls" (ADR 0028); tree-sitter-java-orchard pinned exactly with a
-switch-back boundary (ADR 0022); `ristretto_jimage` and Rust 1.99.1 (ADR 0023, FND-10); Quint
+0036); jdtls for testing and comparison only, so the kill criterion is "stop or rescope", never
+"ship jdtls" (ADR 0028; FND-12 then removed the proxy built for it); tree-sitter-java-orchard
+pinned exactly with a switch-back boundary (ADR 0022); `ristretto_jimage` and Rust 1.99.1 (ADR 0023, FND-10); Quint
 models plus `proptest-state-machine` tests (ADR 0007).
 
 ---
@@ -991,7 +992,7 @@ that adds a subsystem says on its card what reuse it considered.
 | javac worker | **build** a small worker with one warm javac context; scip-java plugin | 0036 |
 | Resolver | E2 decides; javac-attributed arm added, Stack Graphs dropped | DEC-04 |
 | SCIP oracle and baseline | reuse `scip-java`, the `scip` crate | 0009 |
-| Baseline (testing and comparison only) | **wrap** jdtls behind our multiplexing proxy | 0028 |
+| Baseline (testing and comparison only) | **reuse** stock jdtls, started by the bench arm; nothing of ours wraps it | 0028 (amended) |
 | Agent evaluation | **wrap** Harbor; Multi-SWE-bench Java control | 0029 |
 | Benchmarks | reuse hyperfine, divan or criterion, github-action-benchmark; a pinned real corpus | 0031 |
 | Engineering foundation | **port** mayfly's `cargo xtask` piece by piece over today's just, mise and scripts; external tools stay (cargo-deny, gitleaks, zizmor, actionlint, shellcheck, hyperfine, nextest, Quint and the rest) | 0035 (superseding 0030) |
@@ -1020,7 +1021,8 @@ that adds a subsystem says on its card what reuse it considered.
 Unlicense, BSD-3-Clause and Unicode-3.0 (transitive); anything else needs a recorded reason
 (fnd §7.4). jfastlsp itself is MIT only (ADR 0033). Runtime-optional JVM pieces (run, not linked
 or bundled): our own javac worker (MIT), scip-java's plugin (Apache-2.0), build-server-for-gradle
-(MIT), and jdtls (EPL-2.0, a separate process only, in `jfl-jdtls`, for testing and comparison).
+(MIT), and jdtls (EPL-2.0, a separate process only, started by `jfl-bench`'s comparison arm, for
+testing and comparison).
 
 ### 16.3 Rejected, and why
 

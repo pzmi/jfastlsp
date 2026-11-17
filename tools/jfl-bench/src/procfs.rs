@@ -42,6 +42,19 @@ pub fn read_status(pid: Option<u32>) -> Option<MemStatus> {
     Some(parse_status(&text))
 }
 
+/// Parse a `/proc/<pid>/task/<pid>/children` file: the pids of a thread's children, separated
+/// by spaces. A word that is not a pid makes the whole answer `None`.
+pub fn parse_children(text: &str) -> Option<Vec<u32>> {
+    text.split_whitespace().map(|w| w.parse().ok()).collect()
+}
+
+/// The children of process `pid` (its main thread's), where `/proc` has them. The jdtls arm
+/// finds the JVM this way: it is the one child of the `timeout` the harness starts.
+pub fn children(pid: u32) -> Option<Vec<u32>> {
+    let path = format!("/proc/{pid}/task/{pid}/children");
+    parse_children(&std::fs::read_to_string(Path::new(&path)).ok()?)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -65,5 +78,18 @@ mod tests {
         let s = parse_status(text);
         // then
         assert_eq!(s, MemStatus::default());
+    }
+
+    #[test]
+    fn should_read_each_pid_when_parsing_a_children_file() {
+        // given
+        let text = "4242 4250 \n";
+        // when
+        let pids = parse_children(text);
+        // then
+        assert_eq!(pids, Some(vec![4242, 4250]));
+        assert_eq!(parse_children(""), Some(vec![]));
+        assert_eq!(parse_children("12 x"), None);
+        assert_eq!(parse_children("-1"), None);
     }
 }

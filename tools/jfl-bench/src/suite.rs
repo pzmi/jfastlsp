@@ -32,7 +32,7 @@ pub enum Kind {
     Incremental,
     /// The kmp-lsp arm through hyperfine: its index, cached index, `refs` and `find`.
     KmpLsp,
-    /// The jdtls arm behind `jfl-jdtls`, over LSP.
+    /// The jdtls arm: the pinned stock jdtls, over LSP.
     Jdtls,
 }
 

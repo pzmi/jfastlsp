@@ -1,14 +1,15 @@
 //! The comparison arms beside the `rg` floor (BENCH-03, ADR 0031, plan §1.3 and §1.7): kmp-lsp
-//! at a pinned commit, timed end to end through hyperfine, and jdtls behind the proxy
-//! (`jfl-jdtls`, EVAL-11, ADR 0028), driven over LSP. Neither is linked: each is a separate
-//! program the harness starts, so the harness stays independent of what it measures.
+//! at a pinned commit, timed end to end through hyperfine, and the pinned stock jdtls (ADR 0028,
+//! amended 2026-11-17), driven over LSP. Neither is linked: each is a separate program the
+//! harness starts, so the harness stays independent of what it measures.
 //!
 //! - **kmp-lsp** (`scripts/kmp-lsp-fetch.sh` builds it): `kmp-lsp index` with an empty cache (a
 //!   full syntax index, the §1.7 row's arm) and with its cache (its warm reopen), and its `refs`
 //!   and `find` commands for the same seed-picked names as `rg-floor`. Its cache directory is a
 //!   scratch `XDG_CACHE_HOME`, emptied by hyperfine's `--prepare` for the cold-cache series. It
 //!   needs no build of the corpus, so it runs on every size.
-//! - **jdtls** (`jfl-jdtls lsp`): `initialize`, the time until jdtls reports `ServiceReady`, then
+//! - **jdtls** (started by [`crate::jdtls`]: a fresh `-data` per run, a heap cap, under a
+//!   deadline): `initialize`, the time until jdtls reports `ServiceReady`, then
 //!   `definition`, `references`, `hover` and `workspace/symbol` at usage sites of seed-picked
 //!   types, and the backend JVM's resident set. A jdtls import runs the project's build, so in
 //!   the sandbox it runs only on the synthetic multi-module fixture with the Gradle and Maven
@@ -17,7 +18,8 @@
 //!   run), which leaves the Gradle import on.
 //!
 //! Pinned by: `tests/lsp_arm.rs` (usage sites on the fixture), this module's unit tests (the
-//! kmp-lsp and jdtls command lines, status and heap parsing, kmp-lsp exit codes) and
+//! kmp-lsp command lines, the jdtls initialization options, heap parsing, kmp-lsp exit codes),
+//! `jdtls`'s tests (the jdtls command line and its refusals) and
 //! `runner::tests::should_refuse_a_corpus_checkout_when_the_jdtls_arm_is_not_trusted` (the
 //! sandbox refusal).
 
@@ -31,6 +33,7 @@ use serde_json::{Value, json};
 use crate::e1;
 use crate::error::{BenchError, Context, Result};
 use crate::hyperfine;
+use crate::jdtls;
 use crate::lsp::{self, Client};
 use crate::procfs;
 use crate::queries::{self, Query};
@@ -384,9 +387,11 @@ pub struct JdtlsRun<'a> {
     pub size: &'a str,
     /// The checkout jdtls opens (a scratch copy of the fixture).
     pub root: &'a Path,
-    /// The `jfl-jdtls` binary.
-    pub jfl_jdtls: &'a Path,
-    /// Scratch space: the proxy's state directory and its stderr.
+    /// The verified jdtls install ([`jdtls::launcher`] checks it).
+    pub jdtls_home: &'a Path,
+    /// The `java` that runs it.
+    pub java: &'a Path,
+    /// Scratch space: jdtls's fresh `-data` and configuration, and its stderr.
     pub scratch: &'a Path,
     /// Whether jdtls may import the project's build (a corpus checkout, owner or dispatch only).
     pub trusted_build: bool,
@@ -396,31 +401,6 @@ pub struct JdtlsRun<'a> {
     pub runs: u32,
     /// Seed for the picked types.
     pub seed: u64,
-}
-
-/// The `jfl-jdtls lsp` command, under `timeout` so a server that stops answering ends the run.
-pub fn jdtls_argv(r: &JdtlsRun<'_>, j: &Jdtls, state: &Path) -> Vec<String> {
-    let mut argv = vec![
-        "timeout".to_string(),
-        "--kill-after=10s".to_string(),
-        format!("{}s", j.deadline_secs),
-        r.jfl_jdtls.display().to_string(),
-        "lsp".to_string(),
-        "--state-dir".to_string(),
-        state.display().to_string(),
-        "--root".to_string(),
-        r.root.display().to_string(),
-        "--heap-mib".to_string(),
-        j.heap_mib.to_string(),
-        "--idle-secs".to_string(),
-        "60".to_string(),
-        "--daemon-idle-secs".to_string(),
-        "60".to_string(),
-    ];
-    if !r.trusted_build {
-        argv.push("--no-gradle-import".to_string());
-    }
-    argv
 }
 
 /// `initializationOptions` for the arm: in the sandbox the imports are off and the source roots
@@ -435,18 +415,35 @@ pub fn jdtls_init_options(r: &JdtlsRun<'_>) -> Value {
     }}})
 }
 
+/// The `timeout` that runs jdtls. Ended normally by [`Session::wait`] once jdtls has exited; if
+/// the arm unwinds first, `Drop` sends `timeout` a SIGTERM, which it passes on to jdtls (a SIGKILL
+/// would end `timeout` alone and orphan the JVM), then waits, bounded by `--kill-after`.
 struct Session {
-    child: Child,
+    child: Option<Child>,
+}
+
+impl Session {
+    fn wait(mut self) {
+        if let Some(mut child) = self.child.take() {
+            let _ = child.wait();
+        }
+    }
 }
 
 impl Drop for Session {
     fn drop(&mut self) {
-        let _ = self.child.kill();
-        let _ = self.child.wait();
+        if let Some(mut child) = self.child.take() {
+            let _ = Command::new("kill")
+                .args(["-TERM", &child.id().to_string()])
+                .stdin(Stdio::null())
+                .stderr(Stdio::null())
+                .status();
+            let _ = child.wait();
+        }
     }
 }
 
-/// How long a helper call (`jfl-jdtls status`/`stop`, `jcmd`) may take before `timeout` ends it.
+/// How long a helper call (`jcmd`) may take before `timeout` ends it.
 const HELPER_DEADLINE: &str = "30s";
 
 /// Run `program args` under `timeout`, so a helper that hangs cannot hang the harness; its
@@ -461,23 +458,6 @@ fn bounded(program: &Path, args: &[&str]) -> Option<Vec<u8>> {
         .output()
         .ok()?;
     out.status.success().then_some(out.stdout)
-}
-
-/// The jdtls backend's pid from `jfl-jdtls status` JSON: the first session's `backendPid`.
-pub fn parse_backend_pid(status_json: &[u8]) -> Option<u32> {
-    let v: Value = serde_json::from_slice(status_json.trim_ascii()).ok()?;
-    let pid = v
-        .get("sessions")?
-        .as_array()?
-        .first()?
-        .get("backendPid")?
-        .as_u64()?;
-    u32::try_from(pid).ok()
-}
-
-fn status_backend_pid(jfl_jdtls: &Path, state: &Path) -> Option<u32> {
-    let state = state.to_string_lossy();
-    parse_backend_pid(&bounded(jfl_jdtls, &["status", "--state-dir", &state])?)
 }
 
 /// The Java heap from `jcmd <pid> GC.heap_info`: (used, committed) KiB summed over the heap's
@@ -522,18 +502,13 @@ fn operations(site: &Site) -> [(&'static str, &'static str, Value); 4] {
     ]
 }
 
-/// The jdtls arm: one session from `initialize` to `shutdown`, then the proxy's daemon stopped.
+/// The jdtls arm: one session of stock jdtls from `initialize` to `shutdown` and `exit`.
 pub fn jdtls_suite(
     r: &JdtlsRun<'_>,
     j: &Jdtls,
     notes: &mut Vec<String>,
 ) -> Result<(Vec<Metric>, Vec<QuerySlot>)> {
-    if !r.jfl_jdtls.is_file() {
-        return Err(BenchError::new(format!(
-            "no jfl-jdtls at {}: build it (`cargo build --profile bench-tool -p jfl-jdtls`; `just bench` does) or pass --jfl-jdtls PATH",
-            r.jfl_jdtls.display()
-        )));
-    }
+    let launcher = jdtls::launcher(r.jdtls_home)?;
     let picked = queries::pick(r.root, j.sites, r.seed)?;
     let sites = usage_sites(r.root, &picked);
     let slots: Vec<QuerySlot> = sites
@@ -551,36 +526,39 @@ pub fn jdtls_suite(
             sites.len()
         ));
     }
-    let state = r.scratch.join("jdtls-state");
-    let argv = jdtls_argv(r, j, &state);
-    let (program, rest) = argv.split_first().context("empty jdtls command")?;
+    let data = r.scratch.join("jdtls-data");
+    let configuration = r.scratch.join("jdtls-configuration");
+    jdtls::fresh_dir(&data)?;
+    jdtls::fresh_dir(&configuration)?;
+    let launch = jdtls::Launch {
+        java: r.java,
+        home: r.jdtls_home,
+        launcher: &launcher,
+        data: &data,
+        configuration: &configuration,
+        heap_mib: j.heap_mib,
+        deadline_secs: j.deadline_secs,
+    };
     let stderr = std::fs::File::create(r.scratch.join("jdtls.stderr"))
-        .context("create the proxy's stderr file")?;
+        .context("create jdtls's stderr file")?;
     let t0 = Instant::now();
-    let mut child = Command::new(program)
-        .args(rest)
+    let mut child = jdtls::command(&launch, r.root)?
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(stderr)
         .spawn()
-        .context("start jfl-jdtls under timeout (coreutils `timeout` must be on PATH)")?;
-    let stdin = child.stdin.take().context("the proxy's stdin")?;
-    let stdout = child.stdout.take().context("the proxy's stdout")?;
-    let session = Session { child };
+        .context("start jdtls under timeout (coreutils `timeout` must be on PATH)")?;
+    let timeout_pid = child.id();
+    let stdin = child.stdin.take().context("jdtls's stdin")?;
+    let stdout = child.stdout.take().context("jdtls's stdout")?;
+    let session = Session { child: Some(child) };
     let mut client = Client::new(BufReader::new(stdout), stdin);
-    let result = drive(r, j, &sites, &mut client, t0, &state, notes);
+    let result = drive(r, j, &sites, &mut client, t0, timeout_pid, notes);
     let _ = client.request("shutdown", Value::Null);
     let _ = client.notify("exit", Value::Null);
-    // Closing the pipes lets the proxy exit by itself; wait for it (bounded by `timeout`) rather
-    // than kill `timeout` first, whose SIGKILL would not reach the proxy and would orphan it.
+    // jdtls exits on `exit` (or at its stdin's end); wait for it, bounded by `timeout`.
     drop(client);
-    let mut session = session;
-    let _ = session.child.wait();
-    drop(session);
-    let _ = bounded(
-        r.jfl_jdtls,
-        &["stop", "--state-dir", &state.to_string_lossy()],
-    );
+    session.wait();
     Ok((result?, slots))
 }
 
@@ -590,7 +568,7 @@ fn drive<R: std::io::BufRead, W: std::io::Write>(
     sites: &[Site],
     client: &mut Client<R, W>,
     t0: Instant,
-    state: &Path,
+    timeout_pid: u32,
     notes: &mut Vec<String>,
 ) -> Result<Vec<Metric>> {
     let size = r.size;
@@ -599,8 +577,13 @@ fn drive<R: std::io::BufRead, W: std::io::Write>(
     let (caps, _) = client.request(
         "initialize",
         json!({
-            "processId": null,
+            "processId": std::process::id(),
             "rootUri": root_uri,
+            "rootPath": r.root.to_string_lossy(),
+            "workspaceFolders": [{
+                "uri": root_uri,
+                "name": r.root.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
+            }],
             "capabilities": {},
             "initializationOptions": jdtls_init_options(r),
         }),
@@ -689,10 +672,12 @@ fn drive<R: std::io::BufRead, W: std::io::Write>(
             found.get(k).copied().unwrap_or(0) as f64,
         ));
     }
-    let pid = status_backend_pid(r.jfl_jdtls, state);
-    // RSS alone overstates what jdtls needs: the JVM starts with its initial heap (jfl-jdtls
-    // passes -Xms = min(heap cap, 1024 MiB)) resident or not. The heap actually used is the
-    // number to compare with an index's memory.
+    // The JVM is the one child of the `timeout` that runs it (Linux `/proc`; elsewhere neither
+    // its heap nor its RSS is measured, and the notes say so).
+    let pid = crate::procfs::children(timeout_pid).and_then(|c| c.first().copied());
+    // RSS alone overstates what jdtls needs: the JVM starts with its initial heap (-Xms =
+    // min(heap cap, 1024 MiB)) resident or not. The heap actually used is the number to compare
+    // with an index's memory.
     let heap = crate::machine::find_on_path("jcmd").and_then(|jcmd| {
         let text = bounded(&jcmd, &[&pid?.to_string(), "GC.heap_info"])?;
         parse_heap_info(&String::from_utf8_lossy(&text))
@@ -742,7 +727,8 @@ fn drive<R: std::io::BufRead, W: std::io::Write>(
         ),
     }
     notes.push(format!(
-        "jdtls behind jfl-jdtls, heap -Xms{} -Xmx{} MiB (its RSS is bounded by that configuration, not by need: compare backend_heap_used), {}; one session, so initialize and ready are single measurements",
+        "stock jdtls {} with a fresh -data, heap -Xms{} -Xmx{} MiB (its RSS is bounded by that configuration, not by need: compare backend_heap_used), {}; one session, so initialize and ready are single measurements",
+        jdtls::JDTLS_VERSION,
         j.heap_mib.min(1024),
         j.heap_mib,
         if r.trusted_build {
@@ -787,31 +773,6 @@ mod tests {
     }
 
     #[test]
-    fn should_read_the_first_backend_pid_and_nothing_else_when_parsing_status() {
-        // given
-        let good = br#" {"sessions":[{"backendPid":4242,"clients":1},{"backendPid":7}]} "#;
-        // when
-        // then
-        assert_eq!(parse_backend_pid(good), Some(4242));
-        for bad in [
-            &b""[..],
-            b"not json",
-            br#"{"sessions":[]}"#,
-            br#"{"sessions":[{"clients":1}]}"#,
-            br#"{"sessions":[{"backendPid":-1}]}"#,
-            br#"{"sessions":[{"backendPid":99999999999}]}"#,
-            br#"{"sessions":{"backendPid":1}}"#,
-        ] {
-            assert_eq!(
-                parse_backend_pid(bad),
-                None,
-                "{}",
-                String::from_utf8_lossy(bad)
-            );
-        }
-    }
-
-    #[test]
     fn should_sum_the_heap_generations_and_skip_metaspace_when_parsing_heap_info() {
         // given: jcmd GC.heap_info of a ParallelGC JVM
         let text = "4242:\n PSYoungGen      total 305664K, used 104857K [0x00000000eab00000, 0x0000000100000000)\n  eden space 262144K, 40% used [0x1,0x2,0x3)\n ParOldGen       total 699392K, used 20480K [0x00000000c0000000, 0x00000000eab00000)\n  object space 699392K, 2% used [0x1,0x2,0x3)\n Metaspace       used 61440K, committed 62000K, reserved 1114112K\n  class space    used 7000K, committed 7500K, reserved 1048576K\n";
@@ -844,7 +805,8 @@ mod tests {
         JdtlsRun {
             size: "fixture",
             root,
-            jfl_jdtls: Path::new("/b/jfl-jdtls"),
+            jdtls_home: Path::new("/c/jdtls"),
+            java: Path::new("/jdk/bin/java"),
             scratch: Path::new("/s"),
             trusted_build: trusted,
             warmup: 1,
@@ -856,24 +818,14 @@ mod tests {
     #[test]
     fn should_turn_the_build_import_off_unless_trusted_when_starting_jdtls() {
         // given
-        let j = Jdtls {
-            sites: 3,
-            heap_mib: 1024,
-            deadline_secs: 600,
-        };
         let root = Path::new("/nonexistent-root");
         // when
-        let sandbox = jdtls_argv(&run(false, root), &j, Path::new("/s/st"));
-        let trusted = jdtls_argv(&run(true, root), &j, Path::new("/s/st"));
+        let sandbox = jdtls_init_options(&run(false, root));
+        let trusted = jdtls_init_options(&run(true, root));
         // then
-        assert_eq!(&sandbox[..3], ["timeout", "--kill-after=10s", "600s"]);
-        assert!(sandbox.contains(&"--no-gradle-import".to_string()));
-        assert!(!trusted.contains(&"--no-gradle-import".to_string()));
-        let opts = jdtls_init_options(&run(false, root));
-        assert_eq!(
-            opts["settings"]["java"]["import"]["maven"]["enabled"],
-            false
-        );
-        assert_eq!(jdtls_init_options(&run(true, root)), json!({}));
+        let import = &sandbox["settings"]["java"]["import"];
+        assert_eq!(import["gradle"]["enabled"], false);
+        assert_eq!(import["maven"]["enabled"], false);
+        assert_eq!(trusted, json!({}));
     }
 }

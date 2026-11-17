@@ -6,7 +6,7 @@ schema = 1
 [workspace]
 production = ["jfl-domain", "jfl-protocol", "jfl-application", "jfl-process", "jfl-adapter-fs", "jfl-adapter-git", "jfl-adapter-java", "jfl-adapter-classfile", "jfl-adapter-store", "jfl-adapter-ipc", "jfl-adapter-lsp", "jfl-adapter-javac", "jfl-adapter-gradle", "jfl-composition", "jfl-cli"]
 test_only = ["jfl-testkit", "jfl-conformance", "jfl-architecture"]
-tool_only = ["jfl-oracle", "jfl-eval", "jfl-jdtls", "jfl-bench", "xtask"]
+tool_only = ["jfl-oracle", "jfl-eval", "jfl-bench", "xtask"]
 # fuzz_only = ["jfl-fuzz"] arrives with REL-03 (its own workspace under fuzz/).
 
 [roles]
@@ -19,14 +19,14 @@ root = ["jfl-composition", "jfl-cli"]
 # What each crate's clippy.toml may drop from the canonical disallowed list (fnd §2.4). The
 # git, javac and gradle adapters spawn only through jfl-process, so they hold no process grant.
 [grants]
-process = ["jfl-process", "jfl-testkit", "jfl-architecture", "jfl-bench", "jfl-eval", "jfl-jdtls", "xtask"]
-socket = ["jfl-adapter-ipc", "jfl-jdtls"]
-fs = ["jfl-adapter-fs", "jfl-adapter-git", "jfl-adapter-store", "jfl-adapter-classfile", "jfl-adapter-javac", "jfl-adapter-gradle", "jfl-adapter-ipc", "jfl-composition", "jfl-testkit", "jfl-conformance", "jfl-architecture", "jfl-bench", "jfl-eval", "jfl-jdtls", "jfl-oracle", "xtask"]
-spawn = ["jfl-adapter-ipc", "jfl-composition", "jfl-jdtls"]
-sleep = ["jfl-testkit", "jfl-jdtls"]
-clock = ["jfl-process", "jfl-composition", "jfl-testkit", "jfl-bench", "jfl-eval", "jfl-jdtls"]
-env = ["jfl-process", "jfl-composition", "jfl-cli", "jfl-conformance", "jfl-architecture", "jfl-bench", "jfl-eval", "jfl-jdtls", "xtask"]
-independent = ["jfl-oracle", "jfl-eval", "jfl-jdtls", "jfl-bench", "xtask"]
+process = ["jfl-process", "jfl-testkit", "jfl-architecture", "jfl-bench", "jfl-eval", "xtask"]
+socket = ["jfl-adapter-ipc"]
+fs = ["jfl-adapter-fs", "jfl-adapter-git", "jfl-adapter-store", "jfl-adapter-classfile", "jfl-adapter-javac", "jfl-adapter-gradle", "jfl-adapter-ipc", "jfl-composition", "jfl-testkit", "jfl-conformance", "jfl-architecture", "jfl-bench", "jfl-eval", "jfl-oracle", "xtask"]
+spawn = ["jfl-adapter-ipc", "jfl-composition"]
+sleep = ["jfl-testkit"]
+clock = ["jfl-process", "jfl-composition", "jfl-testkit", "jfl-bench", "jfl-eval"]
+env = ["jfl-process", "jfl-composition", "jfl-cli", "jfl-conformance", "jfl-architecture", "jfl-bench", "jfl-eval", "xtask"]
+independent = ["jfl-oracle", "jfl-eval", "jfl-bench", "xtask"]
 
 # The only legal normal edges between workspace crates (plan §6.3).
 [dependencies.normal]
@@ -50,7 +50,6 @@ jfl-conformance = ["jfl-testkit", "jfl-domain", "jfl-protocol", "jfl-application
 jfl-architecture = []
 jfl-oracle = []
 jfl-eval = []
-jfl-jdtls = []
 jfl-bench = []
 xtask = []
 
@@ -71,12 +70,6 @@ xtask = []
 # (XT-01): it was a dev-dependency (the synthetic `cargo metadata` JSON of tests/rules.rs) and is in
 # the graph through cargo_metadata already.
 jfl-architecture = { cargo_metadata = ["default"], serde = ["default", "derive"], serde_json = ["default"], serde_norway = ["default"], sha2 = ["default"], toml = ["default"], yaml-rust2 = [] }
-# jfl-jdtls (EVAL-11, ADR 0028): serde_json parses only the JSON-RPC envelope and forwards params,
-# result and error as raw values (raw_value); serde derives the envelope; sha1_smol keys jdtls's
-# -data on the full worktree path; rustix gives the effective uid, the socket peer's uid and the
-# process-group kill that std lacks.
-jfl-jdtls = { rustix = ["net", "process", "std"], serde = ["default", "derive"], serde_json = ["default", "raw_value"], sha1_smol = ["default"] }
-
 # jfl-bench (BENCH-02, ADR 0031; ADR 0031 amended 2026-11-17): the harness. ignore (the
 # .gitignore-aware walk), rayon (the pool), blake3, tree-sitter and the orchard grammar (the E1
 # pipeline's stages) reproduce the archived spike; toml reads suites, serde and serde_json write
@@ -93,7 +86,7 @@ xtask = { regex = ["default"], sha2 = ["default"] }
 # jfl-eval (EVAL-01, ADR 0029): toml and serde read the task sets and arms strictly
 # (deny_unknown_fields); serde_json reads Harbor's result.json and ATIF trajectories and Claude
 # Code's JSONL transcripts and writes the task settings and the JSON report. All three are in the
-# graph already (jfl-bench, jfl-jdtls); MIT OR Apache-2.0, no build script.
+# graph already (jfl-bench, jfl-architecture); MIT OR Apache-2.0, no build script.
 jfl-eval = { serde = ["default", "derive"], serde_json = ["default"], toml = ["default"] }
 
 jfl-bench = { blake3 = ["default"], ignore = ["default"], rayon = ["default"], serde = ["default", "derive"], serde_json = ["default"], toml = ["default"], tree-sitter = ["default"], tree-sitter-java-orchard = ["default"] }

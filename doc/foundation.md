@@ -55,7 +55,7 @@ the policy, or listed but absent, fails the checker.
 | **adapter** | `jfl-adapter-{fs,git,java,classfile,store,ipc,lsp,javac,gradle}` | yes |
 | **root** | `jfl-composition`, `jfl-cli` | yes |
 | **test_only** | `jfl-testkit`, `jfl-conformance`, `jfl-architecture` | never |
-| **tool_only** | `jfl-oracle`, `jfl-eval`, `jfl-jdtls`, `jfl-bench`, `xtask` | never |
+| **tool_only** | `jfl-oracle`, `jfl-eval`, `jfl-bench`, `xtask` | never |
 | **fuzz_only** | `jfl-fuzz` (own workspace under `fuzz/`, REL-03) | never |
 
 `[workspace]` holds the categories as `production`, `test_only`, `tool_only` and `fuzz_only`;
@@ -150,7 +150,6 @@ Plan §6.5's table is enforced per crate, because clippy has no module-level con
   | `jfl-conformance` | fs, env | committed traces; seed and step parameters from the recipe |
   | `jfl-architecture` | process, fs, env | runs `cargo metadata`, `git`, `bash scripts/*.sh` on scratch repositories |
   | `jfl-bench`, `jfl-eval` | process, fs, clock, env | drive binaries and JVMs, write results, time runs |
-  | `jfl-jdtls` | process, fs, socket, spawn, sleep, clock, env | its per-user daemon on a Unix socket, one jdtls per worktree; its idle and hand-shake deadlines are timed waits (ADR 0028, amended) |
   | `jfl-oracle` | fs | reads indexes and reports |
   | `xtask` | process, fs, env | runs the gate's stages (argv only, never `sh -c`), reads the tool and cargo configuration, judges the environment (XT-01) |
 
@@ -194,7 +193,7 @@ workspace path crates before relying on it.
 
 ### 2.7 Independent oracles
 
-`jfl-oracle`, `jfl-eval`, `jfl-jdtls` and `jfl-bench` judge or compete with the product from
+`jfl-oracle`, `jfl-eval` and `jfl-bench` judge or compete with the product from
 outside: they run the built `jfl` (or jdtls), read its `--json`, and read SCIP indexes, benchmark
 results and Claude Code transcripts with their own code. They import no production crate
 (`ARCH-independent-oracle`): an oracle that shares the resolver's assumptions proves nothing.
@@ -229,7 +228,7 @@ schema = 1
 [workspace]
 production = [ ... ]          # §2.1
 test_only  = ["jfl-testkit", "jfl-conformance", "jfl-architecture"]
-tool_only  = ["jfl-oracle", "jfl-eval", "jfl-jdtls", "jfl-bench", "xtask"]
+tool_only  = ["jfl-oracle", "jfl-eval", "jfl-bench", "xtask"]
 fuzz_only  = ["jfl-fuzz"]     # once the fuzz crate exists
 
 [roles]                       # §2.1, inside production
@@ -240,14 +239,14 @@ adapter     = [ ... ]
 root        = ["jfl-composition", "jfl-cli"]
 
 [grants]                      # §2.4: what each crate's clippy.toml may drop from the canonical list
-process = ["jfl-process", "jfl-testkit", "jfl-architecture", "jfl-bench", "jfl-eval", "jfl-jdtls", "xtask"]
-socket  = ["jfl-adapter-ipc", "jfl-jdtls"]
+process = ["jfl-process", "jfl-testkit", "jfl-architecture", "jfl-bench", "jfl-eval", "xtask"]
+socket  = ["jfl-adapter-ipc"]
 fs      = [ ... ]             # §2.4's table
-spawn   = ["jfl-adapter-ipc", "jfl-composition", "jfl-jdtls"]
-sleep   = ["jfl-testkit", "jfl-jdtls"]
-clock   = ["jfl-process", "jfl-composition", "jfl-testkit", "jfl-bench", "jfl-eval", "jfl-jdtls"]
-env     = ["jfl-process", "jfl-composition", "jfl-cli", "jfl-conformance", "jfl-architecture", "jfl-bench", "jfl-eval", "jfl-jdtls", "xtask"]
-independent = ["jfl-oracle", "jfl-eval", "jfl-jdtls", "jfl-bench", "xtask"]
+spawn   = ["jfl-adapter-ipc", "jfl-composition"]
+sleep   = ["jfl-testkit"]
+clock   = ["jfl-process", "jfl-composition", "jfl-testkit", "jfl-bench", "jfl-eval"]
+env     = ["jfl-process", "jfl-composition", "jfl-cli", "jfl-conformance", "jfl-architecture", "jfl-bench", "jfl-eval", "xtask"]
+independent = ["jfl-oracle", "jfl-eval", "jfl-bench", "xtask"]
 
 [dependencies.normal]         # plan §6.3, one key per crate
 [dependencies.build]
@@ -838,7 +837,6 @@ needs one becomes a recipe parameter (`just conformance seed=42`).
 | `just java-fixtures` | compile the golden Java corpus with the pinned JDK | EVAL-07 |
 | `cargo run --locked -p jfl-eval -- <subcommand>` | the evaluation harness (E0 adapter, reports, E1, E3, E4) | EVAL-01 |
 | `cargo run --locked -p jfl-oracle -- <subcommand>` | the SCIP differential and completeness oracles | EVAL-08 |
-| `cargo run --locked -p jfl-jdtls -- <subcommand>` | jdtls behind the multiplexing proxy | EVAL-11 |
 | `just fuzz <target> [time] [reproduce]` | bounded fuzz run on the pinned nightly | REL-03 |
 | `just soak [seed] [minutes]` | the crash and restart soak | REL-04 |
 | `just mutation` | cargo-mutants over the configured scope | REL-05 |

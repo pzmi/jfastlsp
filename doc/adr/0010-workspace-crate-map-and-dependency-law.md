@@ -4,7 +4,7 @@ Date: 2026-11-16
 
 ## Status
 
-Accepted (owner, 2026-11-17); amended 2026-11-16 (twice).
+Accepted (owner, 2026-11-17); amended 2026-11-16 (twice) and 2026-11-17 (owner: `jfl-jdtls` removed).
 
 ## Context
 
@@ -63,3 +63,11 @@ process, fs and env; `jfl-bench` and `jfl-eval` process, fs, clock and env; `jfl
 fs, socket, spawn, clock and env; `jfl-oracle` fs. TCP stays denied everywhere. These crates are
 never reached from production (`ARCH-production-closure`), so their authority cannot leak into
 `jfl`. The architecture test moves to its own task, FND-07, after the gate (FND-02).
+
+## Amended 2026-11-17 (owner, FND-12): `jfl-jdtls` removed from the map
+
+The owner had `tools/jfl-jdtls` deleted (ADR 0028, amended 2026-11-17: jdtls is a comparison arm
+only, and nothing of ours wraps it). Its row leaves `architecture.toml` with its grants: no tool
+crate holds `socket`, `spawn` or `sleep` any more, so `socket` is `jfl-adapter-ipc`'s alone. The
+tool-only, independent crates are `jfl-oracle`, `jfl-eval`, `jfl-bench` and `xtask`;
+`jfl-bench` starts stock jdtls itself under the grants it already held (process, fs, clock, env).

@@ -39,7 +39,7 @@ range and stop.
 **Enforced architecture** (`architecture.toml`, `deny.toml`, the `clippy.toml` lists, `just check-only architecture deny`; plan §6, fnd §2,
 §3): cli → composition → adapters → application → pure crates; adapters never reference sibling
 adapters or composition; `jfl-process` reaches no adapter; production crates never depend on
-`jfl-testkit` or `jfl-conformance`; tool crates (`jfl-oracle`, `jfl-eval`, `jfl-jdtls`, `jfl-bench`) import no production
+`jfl-testkit` or `jfl-conformance`; tool crates (`jfl-oracle`, `jfl-eval`, `jfl-bench`, `xtask`) import no production
 crate; a new crate has its `members` entry, `architecture.toml` entry and external allowlist in
 the same commit, and each new rule has a negative fixture. A change that loosens
 `architecture.toml`, `[workspace.lints]`, `deny.toml` or a test without a stated reason (the task
@@ -51,8 +51,8 @@ threads or Tokio; a child process is started only through `jfl-process` (argv on
 process group, killed as a group; bounded captured output), the daemon launcher and the JVM
 helpers included;
 sockets only in `jfl-adapter-ipc`, Unix domain only, never TCP. Tool and test crates hold the
-grants their `architecture.toml` row gives them (fnd §2.4: `jfl-jdtls`'s socket and daemon,
-`jfl-testkit`'s sleep and clock inside `poll` only). A spawn, a socket, a filesystem write, a
+grants their `architecture.toml` row gives them (fnd §2.4: `jfl-bench`'s processes for the
+comparison arms, `jfl-testkit`'s sleep and clock inside `poll` only). A spawn, a socket, a filesystem write, a
 clock, a sleep or an environment read outside the crates fnd §2.4 grants it to is HIGH. Rules no tool enforces
 (fnd §3.3) are checked here: application command code naming query modules or the reverse, a
 `tracing` value reaching a branch, a hidden seam into composition, a non-literal event name,

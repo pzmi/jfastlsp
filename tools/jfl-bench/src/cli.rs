@@ -29,7 +29,7 @@ usage: jfl-bench <command>
       --runs N | --seed N  override the suite's repetitions or query seed
       --allow-debug        run a debug build anyway (refused otherwise; the report says so)
       --kmp-lsp PATH       the kmp-lsp arm's binary (default: scripts/kmp-lsp-fetch.sh's)
-      --jfl-jdtls PATH     the jdtls arm's proxy (default: beside this binary)
+      --jdtls-home DIR     the jdtls arm's verified install (default: scripts/jdtls-fetch.sh's)
       --trusted-build      let the jdtls arm import a corpus checkout's Gradle build (never in the
                            sandbox: a bench.yml dispatch job or the owner)
   compare A.json B.json  per-metric change between two reports [--band PCT, default 20] [--strict]
@@ -147,7 +147,7 @@ fn cmd_run(p: Parsed) -> Result<()> {
         "runs",
         "seed",
         "kmp-lsp",
-        "jfl-jdtls",
+        "jdtls-home",
     ])?;
     if cfg!(debug_assertions) && !p.switch("allow-debug") {
         return Err(BenchError::new(
@@ -181,7 +181,7 @@ fn cmd_run(p: Parsed) -> Result<()> {
         exe: std::env::current_exe().context("locate this executable")?,
         scratch: scratch.clone(),
         kmp_lsp: p.flag("kmp-lsp").map(PathBuf::from),
-        jfl_jdtls: p.flag("jfl-jdtls").map(PathBuf::from),
+        jdtls_home: p.flag("jdtls-home").map(PathBuf::from),
         trusted_build: p.switch("trusted-build"),
     };
     let result = runner::run(&args, &runner::SystemCacheDrop);

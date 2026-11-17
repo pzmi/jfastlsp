@@ -65,7 +65,7 @@ for the owner's decisions.
 | [0007](0007-formal-methods-required-quint-with-itf-conformance.md) | Formal methods required: Quint models with ITF conformance against the real code | Accepted (owner, 2026-11-17); amended 2026-11-16 and 2026-11-17 |
 | [0008](0008-no-event-sourcing-the-index-is-a-rebuildable-cache.md) | No event sourcing: the index is a rebuildable cache | Accepted (owner, 2026-11-17) |
 | [0009](0009-phase-0-first-owner-run-evaluations-and-decision-tasks.md) | Phase 0 first: owner-run evaluations and a decision task per open choice | Accepted (owner, 2026-11-17); amended 2026-11-16 |
-| [0010](0010-workspace-crate-map-and-dependency-law.md) | Workspace crate map and dependency law in architecture.toml | Accepted (owner, 2026-11-17); amended 2026-11-16 (twice) |
+| [0010](0010-workspace-crate-map-and-dependency-law.md) | Workspace crate map and dependency law in architecture.toml | Accepted (owner, 2026-11-17); amended 2026-11-16 (twice) and 2026-11-17 |
 | [0011](0011-pinned-toolchains-rust-1-97-0-and-tools-versions-toml.md) | Pinned toolchains: Rust 1.97.0, edition 2024; JDK and tools in tools/versions.toml | Superseded by 0030; tool pins restored by 0035 |
 | [0012](0012-port-xtask-from-mayfly.md) | Port xtask from mayfly | Superseded by 0030; direction restored by 0035 |
 | [0013](0013-two-carriers-over-one-query-engine-cli-first.md) | Two carriers over one query engine: JSON CLI first, LSP second | Superseded by 0034 |
@@ -83,7 +83,7 @@ for the owner's decisions.
 | [0025](0025-storage-rusqlite-fst-postcard-blake3.md) | Storage crates: rusqlite, fst, postcard and blake3 | Accepted (owner, 2026-11-17) |
 | [0026](0026-gradle-model-by-wrapping-build-server-for-gradle.md) | Gradle model: wrap microsoft/build-server-for-gradle | Accepted (owner, 2026-11-17) |
 | [0027](0027-javac-worker-forked-from-java-language-server-with-scip-java.md) | javac worker: fork java-language-server's compiler core, load scip-java's plugin | Superseded by 0036 |
-| [0028](0028-jdtls-behind-our-multiplexing-proxy-baseline-and-fallback.md) | jdtls behind our multiplexing proxy: the baseline, for testing and comparison only | Accepted (owner, 2026-11-17); amended 2026-11-17 (twice) |
+| [0028](0028-jdtls-behind-our-multiplexing-proxy-baseline-and-fallback.md) | jdtls behind our multiplexing proxy: the baseline, for testing and comparison only | Accepted (owner, 2026-11-17); amended 2026-11-17 (three times) |
 | [0029](0029-e0-on-harbor-with-a-multi-swe-bench-java-control.md) | E0 on Harbor, with a Multi-SWE-bench Java control | Accepted (owner, 2026-11-17) |
 | [0030](0030-foundation-from-maintained-tools.md) | Foundation from maintained tools: just, mise, cargo-deny, no_std and a thin test layer | Superseded by 0035 |
 | [0031](0031-benchmark-early-on-a-pinned-real-corpus.md) | Benchmark early on a pinned real-repository corpus; regressions over 10 % block | Accepted (owner, 2026-11-17); amended 2026-11-16 and 2026-11-17 |

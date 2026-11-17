@@ -6,7 +6,7 @@
 //! ones live in `suites/`): the `rg-floor` suite times `rg` answering name queries end to end
 //! through hyperfine, the `e1` suite runs the E1 parse pipeline in process and reports its
 //! stages, throughput and RSS. BENCH-03 adds the comparison arms (`arms`: kmp-lsp through
-//! hyperfine, jdtls behind `jfl-jdtls` over LSP) and the `incremental` suite of proxies for an
+//! hyperfine, stock jdtls over LSP, started by `jdtls`) and the `incremental` suite of proxies for an
 //! index kept fresh. Everything here reports and never gates; the CI gate is BENCH-04.
 
 pub mod arms;
@@ -16,6 +16,7 @@ pub mod e1;
 pub mod error;
 pub mod hyperfine;
 pub mod incremental;
+pub mod jdtls;
 pub mod lsp;
 pub mod machine;
 pub mod procfs;

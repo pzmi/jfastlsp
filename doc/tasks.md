@@ -39,6 +39,7 @@ CLI carrier), **SEM-07** (M4),
 | DEC-08 | (owner) Shared skills plugin or repo-local skills | FND-05 | light | S |  | DEC-07 |
 | FND-10 | Toolchain 1.99.1 | FND-08 | standard | S |  | XT-01 |
 | FND-11 | Remove the private-names hashes and check | FND-04, XT-02 | standard | S |  | EVAL lane |
+| FND-12 | Delete the jdtls proxy; keep stock jdtls as a bench arm | FND-11, BENCH-03 | standard | M |  | EVAL lane |
 | XT-01 | Scaffold `tools/xtask` and port the gate composition | FND-08, FND-09 | deep | M |  | FND-10, EVAL lane |
 | XT-02 | Tool pins: `tools/versions.toml`, `cargo xtask doctor`, `install-tools` | XT-01 | standard | M |  | EVAL lane |
 | XT-03 | Security and workflow stages into xtask | XT-02 | standard | M |  | EVAL lane |
@@ -60,13 +61,13 @@ CLI carrier), **SEM-07** (M4),
 | FORMAL-05 | `diagnostics.qnt`: staleness | FORMAL-04 | deep | M | ⛳ | IDX-03 |
 | DEC-01 | (owner) Choose the target Java repository | — | light | S |  | FND-01, FND-02 |
 | EVAL-01 | Evaluation harness: Harbor adapter, arms, transcript metrics | FND-02 | standard | M |  | FND-07, FND-03 |
-| EVAL-11 | jdtls behind our multiplexing proxy (`jfl-jdtls`) | FND-02 | deep | M |  | FND-07, FND-03, FND-04 |
+| EVAL-11 | jdtls behind our multiplexing proxy (`jfl-jdtls`; later removed by FND-12) | FND-02 | deep | M |  | FND-07, FND-03, FND-04 |
 | EVAL-02 | E0 task set from the target repository's history | DEC-01, EVAL-01 | standard | M |  | FND-05 |
 | EVAL-03 | E0 arms, Harbor images and runbook | EVAL-01, EVAL-11 | standard | M |  | FND-06 |
 | EVAL-12 | E0 control set from Multi-SWE-bench Java | EVAL-01 | standard | S |  | FORMAL-01 |
 | EVAL-04 | (owner) Run E0 and report | EVAL-02, EVAL-03, EVAL-12 | standard | M |  | — |
 | EVAL-05 | E1 in the harness: parse and summarise the corpus on the bench runner and the target | BENCH-04 | standard | S |  | FORMAL-02 |
-| EVAL-06 | E4: jdtls at 1, 3 and 10 worktrees, stock and behind the proxy | EVAL-11, BENCH-02 | standard | M |  | FND-05, EVAL-08 |
+| EVAL-06 | E4: stock jdtls at 1, 3 and 10 worktrees | FND-12, BENCH-02 | standard | M |  | FND-05, EVAL-08 |
 | EVAL-07 | Golden resolution corpus and `java-fixtures` stage | FORMAL-01 | deep | L |  | FORMAL-02 |
 | EVAL-08 | SCIP oracle (`jfl-oracle`) | EVAL-07 | deep | M |  | EVAL-06 |
 | EVAL-09 | E2 resolver bake-off | EVAL-07, EVAL-08, EVAL-10, BENCH-05 | deep | L |  | DEC-03 |
@@ -478,6 +479,32 @@ foundation piece by piece (ADR 0035).
   - [x] `just check` and `just ci-parity` are green; `ARCH-ci-lockstep` and the frozen catalog test agree on the stages without `private-names`
 - **Impact:** gate (one stage removed, on the owner's order); CI (the security job's step).
 
+#### FND-12: Delete the jdtls proxy; keep stock jdtls as a bench arm
+- **Depends on:** FND-11, BENCH-03. **Model:** standard. **Size:** M. **Parallel with:** the EVAL lane.
+- **Cites:** plan §1.3, §6.1, §9.2, §16; fnd §2.1, §2.4, §2.7; ADR 0010, ADR 0028 (amended 2026-11-17), ADR 0031.
+- The owner's order of 2026-11-17: jdtls is for testing and comparison only and is never
+  included, so the multiplexing proxy built for it (`tools/jfl-jdtls`, EVAL-11: pooling,
+  per-worktree workspaces, a daemon and its lifecycle), which only made sense for shipping it,
+  is deleted with its tests, its workspace member, its `architecture.toml` row and grants (the
+  only tool crate that held `socket`, `spawn` and `sleep`), its `deny.toml` and `clippy.toml`
+  entries, the `jdtls-it` recipe and `doc/eval/jfl-jdtls.md`. `jfl-bench`'s jdtls arm keeps
+  measuring the same thing with a small launcher of its own (`src/jdtls.rs`): the pinned stock
+  jdtls, refused unless `scripts/jdtls-fetch.sh` verified it (the install's `.verified` holds the
+  pinned SHA-256), a fresh `-data` and configuration per run, the heap cap, argv only with a
+  cleared environment, under `timeout(1)`'s deadline, over the existing LSP client (which now
+  answers `workspace/configuration` itself). The JVM's pid comes from `/proc` (the `timeout`'s
+  child), so `jcmd GC.heap_info` and the RSS are kept. `--trusted-build` still gates a corpus
+  run. `scripts/jdtls-fetch.sh` stays (minimal, pinned checksum), installing beside kmp-lsp.
+- **Reuse considered:** jdtls's own `bin/jdtls` launcher (Python, and it keys `-data` on the
+  working directory unless told otherwise; the arm needs the heap cap, the deadline and the
+  cleared environment, so it builds the same JVM command line itself).
+- **Accept:**
+  - [x] `tools/jfl-jdtls` and every reference to it outside history are gone; `architecture.toml`, `deny.toml`, the clippy lists and `Cargo.lock` agree
+  - [x] `jfl-bench run jdtls fixture` runs stock jdtls with a fresh `-data` and reports the same metric names, `backend_heap_used` included (sandbox run, 2026-11-17)
+  - [x] `runner::tests::should_refuse_a_corpus_checkout_when_the_jdtls_arm_is_not_trusted` passes; an unverified install is refused (`jdtls::tests`)
+  - [x] `just check` and `just ci-parity` are green
+- **Impact:** dependency graph (a tool crate removed); bench (the jdtls arm's launcher).
+
 ### Lane XT: port mayfly's `xtask`, piece by piece
 
 ADR 0035 (the owner, 2026-11-17) supersedes ADR 0030: `tools/xtask` with a `cargo xtask` surface
@@ -611,8 +638,8 @@ and Quint, and the others the gate uses today until a card decides. Tool version
 #### XT-07: Bench and fetch scripts into xtask
 - **Depends on:** XT-06. **Model:** standard. **Size:** S. **Parallel with:** the EVAL lane.
 - **Cites:** fnd §9; ADR 0031, ADR 0035.
-- `scripts/bench-corpus.sh` and `scripts/jdtls-fetch.sh` become `cargo xtask bench-corpus` and
-  `cargo xtask jdtls-fetch`; hyperfine stays the timing tool `jfl-bench` drives.
+- `scripts/bench-corpus.sh` and `scripts/jdtls-fetch.sh` (the bench's jdtls arm's pinned fetch)
+  become `cargo xtask bench-corpus` and `cargo xtask jdtls-fetch`; hyperfine stays the timing tool `jfl-bench` drives.
 - **Accept:**
   - [ ] every case of `scripts/test-bench-corpus.sh` and `scripts/test-jdtls-fetch.sh` passes against xtask
   - [ ] `doc/bench/README.md` and `doc/bench-corpus.md` name the new commands
@@ -700,7 +727,7 @@ dispatch jobs or `(owner)` items.
 #### BENCH-03: Comparison arms and the first baseline
 - **Depends on:** BENCH-02, EVAL-11. **Model:** standard. **Size:** M. **Parallel with:** FND-06.
 - **Cites:** plan §1.3, §1.7, §9.2; ver §10; ADR 0028, ADR 0031.
-- Arms in `jfl-bench`: jdtls behind our proxy (`jfl-jdtls`, EVAL-11) driven over LSP
+- Arms in `jfl-bench`: jdtls behind our proxy (`jfl-jdtls`, EVAL-11; since FND-12 stock jdtls, started by the arm itself) driven over LSP
   (definition, references, workspace symbol, hover, `initialize`), kmp-lsp at a pinned commit, and
   the `rg` floor. In the sandbox the jdtls arm runs only on the synthetic multi-module fixture with
   `java.import.gradle.enabled=false` and `java.import.maven.enabled=false` (a jdtls import runs the
@@ -962,7 +989,11 @@ target repository is private, only aggregated reports under `doc/eval/` are comm
   - [x] two clients in one worktree share one backend and each sees only its own responses with its own ids (fake backend)
   - [x] two worktrees with the same basename get different `-data` directories
   - [x] a client that exits mid-request leaves the backend serving the others
-  - [ ] (owner) with Claude Code and three subagents in one worktree, one jdtls process runs for it
+  - [ ] (owner) with Claude Code and three subagents in one worktree, one jdtls process runs for it (withdrawn: FND-12 removed the proxy)
+- **Later removed (FND-12, 2026-11-17, the owner's order):** jdtls is for testing and comparison
+  only and never included, so the proxy and its plugin were deleted; the bench's jdtls arm starts
+  stock jdtls itself. The card stays as the record of what was built; its owner criterion is
+  withdrawn.
 - **Impact:** none (tooling; for testing and comparison only, never a shipped product: ADR 0028, amended 2026-11-17).
 
 #### EVAL-02: E0 task set from the target repository's history
@@ -988,8 +1019,8 @@ target repository is private, only aggregated reports under `doc/eval/` are comm
 - **Depends on:** EVAL-01, EVAL-11. **Model:** standard. **Size:** M. **Parallel with:** FND-06.
 - **Cites:** plan §1.3, §9.2 (E0), §2.6; ver §11; ADR 0028, ADR 0029.
 - The four arms as EVAL-01 arm files with their Harbor images: grep only (no language-server
-  plugin); the stock `jdtls-lsp` plugin; jdtls behind our proxy (`jfl-jdtls`, EVAL-11, the
-  kill-criterion baseline); `kmp-lsp` at a pinned commit. `doc/eval/e0-runbook.md`: machine setup,
+  plugin); the stock `jdtls-lsp` plugin (the kill-criterion baseline; the proxy arm went with
+  FND-12); `kmp-lsp` at a pinned commit. `doc/eval/e0-runbook.md`: machine setup,
   pinned versions of Claude Code and each arm's server, how to build the images and run each task
   three times per arm from a clean worktree, the control set (EVAL-12) included, where transcripts
   go, how to record the test-command result, how to measure 10 concurrent worktrees, and how to run
@@ -1043,11 +1074,11 @@ target repository is private, only aggregated reports under `doc/eval/` are comm
   - [ ] (owner) run on the target repository; aggregate numbers added to `doc/eval/e1-results.md`
 - **Impact:** none.
 
-#### EVAL-06: E4: jdtls at 1, 3 and 10 worktrees, stock and behind the proxy
-- **Depends on:** EVAL-11, BENCH-02. **Model:** standard. **Size:** M. **Parallel with:** FND-05, EVAL-08.
-- **Cites:** plan §1.3, §1.7, §9.2 (E4); ADR 0028, ADR 0031.
-- A `jfl-bench` suite `e4`: jdtls stock (one per client, `-data` as its launcher picks it) and
-  behind our proxy (`jfl-jdtls`), driven with `initialize` and a fixed query script over LSP, with
+#### EVAL-06: E4: stock jdtls at 1, 3 and 10 worktrees
+- **Depends on:** FND-12, BENCH-02. **Model:** standard. **Size:** M. **Parallel with:** FND-05, EVAL-08.
+- **Cites:** plan §1.3, §1.7, §9.2 (E4); ADR 0028 (amended 2026-11-17), ADR 0031.
+- A `jfl-bench` suite `e4`: stock jdtls only (one per client, as a user gets it; started by the
+  bench's launcher, `src/jdtls.rs`, and nothing of ours in between), driven with `initialize` and a fixed query script over LSP, with
   RSS over time, time to first useful answer and project import count for 1, 3 and 10 linked
   worktrees and 1 and 3 clients per worktree; runbook in `doc/eval/e4-runbook.md`. In the sandbox
   it runs on the synthetic multi-module fixture with `java.import.gradle.enabled=false` (no build
@@ -1199,13 +1230,13 @@ target repository is private, only aggregated reports under `doc/eval/` are comm
   coverage tooling.
 - **Cites:** plan §1.3, §1.7, §9.3; ADR 0009, ADR 0028, ADR 0031.
 - `doc/eval/go-no-go.md`: each criterion of plan §9.3 with its numbers and source report, the
-  kill criterion of plan §1.3 against E0 and E4 (jdtls behind our proxy as the baseline), the §1.7
+  kill criterion of plan §1.3 against E0 and E4 (stock jdtls as the baseline), the §1.7
   speed targets against BENCH-03's baseline, the recommended decision and what changes in the
   plan if it is "go with changes" (a list of task-card edits). A draft ADR (Proposed) recording
-  the decision. The kill criterion (plan §1.3): if jfastlsp cannot beat jdtls behind our proxy on
+  the decision. The kill criterion (plan §1.3): if jfastlsp cannot beat stock jdtls on
   speed with honest envelopes, the memo recommends stopping or a rescope (and lists the
-  task-card edits a rescope needs); it never recommends shipping `jfl-jdtls`, which stays a
-  testing and comparison tool (ADR 0028, amended).
+  task-card edits a rescope needs); it never recommends shipping jdtls, which stays a
+  testing and comparison arm (ADR 0028, amended).
 - **Accept:**
   - [ ] memo and draft ADR committed; every number traces to a committed report
   - [ ] (owner) go, go with changes (a rescope), or stop, and the §1.7 targets confirmed; the ADR's status says so and `doc/tasks.md` reflects it
@@ -1539,7 +1570,7 @@ plugin; LSP-06 is M1's gate and makes the bench gate blocking.
 - **Cites:** plan §2.6; ADR 0034.
 - `plugin/lsp/` (the LSP-only plugin with `.lsp.json` using only the documented keys of plan §2.6;
   the CLI plugin of IDX-14 later carries the same entry); a test that checks `.lsp.json` against the
-  documented key list; coexistence with `jdtls-lsp` and with `jfl-jdtls`'s plugin investigated and
+  documented key list; coexistence with `jdtls-lsp` investigated and
   written down in `doc/plugins.md` (which wins for `.java`, or that they cannot coexist).
 - **Accept:**
   - [ ] the key-list test passes and fails on a fixture with an unknown key

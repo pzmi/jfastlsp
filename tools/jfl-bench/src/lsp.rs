@@ -3,7 +3,8 @@
 //!
 //! The harness holds no thread or timed-wait grant (fnd §2.4), so the client is synchronous: it
 //! writes a request and reads messages until the response with that id, answering a server's
-//! own requests with `null` and handing notifications to the caller's predicate. A server that
+//! own requests ([`answer`]: `null`, or one `null` per item of a `workspace/configuration`) and
+//! handing notifications to the caller's predicate. A server that
 //! never answers is ended from outside: the arm runs it under `timeout(1)`, which closes the pipe,
 //! and the read fails with end of file. Frames are bounded (a header line, the header count and
 //! the body) before anything is allocated, because the peer is a program under test.
@@ -115,15 +116,16 @@ impl<R: BufRead, W: Write> Client<R, W> {
         self.send(&json!({"jsonrpc": "2.0", "method": method, "params": params}))
     }
 
-    /// Read the next message of any kind, answering it first with a `null` result when it is a
-    /// request from the server (jfl-jdtls answers `workspace/configuration` itself).
+    /// Read the next message of any kind, answering it first ([`answer`]) when it is a request
+    /// from the server.
     fn next(&mut self) -> Result<Value> {
         let body = read_frame(&mut self.reader)?
             .context("the server closed its output (exited, or ended by the arm's deadline)")?;
         let msg: Value = serde_json::from_slice(&body).context("decode a message")?;
-        if let (Some(id), Some(_)) = (msg.get("id"), msg.get("method")) {
+        if let (Some(id), Some(method)) = (msg.get("id"), msg.get("method")) {
+            let result = answer(method.as_str().unwrap_or(""), msg.get("params"));
             let id = id.clone();
-            self.send(&json!({"jsonrpc": "2.0", "id": id, "result": null}))?;
+            self.send(&json!({"jsonrpc": "2.0", "id": id, "result": result}))?;
         }
         Ok(msg)
     }
@@ -162,6 +164,25 @@ impl<R: BufRead, W: Write> Client<R, W> {
             return Ok((msg.get("result").cloned().unwrap_or(Value::Null), elapsed));
         }
     }
+}
+
+/// The most `workspace/configuration` items answered; a server asks for a handful.
+const MAX_CONFIGURATION_ITEMS: usize = 1024;
+
+/// The result for a server's own request: for `workspace/configuration`, one `null` per item
+/// asked (up to [`MAX_CONFIGURATION_ITEMS`]), which tells the server "no client setting" so it
+/// keeps what `initializationOptions` gave it; for anything else (`client/registerCapability`,
+/// `window/workDoneProgress/create`, ...), `null`.
+pub fn answer(method: &str, params: Option<&Value>) -> Value {
+    if method != "workspace/configuration" {
+        return Value::Null;
+    }
+    let items = params
+        .and_then(|p| p.get("items"))
+        .and_then(Value::as_array)
+        .map_or(0, Vec::len)
+        .min(MAX_CONFIGURATION_ITEMS);
+    Value::Array(vec![Value::Null; items])
 }
 
 /// Whether an answer holds something: a non-empty array, or any object.
@@ -272,6 +293,29 @@ mod tests {
         assert_eq!(out[0]["method"], "textDocument/definition");
         assert_eq!(out[0]["id"], 1);
         assert_eq!(out[1], json!({"jsonrpc":"2.0","id":"s1","result":null}));
+    }
+
+    #[test]
+    fn should_answer_one_null_per_item_when_the_server_asks_for_configuration() {
+        // given
+        let script = frames(&[
+            json!({"jsonrpc":"2.0","id":7,"method":"workspace/configuration","params":{"items":[{"section":"java"},{}]}}),
+            json!({"jsonrpc":"2.0","id":1,"result":null}),
+        ]);
+        let mut client = Client::new(Cursor::new(script), Vec::new());
+        // when
+        client.request("workspace/symbol", json!({})).unwrap();
+        // then
+        let out = sent(client.writer());
+        assert_eq!(out[1], json!({"jsonrpc":"2.0","id":7,"result":[null,null]}));
+        let many = json!({"items": vec![json!({}); MAX_CONFIGURATION_ITEMS + 5]});
+        assert_eq!(
+            answer("workspace/configuration", Some(&many))
+                .as_array()
+                .map(Vec::len),
+            Some(MAX_CONFIGURATION_ITEMS)
+        );
+        assert_eq!(answer("client/registerCapability", None), Value::Null);
     }
 
     #[test]

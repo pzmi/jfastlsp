@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Self-test of scripts/jdtls-fetch.sh (EVAL-11), without the network: a stand-in archive with its
+# Self-test of scripts/jdtls-fetch.sh (EVAL-11, BENCH-03), without the network: a stand-in archive with its
 # checksum rewritten into a copy of the script checks the verify-then-extract logic, not the
 # download. The real fetch is `bash scripts/jdtls-fetch.sh`. Also checks that the script pins the
-# version tools/jfl-jdtls/src/launch.rs expects.
+# version and digest tools/jfl-bench/src/jdtls.rs expects.
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
@@ -15,10 +15,13 @@ sha256_of() {
   else shasum -a 256 "$1" | cut -d' ' -f1; fi
 }
 
-# the pinned version agrees with the crate's
-pinned="$(sed -n 's/^JDTLS_VERSION="\(.*\)"$/\1/p' "$script")"
-crate="$(sed -n 's/^pub const JDTLS_VERSION: &str = "\(.*\)";$/\1/p' "$here/../tools/jfl-jdtls/src/launch.rs")"
-[ -n "$pinned" ] && [ "$pinned" = "$crate" ] || fail "script pins '$pinned', launch.rs '$crate'"
+# the pinned version and digest agree with the bench's launcher
+launcher="$here/../tools/jfl-bench/src/jdtls.rs"
+for name in JDTLS_VERSION JDTLS_SHA256; do
+  pinned="$(sed -n "s/^$name=\"\(.*\)\"\$/\1/p" "$script")"
+  crate="$(sed -n "s/^pub const $name: &str = \"\(.*\)\";\$/\1/p" "$launcher")"
+  [ -n "$pinned" ] && [ "$pinned" = "$crate" ] || fail "$name: script pins '$pinned', jdtls.rs '$crate'"
+done
 
 # a stand-in release
 mkdir -p "$tmp/src/plugins" "$tmp/src/config_linux"

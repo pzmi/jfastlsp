@@ -53,9 +53,9 @@ prompt, a path or a line of Java.
 
 ```bash
 # Harbor tasks: out/<arm>/tasks/<arm>__<task>/ for every task and arm, and out/<arm>/claude-settings.json.
-cargo run --locked -p jfl-eval -- harbor --tasks tasks.toml --arm grep-only.toml --arm jdtls-proxy.toml --out out
+cargo run --locked -p jfl-eval -- harbor --tasks tasks.toml --arm grep-only.toml --arm jdtls.toml --out out
 # The smoke task for one arm: out/<arm>/tasks/<arm>__smoke-lsp/.
-cargo run --locked -p jfl-eval -- smoke --arm jdtls-proxy.toml --out smoke
+cargo run --locked -p jfl-eval -- smoke --arm jdtls.toml --out smoke
 # The report over every trial under a jobs directory (Markdown, or --json).
 cargo run --locked -p jfl-eval -- report jobs/ [--json]
 # One trial's metrics and the transcript's schema names, as JSON.

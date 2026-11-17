@@ -2,13 +2,14 @@
 //!
 //! ```toml
 //! schema = 1
-//! id = "jdtls-proxy"
+//! id = "jdtls"
 //! # The Docker image: the target repository at `workdir` with a pre-warmed Gradle cache, the
 //! # language server's binaries and the plugin's files. Built owner-side (ADR 0029); pin by digest.
-//! image = "jfl-eval/jdtls-proxy@sha256:..."
+//! image = "jfl-eval/jdtls@sha256:..."
 //! workdir = "/app"                     # optional, default /app
 //! setup = ["git config --global --add safe.directory /app"]   # Dockerfile RUN lines
-//! plugins = ["jfl-jdtls@jfl-eval"]     # Claude Code `enabledPlugins` entries
+//! plugins = ["jdtls-lsp@jfl-eval"]     # Claude Code `enabledPlugins` entries: here the stock
+//!                                      # `jdtls-lsp` plugin, copied into the image's marketplace
 //!
 //! [marketplaces.jfl-eval]              # Claude Code `extraKnownMarketplaces`, as JSON
 //! source = { source = "directory", path = "/opt/jfl-eval/marketplace" }
@@ -215,10 +216,10 @@ mod tests {
 
     const GOOD: &str = r#"
 schema = 1
-id = "jdtls-proxy"
-image = "jfl-eval/jdtls-proxy:2026-11-17"
+id = "jdtls"
+image = "jfl-eval/jdtls:2026-11-17"
 setup = ["git config --global --add safe.directory /app"]
-plugins = ["jfl-jdtls@jfl-eval"]
+plugins = ["jdtls-lsp@jfl-eval"]
 
 [marketplaces.jfl-eval]
 source = { source = "directory", path = "/opt/jfl-eval/marketplace" }
@@ -241,7 +242,7 @@ ENABLE_LSP_TOOL = "1"
             arm.settings,
             serde_json::json!({
                 "permissions": {"defaultMode": "bypassPermissions"},
-                "enabledPlugins": {"jfl-jdtls@jfl-eval": true},
+                "enabledPlugins": {"jdtls-lsp@jfl-eval": true},
                 "extraKnownMarketplaces": {
                     "jfl-eval": {"source": {"source": "directory", "path": "/opt/jfl-eval/marketplace"}}
                 },

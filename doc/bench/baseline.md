@@ -33,7 +33,7 @@ noise does not change them; every absolute number is this VM's under that load.
 |:--|:--|:--|:--|
 | `rg` floor (`rg-floor`) | yes | medium, lombok (small: BENCH-02) | — |
 | kmp-lsp 0.27.0 (`kmp-lsp`), CLI end to end | yes, every query returned results (`<op>/qNN/matches`) | small, medium, lombok | large (elasticsearch is not fetched in this sandbox; owner, reference machine) |
-| jdtls behind `jfl-jdtls` (`jdtls`), over LSP | yes (heap cap 1 GiB, and again at 256 MiB) | `fixture`: the synthetic three-module project, Gradle and Maven imports off | **medium and large: owner-run** (`(owner)` item). A jdtls import of a corpus repository runs its Gradle build, which never happens in the sandbox; `jfl-bench run jdtls medium --trusted-build` is the command for a `bench.yml` dispatch job (BENCH-04) or the owner |
+| jdtls behind `jfl-jdtls` (`jdtls`), over LSP; since FND-12 the arm starts stock jdtls itself with the same JVM options (a sandbox rerun on 2026-11-17, 2 rounds, 1 GiB cap: RSS 1,027 MiB, heap used 373 MiB, definition p50 4.1 ms, hover p50 12.3 ms; not a new baseline) | yes (heap cap 1 GiB, and again at 256 MiB) | `fixture`: the synthetic three-module project, Gradle and Maven imports off | **medium and large: owner-run** (`(owner)` item). A jdtls import of a corpus repository runs its Gradle build, which never happens in the sandbox; `jfl-bench run jdtls medium --trusted-build` is the command for a `bench.yml` dispatch job (BENCH-04) or the owner |
 | Our product (`jfl`) | — | — | nothing to measure until IDX and LSP-06; the `e1` pipeline is the syntax tier's stand-in |
 
 kmp-lsp is measured through its CLI (`kmp-lsp index`, `refs`, `find`): each `refs` or `find`
@@ -43,7 +43,7 @@ request latency. Its LSP mode was not driven in this task: the CLI covers its in
 jdtls) is a follow-up for whoever extends the arm, recorded here rather than dropped. Its index covers the
 Kotlin files of the tree too, and with no `fd` installed it walked with its built-in walker.
 
-**jdtls memory is set by its configuration.** jfl-jdtls starts the JVM with `-Xms` equal to the
+**jdtls memory is set by its configuration.** The arm (through jfl-jdtls when measured; through its own launcher since FND-12) starts the JVM with `-Xms` equal to the
 heap cap (up to 1 GiB) and `-Xmx` the cap, so its RSS reflects the configured heap, not what
 jdtls needs. On the fixture with the suite's 1 GiB cap: RSS 1,044 MiB, heap committed 945 MiB,
 heap used 438 MiB (`jcmd GC.heap_info`; with that much room ParallelGC barely collects). With a
@@ -158,7 +158,7 @@ series under the same case, without `proxy`:
 
 ## Owner-run
 
-- jdtls behind the proxy on the medium corpus with its Gradle import, and the large corpus
+- stock jdtls on the medium corpus with its Gradle import, and the large corpus
   (`e1`, `rg-floor`, `kmp-lsp`) on the reference machine: `jfl-bench run jdtls medium
   --trusted-build` (or BENCH-04's dispatch job), `just bench e1 large`, `just bench kmp-lsp
   large`. Name the machine in the result.

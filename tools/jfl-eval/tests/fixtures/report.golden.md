@@ -53,7 +53,7 @@ Data quality: 2 malformed lines, 0 oversized lines, 0 cut files, 0 duplicate lin
 | fix-rounding | 2 | 1 | 0.50 | 4.50 ± 2.12 | 1704.00 ± 810.34 | 0.50 ± 0.71 | 0.00 ± 0.00 |
 | rename-entry | 1 | 1 | 1.00 | 3.00 ± 0.00 | 1131.00 ± 0.00 | 0.00 ± 0.00 | 0.00 ± 0.00 |
 
-## Arm `jdtls-proxy`
+## Arm `jdtls`
 
 3 runs · 1 successes · 1 without a verdict · success rate 0.33 (a run without a verdict counts as a failure; 0.50 over the runs with one) · transcripts: atif 1, session 2
 

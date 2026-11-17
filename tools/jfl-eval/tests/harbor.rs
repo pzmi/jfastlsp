@@ -59,10 +59,10 @@ category = "rename"
 
 const ARM: &str = r#"
 schema = 1
-id = "jdtls-proxy"
-image = "jfl-eval/jdtls-proxy:2026-11-17"
+id = "jdtls"
+image = "jfl-eval/jdtls:2026-11-17"
 setup = ["git config --global --add safe.directory /app"]
-plugins = ["jfl-jdtls@jfl-eval"]
+plugins = ["jdtls-lsp@jfl-eval"]
 
 [env]
 ENABLE_LSP_TOOL = "1"
@@ -98,7 +98,7 @@ fn should_write_a_harbor_task_per_task_and_arm_when_given_a_task_set() {
     .unwrap();
     // then
     assert!(ok, "{stderr}");
-    let task = out.join("jdtls-proxy/tasks/jdtls-proxy__fix-rounding");
+    let task = out.join("jdtls/tasks/jdtls__fix-rounding");
     let toml = std::fs::read_to_string(task.join("task.toml")).unwrap();
     assert!(toml.contains("schema_version = \"1.4\""), "{toml}");
     assert!(toml.contains("jfl_eval_task = \"fix-rounding\""), "{toml}");
@@ -112,7 +112,7 @@ fn should_write_a_harbor_task_per_task_and_arm_when_given_a_task_set() {
     );
     let dockerfile = std::fs::read_to_string(task.join("environment/Dockerfile")).unwrap();
     assert!(
-        dockerfile.contains("FROM jfl-eval/jdtls-proxy:2026-11-17\n"),
+        dockerfile.contains("FROM jfl-eval/jdtls:2026-11-17\n"),
         "{dockerfile}"
     );
     assert!(dockerfile.contains("RUN git config --global --add safe.directory /app\n"));
@@ -130,14 +130,14 @@ fn should_write_a_harbor_task_per_task_and_arm_when_given_a_task_set() {
     );
     assert!(solve.contains("/solution/known-good.patch"), "{solve}");
     assert!(
-        out.join("jdtls-proxy/tasks/jdtls-proxy__rename-entry/task.toml")
+        out.join("jdtls/tasks/jdtls__rename-entry/task.toml")
             .is_file()
     );
     let settings: serde_json::Value = serde_json::from_str(
-        &std::fs::read_to_string(out.join("jdtls-proxy/claude-settings.json")).unwrap(),
+        &std::fs::read_to_string(out.join("jdtls/claude-settings.json")).unwrap(),
     )
     .unwrap();
-    assert_eq!(settings["enabledPlugins"]["jfl-jdtls@jfl-eval"], true);
+    assert_eq!(settings["enabledPlugins"]["jdtls-lsp@jfl-eval"], true);
     assert_eq!(settings["env"]["ENABLE_LSP_TOOL"], "1");
     assert!(stdout.contains("harbor run -p "), "{stdout}");
     assert!(stdout.contains("--ak config="), "{stdout}");
@@ -163,10 +163,9 @@ fn should_strip_history_past_the_starting_commit_when_writing_the_dockerfile() {
     // then: refs deleted, reflogs expired, unreachable objects pruned, and the build fails if
     // the known-good commit survived
     assert!(ok, "{stderr}");
-    let dockerfile = std::fs::read_to_string(
-        out.join("jdtls-proxy/tasks/jdtls-proxy__fix-rounding/environment/Dockerfile"),
-    )
-    .unwrap();
+    let dockerfile =
+        std::fs::read_to_string(out.join("jdtls/tasks/jdtls__fix-rounding/environment/Dockerfile"))
+            .unwrap();
     let run_line = &dockerfile[dockerfile.find("RUN git -C /app checkout").unwrap()..];
     for step in [
         "checkout --quiet --force --detach 1111111111111111111111111111111111111111",
@@ -245,7 +244,7 @@ fn should_write_the_smoke_task_when_given_an_arm() {
         run(&["smoke", "--arm", &arm, "--out", out.to_str().unwrap()]).unwrap();
     // then
     assert!(ok, "{stderr}");
-    let task = out.join("jdtls-proxy/tasks/jdtls-proxy__smoke-lsp");
+    let task = out.join("jdtls/tasks/jdtls__smoke-lsp");
     let ledger =
         std::fs::read_to_string(task.join("environment/smoke/src/main/java/smoke/Ledger.java"))
             .unwrap();

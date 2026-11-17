@@ -59,7 +59,7 @@ deny = [
   { crate = "tree-sitter-java-orchard", wrappers = ["jfl-adapter-java", "jfl-bench"], reason = "the Java grammar is the Java adapter's (ADR 0022); the bench harness runs the E1 parse pipeline on its own (ADR 0031, amended 2026-11-17)" },
   { crate = "lsp-server", wrappers = ["jfl-adapter-lsp", "jfl-adapter-ipc"], reason = "LSP framing lives in the LSP and IPC adapters (ADR 0020, ADR 0021)" },
   { crate = "gen-lsp-types", wrappers = ["jfl-adapter-lsp"], reason = "LSP types are the LSP adapter's (ADR 0020)" },
-  { crate = "anyhow", wrappers = ["jfl-cli", "jfl-architecture", "jfl-oracle", "jfl-eval", "jfl-jdtls", "jfl-bench"], reason = "anyhow only in binaries and tools (ARCH-anyhow-in-library)" },
+  { crate = "anyhow", wrappers = ["jfl-cli", "jfl-architecture", "jfl-oracle", "jfl-eval", "jfl-bench"], reason = "anyhow only in binaries and tools (ARCH-anyhow-in-library)" },
   { crate = "lsp-types", use-instead = "gen-lsp-types", reason = "stalled since 2024 (plan §16.3)" },
   { crate = "tower-lsp", use-instead = "lsp-server", reason = "unmaintained (plan §16.3)" },
   { crate = "git2", reason = "linked-worktree gap and a C build: the git CLI (ADR 0024)" },
@@ -106,11 +106,8 @@ bypass = [
   { crate = "thiserror", build-script = "ccc38283604f99237ad2333bbe395259e29fdf2ff4e04a60a95de9e4499c09a3" },
   # zmij: rustc probe (serde_json's float formatting), cfgs only; jfl-architecture's closure.
   { crate = "zmij", build-script = "ad320bc635887879bdbbf1b9322da4a157ec2c5a4243bd7c2cf9b6884a3b2a41" },
-  # EVAL-11 (ADR 0028, amended 2026-11-17): jfl-jdtls reuses the serde and serde_json entries above,
-  # and adds rustix (geteuid, the peer uid, process-group kill) with libc, its macOS backend.
-  # rustix: rustc feature probes (compiles probe snippets with $RUSTC), cfgs only; jfl-jdtls's closure.
-  { crate = "rustix", build-script = "f7609b919173e7121493266d0f89db724a1e47bb105ebd05397f869639603eec" },
-  # libc: rustc version probe and target cfgs, cfgs only; rustix's libc backend (macOS).
+  # libc: rustc version probe and target cfgs, cfgs only; cpufeatures's (sha2 and blake3) on
+  # aarch64. Added by EVAL-11 for rustix, which left the graph with jfl-jdtls (FND-12).
   { crate = "libc", build-script = "e70593206df4d2a3138eab463567e0ae8f91c1bea565da4ab5370ea8986840ac" },
   # BENCH-02 (ADR 0031, amended 2026-11-17): jfl-bench reuses the serde and serde_json entries above
   # and adds the E1 pipeline's crates. Each script below was read at the version pinned in Cargo.lock.

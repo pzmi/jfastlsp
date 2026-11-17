@@ -23,7 +23,6 @@ members = [
     "tools/jfl-architecture",
     "tools/jfl-oracle",
     "tools/jfl-eval",
-    "tools/jfl-jdtls",
     "tools/jfl-bench",
     "tools/xtask",
 ]

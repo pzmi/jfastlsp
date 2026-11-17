@@ -276,7 +276,7 @@ at the end (ADR 0031, BENCH lane).
    criterion for in-process benches; JSON results with machine facts. **Metrics:** cold and warm
    index time, files per second, RSS, the marginal cost of each extra worktree (1, 3, 10), query
    p50 and p95 per operation, freshness lag after an edit, `initialize` against a warm daemon,
-   reconcile after a checkout. **Arms:** `rg` as the floor, jdtls behind our proxy, kmp-lsp at a
+   reconcile after a checkout. **Arms:** `rg` as the floor, stock jdtls, kmp-lsp at a
    pinned commit (BENCH-03).
 4. **Every product task** runs its suites on the corpus (small at least) and reports the metrics
    it changes in its report and commit body.

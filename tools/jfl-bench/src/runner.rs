@@ -38,8 +38,9 @@ pub struct Args {
     pub scratch: PathBuf,
     /// The kmp-lsp binary for the kmp-lsp arm (default: where `scripts/kmp-lsp-fetch.sh` puts it).
     pub kmp_lsp: Option<PathBuf>,
-    /// The `jfl-jdtls` binary for the jdtls arm (default: beside this binary).
-    pub jfl_jdtls: Option<PathBuf>,
+    /// The verified jdtls install for the jdtls arm (default: where `scripts/jdtls-fetch.sh`
+    /// puts it, [`crate::jdtls::default_home`]).
+    pub jdtls_home: Option<PathBuf>,
     /// Let the jdtls arm import a corpus checkout's build (runs its Gradle build: a dispatch job
     /// or the owner, never the sandbox).
     pub trusted_build: bool,
@@ -238,7 +239,7 @@ fn jdtls_suite(
         )));
     }
     // jdtls writes Eclipse metadata into the project it opens: the fixture is opened as a scratch
-    // copy (a git root, as jfl-jdtls expects), never in this repository.
+    // copy (a git root, as an LSP client's workspace usually is), never in this repository.
     let root = if fixture {
         let copy = args.scratch.join("fixture");
         copy_tree(&args.corpus_root, &copy)?;
@@ -251,15 +252,19 @@ fn jdtls_suite(
         );
         args.corpus_root.clone()
     };
-    let jfl_jdtls = match &args.jfl_jdtls {
-        Some(p) => p.clone(),
-        None => args.exe.with_file_name("jfl-jdtls"),
-    };
+    let jdtls_home = args
+        .jdtls_home
+        .clone()
+        .or_else(crate::jdtls::default_home)
+        .context("no --jdtls-home and no HOME to find scripts/jdtls-fetch.sh's install under")?;
+    let java = crate::jdtls::java()
+        .context("no java for the jdtls arm: set JAVA_HOME or put java (21 or newer) on PATH")?;
     arms::jdtls_suite(
         &arms::JdtlsRun {
             size: &args.size,
             root: &root,
-            jfl_jdtls: &jfl_jdtls,
+            jdtls_home: &jdtls_home,
+            java: &java,
             scratch: &args.scratch,
             trusted_build: args.trusted_build,
             warmup: args.suite.run.warmup,
@@ -714,14 +719,14 @@ mod tests {
             exe: scratch.join("jfl-bench"),
             scratch: scratch.join("scratch"),
             kmp_lsp: None,
-            jfl_jdtls: Some(scratch.join("no-such-jfl-jdtls")),
+            jdtls_home: Some(scratch.join("no-such-jdtls")),
             trusted_build: false,
         }
     }
 
     #[test]
     fn should_refuse_a_corpus_checkout_when_the_jdtls_arm_is_not_trusted() {
-        // given: a corpus size, no --trusted-build, and no jfl-jdtls that could be started
+        // given: a corpus size, no --trusted-build, and no jdtls that could be started
         let scratch = std::env::temp_dir().join(format!("jfl-bench-refuse-{}", std::process::id()));
         let args = jdtls_args("medium", &scratch);
         let j = args.suite.jdtls.clone().unwrap();

@@ -74,7 +74,7 @@ allowlist or a pinned shape, never a list of bad patterns (fnd §3).
 
 - **Dependency law** (plan §6.3, fnd §2): cli → composition → adapters → application → pure
   crates. Adapters never name a sibling adapter, composition or the CLI. Production crates never
-  depend on test-only crates; `jfl-oracle`, `jfl-eval`, `jfl-jdtls` and `jfl-bench` import no
+  depend on test-only crates; `jfl-oracle`, `jfl-eval` and `jfl-bench` import no
   production crate. A new crate gets its `members`, `architecture.toml`, `deny.toml` and
   `clippy.toml` entries in the same commit. Fix an architecture failure in the structure, never by
   loosening the policy.

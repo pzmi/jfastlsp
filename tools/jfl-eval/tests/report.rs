@@ -90,7 +90,7 @@ fn should_leave_out_every_planted_string_when_the_input_carries_them() {
     // when
     let (_, markdown, _) = run(&["report", &runs_dir()]).unwrap();
     let (_, json, _) = run(&["report", &runs_dir(), "--json"]).unwrap();
-    let trial = fixtures().join("runs/job-jdtls/jdtls-proxy__fix-rounding__bbb1");
+    let trial = fixtures().join("runs/job-jdtls/jdtls__fix-rounding__bbb1");
     let (_, inspect, _) = run(&["inspect", trial.to_str().unwrap()]).unwrap();
     // then
     for output in [&markdown, &json, &inspect] {
@@ -107,7 +107,7 @@ fn should_leave_out_every_planted_string_when_the_input_carries_them() {
 #[test]
 fn should_print_the_trials_metrics_and_shapes_when_inspecting_one() {
     // given
-    let trial = fixtures().join("runs/job-jdtls/jdtls-proxy__fix-rounding__bbb1");
+    let trial = fixtures().join("runs/job-jdtls/jdtls__fix-rounding__bbb1");
     // when
     let (ok, stdout, stderr) = run(&["inspect", trial.to_str().unwrap()]).unwrap();
     // then
