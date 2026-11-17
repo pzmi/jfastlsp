@@ -2,7 +2,10 @@
 //! fixture workspace under `fixtures/` must fail the tool that enforces its rule, and each has a
 //! positive control showing that the failure is the rule's and not a broken fixture. The `just`
 //! cases run the repository's own `justfile` on a child process, so no test steers its own
-//! environment. FND-07 builds the rest of `jfl-architecture` around these.
+//! environment; since XT-01 its gate recipes delegate to xtask (scripts/xtask.sh), and the cases
+//! that need a scratch repository, a scratch CARGO_HOME or a stage over a fixture workspace moved
+//! to tools/xtask/tests/ (preflight.rs, stages.rs) with their names. FND-07 builds the rest of
+//! `jfl-architecture` around these.
 //!
 //! Every case runs a nested cargo, clippy, cargo-deny or just; `.config/nextest.toml` puts them in
 //! the `nested-cargo` test group. `just` and `cargo-deny` come from PATH, which the justfile's
@@ -63,10 +66,11 @@ fn clippy(fixture_name: &str, conf_dir: &Path, case: &str) -> Result<Output, Box
         .output()?)
 }
 
-/// The variables a gate run may inherit (the justfile's `_preflight` allowlist), passed through
-/// to a child `just`; everything else, the test runner's own `CARGO_*` and `NEXTEST_*` included,
-/// is cleared, so a case sets exactly the steering it tests.
-const PASSED_THROUGH: [&str; 7] = [
+/// The variables a gate run may inherit (the preflight's allowlist), passed through to a child
+/// `just`; everything else, the test runner's own `CARGO_*` and `NEXTEST_*` included, is cleared,
+/// so a case sets exactly the steering it tests. CARGO_TARGET_DIR is passed so scripts/xtask.sh
+/// finds the xtask the gate built rather than building one from scratch.
+const PASSED_THROUGH: [&str; 8] = [
     "PATH",
     "HOME",
     "RUSTUP_HOME",
@@ -74,6 +78,7 @@ const PASSED_THROUGH: [&str; 7] = [
     "CARGO_BUILD_JOBS",
     "CARGO_INCREMENTAL",
     "CARGO_HTTP_CAINFO",
+    "CARGO_TARGET_DIR",
 ];
 
 /// The repository's justfile, run on a child process with the given working directory and a
@@ -156,41 +161,6 @@ fn should_pass_clippy_when_the_sleeping_crate_holds_the_sleep_grant() -> TestRes
 
     // when
     let output = clippy("sleep-in-test", &granted, "sleep-control")?;
-
-    // then
-    assert!(output.status.success(), "{}", printed(&output));
-    Ok(())
-}
-
-#[test]
-fn should_fail_the_nostd_stage_when_a_pure_crate_depends_on_a_std_crate() -> TestResult {
-    // given
-    let workspace = fixture("pure-depends-on-std");
-
-    // when
-    let output = just(&workspace)
-        .arg("nostd")
-        .env("CARGO_TARGET_DIR", fresh_target("nostd")?)
-        .output()?;
-
-    // then
-    let text = printed(&output);
-    assert!(!output.status.success(), "nostd passed:\n{text}");
-    assert!(text.contains("can't find crate for `std`"), "{text}");
-    Ok(())
-}
-
-#[test]
-fn should_build_on_the_host_when_a_pure_crate_depends_on_a_std_crate() -> TestResult {
-    // given
-    let workspace = fixture("pure-depends-on-std");
-
-    // when
-    let output = Command::new("cargo")
-        .args(["build", "--locked", "-p", "pure"])
-        .current_dir(&workspace)
-        .env("CARGO_TARGET_DIR", fresh_target("nostd-host")?)
-        .output()?;
 
     // then
     assert!(output.status.success(), "{}", printed(&output));
@@ -331,82 +301,6 @@ fn should_refuse_the_gate_when_an_ancestor_cargo_config_sets_rustflags() -> Test
 }
 
 #[test]
-fn should_refuse_the_gate_when_a_cargo_config_steers_in_another_toml_form() -> TestResult {
-    // given: the forms FND-02's review found past the line grep
-    let forms = [
-        "profile = { dev = { overflow-checks = false } }\n",
-        "build = { rustflags = [\"--cap-lints=allow\"] }\n",
-        "\"build\".rustflags = [\"--cap-lints=allow\"]\n",
-        "[ \"profile\".dev ]\noverflow-checks = false\n",
-        "env = { RUSTC_BOOTSTRAP = \"1\" }\n",
-        // FND-07's review: TOML literal (single-quoted) keys.
-        "['profile'.dev]\noverflow-checks = false\n",
-        "'profile' = { dev = { overflow-checks = false } }\n",
-        "[build]\n'rustflags' = [\"--cap-lints=allow\"]\n",
-    ];
-    let mut accepted = Vec::new();
-
-    // when
-    for (index, form) in forms.iter().enumerate() {
-        let cargo_home = fresh_target(&format!("cargo-home-form-{index}"))?;
-        std::fs::write(cargo_home.join("config.toml"), form)?;
-        let output = just(&repo_root())
-            .arg("_preflight")
-            .env("CARGO_HOME", &cargo_home)
-            .output()?;
-        if output.status.success() {
-            accepted.push(*form);
-        }
-    }
-
-    // then
-    assert!(accepted.is_empty(), "preflight accepted {accepted:?}");
-    Ok(())
-}
-
-#[test]
-fn should_refuse_the_gate_when_the_cargo_home_config_sets_a_rustc_wrapper() -> TestResult {
-    // given
-    let cargo_home = fresh_target("cargo-home-config")?;
-    std::fs::write(
-        cargo_home.join("config.toml"),
-        "[build]\nrustc-wrapper = \"sccache\"\n",
-    )?;
-
-    // when
-    let output = just(&repo_root())
-        .arg("_preflight")
-        .env("CARGO_HOME", &cargo_home)
-        .output()?;
-
-    // then
-    let text = printed(&output);
-    assert!(!output.status.success(), "preflight passed:\n{text}");
-    assert!(text.contains("config.toml"), "{text}");
-    Ok(())
-}
-
-#[test]
-fn should_pass_preflight_when_a_cargo_config_sets_only_network_and_job_options() -> TestResult {
-    // given
-    let cargo_home = fresh_target("cargo-home-network")?;
-    std::fs::write(
-        cargo_home.join("config.toml"),
-        "[net]\ngit-fetch-with-cli = true\n\n[build]\njobs = 2\ntarget-dir = \"elsewhere\"\n",
-    )?;
-
-    // when
-    let output = just(&repo_root())
-        .arg("_preflight")
-        .env("CARGO_HOME", &cargo_home)
-        .output()?;
-
-    // then
-    assert!(output.status.success(), "{}", printed(&output));
-    Ok(())
-}
-
-#[test]
 fn should_pass_preflight_when_nothing_steers_the_build() -> TestResult {
     // given: the allowlisted values only
     let mut preflight = just(&repo_root());
@@ -421,47 +315,6 @@ fn should_pass_preflight_when_nothing_steers_the_build() -> TestResult {
 
     // then
     assert!(output.status.success(), "{}", printed(&output));
-    Ok(())
-}
-
-#[test]
-fn should_fail_the_unit_tests_stage_when_a_test_passes_only_on_a_retry() -> TestResult {
-    // given: the fixture's own nextest config asks for three retries
-    let workspace = fixture("flaky-test");
-
-    // when
-    let output = just(&workspace)
-        .arg("unit-tests")
-        .env("CARGO_TARGET_DIR", fresh_target("flaky-stage")?)
-        .output()?;
-
-    // then
-    let text = printed(&output);
-    assert!(!output.status.success(), "unit-tests passed:\n{text}");
-    assert!(text.contains("FAIL"), "{text}");
-    Ok(())
-}
-
-#[test]
-fn should_pass_plain_nextest_when_the_flaky_test_is_retried() -> TestResult {
-    // given: the control, nextest without the gate's flags, without the runner's own profile
-    // (CI's NEXTEST_PROFILE=ci names a profile the fixture does not have) and without colour
-    // (CI's CARGO_TERM_COLOR=always splits "1 flaky" with escape codes)
-    let workspace = fixture("flaky-test");
-
-    // when
-    let output = Command::new("cargo")
-        .args(["nextest", "run", "--locked", "--color", "never"])
-        .current_dir(&workspace)
-        .env("CARGO_TARGET_DIR", fresh_target("flaky-plain")?)
-        .env_remove("NEXTEST_RETRIES")
-        .env_remove("NEXTEST_PROFILE")
-        .output()?;
-
-    // then
-    let text = printed(&output);
-    assert!(output.status.success(), "{text}");
-    assert!(text.contains("1 flaky"), "{text}");
     Ok(())
 }
 
@@ -491,27 +344,6 @@ fn should_fail_clippy_when_a_crate_without_grants_uses_the_paths_a_review_found_
             "{path}:\n{text}"
         );
     }
-    Ok(())
-}
-
-#[test]
-fn should_fail_the_clippy_stage_when_a_list_names_a_path_that_does_not_exist() -> TestResult {
-    // given: a clean crate whose clippy.toml has a mistyped std path without allow-invalid
-    let workspace = fixture("typo-in-list");
-
-    // when
-    let output = just(&workspace)
-        .arg("clippy")
-        .env("CARGO_TARGET_DIR", fresh_target("typo-in-list")?)
-        .output()?;
-
-    // then
-    let text = printed(&output);
-    assert!(!output.status.success(), "clippy stage passed:\n{text}");
-    assert!(
-        text.contains("`std::thread::sleeep` does not refer to a"),
-        "{text}"
-    );
     Ok(())
 }
 
@@ -594,212 +426,6 @@ fn should_name_the_valid_stages_when_check_only_gets_an_unknown_one() -> TestRes
     assert!(
         text.contains("valid stages: fmt-check architecture clippy nostd"),
         "{text}"
-    );
-    Ok(())
-}
-
-/// A scratch git repository holding a copy of the repository's justfile, rust-toolchain.toml,
-/// mise.toml, mise.lock and the tool configuration check the justfile runs before mise, so a
-/// case can commit the file `_preflight` must refuse without touching the real tree
-/// (`_preflight` takes the justfile's directory as the repository root).
-fn scratch_repository(case: &str) -> Result<PathBuf, Box<dyn Error>> {
-    let root = fresh_target(case)?.join("repo");
-    std::fs::create_dir_all(root.join("scripts"))?;
-    for file in [
-        "justfile",
-        "rust-toolchain.toml",
-        "mise.toml",
-        "mise.lock",
-        "scripts/tool-config-check.sh",
-    ] {
-        std::fs::copy(repo_root().join(file), root.join(file))?;
-    }
-    let init = Command::new("git")
-        .args(["init", "-q"])
-        .current_dir(&root)
-        .output()?;
-    assert!(init.status.success(), "{}", printed(&init));
-    Ok(root)
-}
-
-/// `_preflight` of the scratch repository's own justfile, run there.
-fn scratch_preflight(root: &Path) -> Command {
-    let mut command = Command::new("just");
-    command
-        .arg("--justfile")
-        .arg(root.join("justfile"))
-        .arg("--working-directory")
-        .arg(root)
-        .env_clear();
-    for name in PASSED_THROUGH {
-        if let Some(value) = std::env::var_os(name) {
-            command.env(name, value);
-        }
-    }
-    command.arg("_preflight");
-    command
-}
-
-/// The reviewer's runner (the FND-05 checkpoint's N1): TOML unicode escapes spell `target` and
-/// `runner`, which a line grep never matched; the runner passes every test without running it.
-const ESCAPED_RUNNER: &str = "[\"t\\u0061rget\".x86_64-unknown-linux-gnu]\n\"r\\u0075nner\" = [\"bash\", \"-c\", \"exit 0\"]\n";
-
-#[test]
-fn should_pass_preflight_when_the_scratch_repository_holds_only_the_gate_files() -> TestResult {
-    // given: the control for the scratch cases below
-    let root = scratch_repository("scratch-clean")?;
-
-    // when
-    let output = scratch_preflight(&root).output()?;
-
-    // then
-    assert!(output.status.success(), "{}", printed(&output));
-    Ok(())
-}
-
-#[test]
-fn should_refuse_the_gate_when_the_repository_holds_any_cargo_config() -> TestResult {
-    // given: the escaped runner at the root, and an alias in a nested directory
-    let mut accepted = Vec::new();
-    let cases = [
-        (".cargo/config.toml", ESCAPED_RUNNER),
-        (
-            "crates/x/.cargo/config",
-            "[\"\\u0061lias\"]\nxyzzy = \"build\"\n",
-        ),
-        (".cargo/config.toml", "[net]\nretry = 2\n"),
-    ];
-
-    // when
-    for (index, (path, contents)) in cases.iter().enumerate() {
-        let root = scratch_repository(&format!("repo-cargo-config-{index}"))?;
-        let file = root.join(path);
-        std::fs::create_dir_all(file.parent().ok_or("no parent")?)?;
-        std::fs::write(&file, contents)?;
-        let output = scratch_preflight(&root).output()?;
-        if output.status.success() || !printed(&output).contains(path) {
-            accepted.push(format!("{path}: {}", printed(&output)));
-        }
-    }
-
-    // then: inside the repository the allowlist is empty, a harmless key included
-    assert!(accepted.is_empty(), "preflight accepted {accepted:?}");
-    Ok(())
-}
-
-#[test]
-fn should_refuse_the_gate_when_a_cargo_home_config_leaves_the_plain_shape() -> TestResult {
-    // given: the escaped runner, an escaped alias table and a dotted key in CARGO_HOME
-    let forms = [
-        ESCAPED_RUNNER,
-        "[\"\\u0061lias\"]\nxyzzy = \"build\"\n",
-        "net.retry = 2\n",
-        "[net]\nretry = \"\\u0032\"\n",
-        "[paths]\n",
-        "[source.crates-io]\nreplace-with = \"vendored\"\n",
-    ];
-    let mut accepted = Vec::new();
-
-    // when
-    for (index, form) in forms.iter().enumerate() {
-        let cargo_home = fresh_target(&format!("cargo-home-shape-{index}"))?;
-        std::fs::write(cargo_home.join("config.toml"), form)?;
-        let output = just(&repo_root())
-            .arg("_preflight")
-            .env("CARGO_HOME", &cargo_home)
-            .output()?;
-        if output.status.success() {
-            accepted.push(*form);
-        }
-    }
-
-    // then
-    assert!(accepted.is_empty(), "preflight accepted {accepted:?}");
-    Ok(())
-}
-
-#[test]
-fn should_refuse_the_gate_when_mise_toml_has_more_than_tools() -> TestResult {
-    // given: the reviewer's N6, an [env] that would reach every tool through its shim
-    let root = scratch_repository("mise-env")?;
-    let mise = root.join("mise.toml");
-    let mut text = std::fs::read_to_string(&mise)?;
-    text.push_str("\n[env]\nNEXTEST_PROFILE = \"evil\"\n");
-    std::fs::write(&mise, text)?;
-
-    // when
-    let output = scratch_preflight(&root).output()?;
-
-    // then
-    let text = printed(&output);
-    assert!(!output.status.success(), "preflight passed:\n{text}");
-    assert!(text.contains("mise.toml"), "{text}");
-    Ok(())
-}
-
-#[test]
-fn should_refuse_the_gate_when_another_mise_config_sits_in_the_repository() -> TestResult {
-    // given: a second configuration mise would load, tools only
-    let root = scratch_repository("mise-local")?;
-    std::fs::write(root.join("mise.local.toml"), "[tools]\njust = \"1.59.0\"\n")?;
-
-    // when
-    let output = scratch_preflight(&root).output()?;
-
-    // then
-    let text = printed(&output);
-    assert!(!output.status.success(), "preflight passed:\n{text}");
-    assert!(text.contains("mise.local.toml"), "{text}");
-    Ok(())
-}
-
-#[test]
-fn should_run_nothing_from_mise_toml_when_the_gate_meets_the_reviewer_s_payload() -> TestResult {
-    // given: the FND-08 re-verification's F3, a mise.toml whose [env] sources a script and
-    // expands an exec template, in a tree mise trusts (as land.sh used to make it); mise runs
-    // both as it loads the file, which the justfile's top-level `mise bin-paths` did before
-    // `_preflight` could look
-    let root = scratch_repository("mise-payload")?;
-    let sourced = root.join("ran-source");
-    let executed = root.join("ran-exec");
-    std::fs::write(
-        root.join("payload.sh"),
-        format!("touch '{}'\n", sourced.display()),
-    )?;
-    let mise = root.join("mise.toml");
-    let mut text = std::fs::read_to_string(&mise)?;
-    text.push_str(&format!(
-        "\n[env]\n_.source = \"{{{{config_root}}}}/payload.sh\"\nX = \"{{{{exec(command='touch {}')}}}}\"\n",
-        executed.display()
-    ));
-    std::fs::write(&mise, text)?;
-
-    // when
-    let output = scratch_preflight(&root)
-        .env("MISE_TRUSTED_CONFIG_PATHS", &root)
-        .output()?;
-    let ran_through_the_gate = (sourced.try_exists()?, executed.try_exists()?);
-    let control = Command::new("mise")
-        .arg("bin-paths")
-        .current_dir(&root)
-        .env_clear()
-        .envs(
-            PASSED_THROUGH
-                .iter()
-                .filter_map(|n| std::env::var_os(n).map(|v| (*n, v))),
-        )
-        .env("MISE_TRUSTED_CONFIG_PATHS", &root)
-        .output()?;
-
-    // then: the gate refused before mise loaded the file; mise itself, the control, runs both
-    let printed_text = printed(&output);
-    assert!(!output.status.success(), "the gate passed:\n{printed_text}");
-    assert!(printed_text.contains("mise.toml"), "{printed_text}");
-    assert_eq!(ran_through_the_gate, (false, false), "{printed_text}");
-    assert!(
-        sourced.try_exists()? && executed.try_exists()?,
-        "the control did not run the payload, so the case proves nothing:\n{}",
-        printed(&control)
     );
     Ok(())
 }

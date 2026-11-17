@@ -3,10 +3,12 @@
 //! Every check is an allowlist or a pinned shape, never a list of bad patterns (fnd §3):
 //!
 //! - **the pin manifest** [`PINS`]: one SHA-256 per justfile recipe of the gate's closure (the
-//!   roots [`ROOTS`], every stage of `check_stages` and their header dependencies), one for the
-//!   justfile's top-level lines (settings, exports, variables, aliases), and one per file of
-//!   [`GATE_FILES`] and per `scripts/test-*.sh` (which `script-tests` runs by glob; FND-09); an
-//!   entry missing, extra or different fails, naming the line to write. A `scripts/...` path
+//!   roots [`ROOTS`], every stage of xtask's catalog, `list --json`, and their header
+//!   dependencies), one for the justfile's top-level lines (settings, exports, variables,
+//!   aliases), one per file of [`GATE_FILES`], per `scripts/test-*.sh` (which `script-tests` runs
+//!   by glob; FND-09) and per xtask composition source ([`XTASK_SOURCES`]: the manifest and every
+//!   file under `src/`, where the stage catalog, its commands and the preflight live since XT-01);
+//!   an entry missing, extra or different fails, naming the line to write. A `scripts/...` path
 //!   named in a pinned recipe or a top-level line must be pinned;
 //! - **`.config/nextest.toml`**: only the keys of [`nextest_shape`] (no `default-filter`, no
 //!   `[scripts]`, `retries` 0, overrides that set a test group and nothing else);
@@ -17,13 +19,15 @@
 //!   each platform a checksummed GitHub release asset (FND-09);
 //! - **the implicit configuration of the gate's tools** (FND-09): the root's dot-entries and
 //!   `mise*` entries, `.github/`'s entries and `.config/`'s entries are allowlists
-//!   ([`ROOT_ALLOWED`], [`GITHUB_ALLOWED`], [`CONFIG_ALLOWED`]; `scripts/tool-config-check.sh`
-//!   holds the same lists and runs before any tool), and no `rustfmt.toml` may exist;
+//!   ([`ROOT_ALLOWED`], [`GITHUB_ALLOWED`], [`CONFIG_ALLOWED`]; xtask's `tool-config`,
+//!   tools/xtask/src/tool_config.rs, holds the same lists and runs before any tool), and no
+//!   `rustfmt.toml` may exist;
 //! - **`rust-toolchain.toml`**: only `[toolchain]` with `channel`, `profile`, `components` and
 //!   `targets` (no `path`), and no other toolchain file in the tree;
 //! - **no cargo configuration file** (`.cargo/config`, `.cargo/config.toml`) anywhere in the tree:
-//!   the allowlist of committed cargo configuration is empty (the `_preflight` recipe refuses one
-//!   before any cargo runs; this is the second line).
+//!   the allowlist of committed cargo configuration is empty (xtask's preflight refuses one before
+//!   any stage's cargo runs, and scripts/xtask.sh builds xtask from outside the tree; this is the
+//!   second line).
 //!
 //! Comment lines at column 0 of the justfile are documentation and are not hashed; a comment
 //! inside a recipe body is.
@@ -50,13 +54,14 @@ pub const NEXTEST: &str = ".config/nextest.toml";
 pub const MISE: &str = "mise.toml";
 /// rustup's toolchain file.
 pub const TOOLCHAIN: &str = "rust-toolchain.toml";
-/// The justfile recipes the gate starts from, besides every stage of `check_stages`.
-pub const ROOTS: [&str; 5] = [
+/// The justfile recipes the gate starts from, besides the recipe of every stage of xtask's catalog.
+pub const ROOTS: [&str; 6] = [
     "quick",
     "check",
     "check-only",
     "ci-parity",
     "platform-tests",
+    "_preflight",
 ];
 /// mise's lockfile.
 pub const MISE_LOCK: &str = "mise.lock";
@@ -64,7 +69,8 @@ pub const MISE_LOCK: &str = "mise.lock";
 /// reads by path (`.github/zizmor.yml`, `deny.toml`) and the tool pins (`mise.toml`, whose new
 /// tool would land on the stages' PATH, and `mise.lock`; FND-09), and what decides landing and
 /// guards a session (`scripts/land.sh`, `scripts/dco-check.sh`, the SessionStart and Stop hooks;
-/// the FND-09 review's G5). Every `scripts/test-*.sh` is
+/// the FND-09 review's G5), and the launcher that builds and runs xtask (`scripts/xtask.sh`,
+/// XT-01). Every `scripts/test-*.sh` and every xtask composition source ([`XTASK_SOURCES`]) is
 /// pinned too, found by [`gate_files`]. Not pinned, each for its reason (fnd §3.6):
 /// `architecture.toml` and the `clippy.toml` files change with every new crate and are held to
 /// their schema by the architecture test itself (`ARCH-policy-schema`, `ARCH-clippy-lists`);
@@ -87,11 +93,15 @@ pub const GATE_FILES: [&str; 17] = [
     "scripts/private-names-check.sh",
     "scripts/private-names-fold.pl",
     "scripts/secrets-check.sh",
-    "scripts/tool-config-check.sh",
     "scripts/workflows-check.sh",
+    "scripts/xtask.sh",
 ];
+/// The xtask composition (XT-01, ADR 0035): its manifest and every file under its `src/` (the
+/// stage catalog, each stage's command, the preflight and the tool configuration check), pinned
+/// whole by [`gate_files`]; its tests are code under review, like this checker's.
+pub const XTASK_SOURCES: (&str, &str) = ("tools/xtask/Cargo.toml", "tools/xtask/src");
 /// The entries allowed at the root among the names that start with a dot or with `mise`
-/// (`scripts/tool-config-check.sh` holds the same list): `.shellcheckrc`, `.tool-versions`,
+/// (tools/xtask/src/tool_config.rs holds the same list): `.shellcheckrc`, `.tool-versions`,
 /// `.mise.toml`, `mise.local.toml`, `.pinact.yaml`, `.yamllint`, `.envrc` and the like are
 /// refused, since a tool of the gate would read them without a command line naming them.
 pub const ROOT_ALLOWED: [&str; 15] = [
@@ -126,11 +136,11 @@ pub const CONFIG_ALLOWED: [&str; 2] = ["gate.sha256", "nextest.toml"];
 /// The manifest's name for the justfile's top-level lines.
 pub const TOP_LEVEL: &str = "justfile::(top-level)";
 
-/// Runs every check of the rule over `tree`.
-pub fn check(tree: &dyn Tree) -> Vec<Finding> {
+/// Runs every check of the rule over `tree`, with `catalog` the JSON of xtask's `list --json`.
+pub fn check(tree: &dyn Tree, catalog: &str) -> Vec<Finding> {
     let mut findings = Vec::new();
     let files = tree.files_under("");
-    pins(tree, &mut findings);
+    pins(tree, catalog, &mut findings);
     match tree.read(NEXTEST) {
         Some(text) => findings.extend(nextest_shape(&text)),
         None => findings.push(Finding::new(RULE, NEXTEST, "the file is missing")),
@@ -244,16 +254,17 @@ fn stray(path: &str) -> Option<&'static str> {
     None
 }
 
-/// The pin manifest's expected lines, computed from the tree: `(entry, sha256 hex)`.
-pub fn expected_pins(tree: &dyn Tree) -> Result<BTreeMap<String, String>, Finding> {
+/// The pin manifest's expected lines, computed from the tree and the stage catalog (the JSON of
+/// xtask's `list --json`): `(entry, sha256 hex)`.
+pub fn expected_pins(tree: &dyn Tree, catalog: &str) -> Result<BTreeMap<String, String>, Finding> {
     let justfile = tree
         .read(ci::JUSTFILE)
         .ok_or_else(|| Finding::new(RULE, ci::JUSTFILE, "the file is missing"))?;
-    let stages = ci::check_stages(&justfile).ok_or_else(|| {
+    let stages = ci::check_stages(catalog).map_err(|finding| {
         Finding::new(
             RULE,
-            ci::JUSTFILE,
-            "no `check_stages := \"...\"` line: the gate's recipes are unknown",
+            finding.at,
+            format!("{}: the gate's recipes are unknown", finding.message),
         )
     })?;
     let parsed = Justfile::parse(&justfile);
@@ -294,10 +305,13 @@ pub fn expected_pins(tree: &dyn Tree) -> Result<BTreeMap<String, String>, Findin
     Ok(pins)
 }
 
-/// [`GATE_FILES`] and every `scripts/test-*.sh` of the tree (the `script-tests` stage runs them
-/// by glob, so a new one is a change of the gate), sorted.
+/// [`GATE_FILES`], every `scripts/test-*.sh` of the tree (the `script-tests` stage runs them by
+/// glob, so a new one is a change of the gate) and every xtask composition source
+/// ([`XTASK_SOURCES`]: a new module of xtask is a change of the gate too), sorted.
 pub fn gate_files(tree: &dyn Tree) -> Vec<String> {
     let mut files: BTreeSet<String> = GATE_FILES.iter().map(|f| (*f).to_owned()).collect();
+    files.insert(XTASK_SOURCES.0.to_owned());
+    files.extend(tree.files_under(XTASK_SOURCES.1));
     for path in tree.files_under("scripts") {
         let name = path.strip_prefix("scripts/").unwrap_or_default();
         if name.starts_with("test-") && name.ends_with(".sh") && !name.contains('/') {
@@ -307,8 +321,8 @@ pub fn gate_files(tree: &dyn Tree) -> Vec<String> {
     files.into_iter().collect()
 }
 
-fn pins(tree: &dyn Tree, findings: &mut Vec<Finding>) {
-    let expected = match expected_pins(tree) {
+fn pins(tree: &dyn Tree, catalog: &str, findings: &mut Vec<Finding>) {
+    let expected = match expected_pins(tree, catalog) {
         Ok(expected) => expected,
         Err(finding) => {
             findings.push(finding);

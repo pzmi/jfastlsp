@@ -1,11 +1,13 @@
-//! `ARCH-ci-lockstep` (fnd §7.2 rule 3): `ci.yml`, the `justfile` and `required-checks.md` say the
-//! same thing, and no job of `ci.yml` can fail without failing `Required`.
+//! `ARCH-ci-lockstep` (fnd §7.2 rule 3): `ci.yml`, the `justfile`, xtask's stage catalog and
+//! `required-checks.md` say the same thing, and no job of `ci.yml` can fail without failing
+//! `Required`.
 //!
 //! What fails, each a finding of [`RULE`]:
 //!
-//! - a stage of `just check` (the justfile's `check_stages`) run by no job, or by two (or twice in
-//!   one), counting `just check-only <stage>...` and `just <stage>`; a `check-only` argument that
-//!   is not a stage;
+//! - a stage of `check` (xtask's catalog, `bash scripts/xtask.sh list --json`, read by
+//!   [`xtask_catalog`] since XT-01) run by no job, or by two (or twice in one), counting
+//!   `just check-only <stage>...` and `just <stage>`; a `check-only` argument that is not a stage;
+//!   a catalog that names no stage or does not parse;
 //! - the aggregate job [`AGGREGATE`] missing, not `if: always()`, not needing every other job, or
 //!   not reading `needs.*.result`;
 //! - a job other than the aggregate with an `if:`, any job or step with `continue-on-error`, a step
@@ -47,8 +49,10 @@ use crate::tree::Tree;
 pub const RULE: &str = "ARCH-ci-lockstep";
 /// The workflow whose jobs are the gate in CI.
 pub const WORKFLOW: &str = ".github/workflows/ci.yml";
-/// Where `check_stages` is defined.
+/// The recipes CI runs.
 pub const JUSTFILE: &str = "justfile";
+/// Where the stage catalog is defined (`list --json` prints it); findings about it point here.
+pub const CATALOG: &str = "tools/xtask/src/catalog.rs";
 /// The page that documents the jobs.
 pub const REQUIRED_CHECKS: &str = "doc/required-checks.md";
 /// The aggregate job's id.
@@ -151,8 +155,9 @@ pub const REQUIRED_INPUTS: [(&str, &str); 2] = [
 /// and every pull request and manual dispatch, unfiltered.
 pub const TRIGGERS: &str = "push:\n  branches: [main]\npull_request:\nworkflow_dispatch:\n";
 
-/// Runs the rule over the three files of `tree`.
-pub fn check(tree: &dyn Tree) -> Vec<Finding> {
+/// Runs the rule over the three files of `tree` and the stage catalog `catalog` (the JSON of
+/// `xtask list --json`).
+pub fn check(tree: &dyn Tree, catalog: &str) -> Vec<Finding> {
     let mut findings = Vec::new();
     let mut read = |path: &str| {
         let text = tree.read(path);
@@ -166,19 +171,17 @@ pub fn check(tree: &dyn Tree) -> Vec<Finding> {
     else {
         return findings;
     };
-    findings.extend(check_files(&workflow, &justfile, &doc));
+    findings.extend(check_files(&workflow, &justfile, &doc, catalog));
     findings
 }
 
-/// Runs the rule over the texts of `ci.yml`, the `justfile` and `required-checks.md`.
-pub fn check_files(workflow: &str, justfile: &str, doc: &str) -> Vec<Finding> {
+/// Runs the rule over the texts of `ci.yml`, the `justfile` and `required-checks.md`, and the stage
+/// catalog `catalog` (the JSON of `xtask list --json`).
+pub fn check_files(workflow: &str, justfile: &str, doc: &str, catalog: &str) -> Vec<Finding> {
     let mut findings = Vec::new();
-    let Some(stages) = check_stages(justfile) else {
-        return vec![Finding::new(
-            RULE,
-            JUSTFILE,
-            "no `check_stages := \"...\"` line: the stages of `just check` are unknown",
-        )];
+    let stages = match check_stages(catalog) {
+        Ok(stages) => stages,
+        Err(finding) => return vec![finding],
     };
     let root: Value = match serde_norway::from_str(workflow) {
         Ok(value) => value,
@@ -671,14 +674,86 @@ pub fn recipe_dependencies(justfile: &str, recipe: &str) -> Option<Vec<String>> 
     })
 }
 
-/// The stages of `just check`, from the justfile's `check_stages := "..."` line.
-pub fn check_stages(justfile: &str) -> Option<Vec<String>> {
-    justfile.lines().find_map(|line| {
-        let rest = line.strip_prefix("check_stages")?.trim_start();
-        let quoted = rest.strip_prefix(":=")?.trim();
-        let inner = quoted.strip_prefix('"')?.strip_suffix('"')?;
-        Some(inner.split_whitespace().map(str::to_owned).collect())
-    })
+/// One row of xtask's stage catalog, as `list --json` prints it; any other field fails the parse.
+#[derive(Debug, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CatalogRow {
+    id: String,
+    command: String,
+    quick: bool,
+    check: bool,
+}
+
+/// The stages of `check`, in order, from the JSON of `xtask list --json`: the ids of the rows
+/// whose `check` is true. A catalog that does not parse, names no stage, has a row without a
+/// command or a `quick` stage that `check` does not run, is a finding at [`CATALOG`]. Pinned by
+/// tests/ci_lockstep.rs (`should_fail_lockstep_when_a_file_is_missing_or_names_no_stages`).
+pub fn check_stages(catalog: &str) -> Result<Vec<String>, Finding> {
+    let rows: Vec<CatalogRow> = serde_json::from_str(catalog).map_err(|error| {
+        Finding::new(
+            RULE,
+            CATALOG,
+            format!("`xtask list --json` does not parse: {error}"),
+        )
+    })?;
+    let mut stages = Vec::new();
+    for CatalogRow {
+        id,
+        command,
+        quick,
+        check,
+    } in rows
+    {
+        if command.trim().is_empty() || (quick && !check) {
+            return Err(Finding::new(
+                RULE,
+                CATALOG,
+                format!(
+                    "stage `{id}`: every row names its command, and `quick` runs only stages of `check`"
+                ),
+            ));
+        }
+        if check {
+            stages.push(id);
+        }
+    }
+    if stages.is_empty() {
+        return Err(Finding::new(
+            RULE,
+            CATALOG,
+            "`xtask list --json` names no stage of `check`: the gate's stages are unknown",
+        ));
+    }
+    Ok(stages)
+}
+
+/// The JSON of `bash <root>/scripts/xtask.sh list --json`: the stage catalog of the checkout at
+/// `root`, built and listed the way the gate runs it. A failure is a finding at [`CATALOG`].
+pub fn xtask_catalog(root: &std::path::Path) -> Result<String, Finding> {
+    let output = std::process::Command::new("bash")
+        .arg(root.join("scripts/xtask.sh"))
+        .args(["list", "--json"])
+        .current_dir(root)
+        .output()
+        .map_err(|error| {
+            Finding::new(
+                RULE,
+                CATALOG,
+                format!("cannot run scripts/xtask.sh: {error}"),
+            )
+        })?;
+    if !output.status.success() {
+        return Err(Finding::new(
+            RULE,
+            CATALOG,
+            format!(
+                "`scripts/xtask.sh list --json` failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            ),
+        ));
+    }
+    String::from_utf8(output.stdout)
+        .map_err(|_| Finding::new(RULE, CATALOG, "`xtask list --json` printed no UTF-8"))
 }
 
 /// One row of the doc's table: id, display name, runner, `just` invocations.

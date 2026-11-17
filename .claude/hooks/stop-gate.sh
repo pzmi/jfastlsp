@@ -50,9 +50,11 @@ if [ -f justfile ] && grep -qsE '^quick([[:space:]]|:)' justfile; then
     exit 2
   fi
   # `just` may be mise's shim, which loads mise.toml before the justfile's own check runs: the
-  # tool configuration passes scripts/tool-config-check.sh first (bash and awk, no mise; FND-09).
-  if [ -f scripts/tool-config-check.sh ] && ! bash scripts/tool-config-check.sh "$PWD" >&2; then
-    echo "the tool configuration is outside its allowlist (above); fix it before stopping (fnd §3.6)" >&2
+  # tool configuration passes xtask's `tool-config` first (scripts/xtask.sh, built from outside the
+  # tree; no mise; FND-09, XT-01). Fail closed: a refusal, a missing launcher or a failed build of
+  # xtask blocks the stop.
+  if ! bash scripts/xtask.sh tool-config "$PWD" >&2; then
+    echo "the tool configuration is outside its allowlist or could not be checked (above); fix it before stopping (fnd §3.6)" >&2
     exit 2
   fi
   gate="just quick"

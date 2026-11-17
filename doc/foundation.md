@@ -55,7 +55,7 @@ the policy, or listed but absent, fails the checker.
 | **adapter** | `jfl-adapter-{fs,git,java,classfile,store,ipc,lsp,javac,gradle}` | yes |
 | **root** | `jfl-composition`, `jfl-cli` | yes |
 | **test_only** | `jfl-testkit`, `jfl-conformance`, `jfl-architecture` | never |
-| **tool_only** | `jfl-oracle`, `jfl-eval`, `jfl-jdtls`, `jfl-bench` | never |
+| **tool_only** | `jfl-oracle`, `jfl-eval`, `jfl-jdtls`, `jfl-bench`, `xtask` | never |
 | **fuzz_only** | `jfl-fuzz` (own workspace under `fuzz/`, REL-03) | never |
 
 `[workspace]` holds the categories as `production`, `test_only`, `tool_only` and `fuzz_only`;
@@ -152,6 +152,7 @@ Plan §6.5's table is enforced per crate, because clippy has no module-level con
   | `jfl-bench`, `jfl-eval` | process, fs, clock, env | drive binaries and JVMs, write results, time runs |
   | `jfl-jdtls` | process, fs, socket, spawn, sleep, clock, env | its per-user daemon on a Unix socket, one jdtls per worktree; its idle and hand-shake deadlines are timed waits (ADR 0028, amended) |
   | `jfl-oracle` | fs | reads indexes and reports |
+  | `xtask` | process, fs, env | runs the gate's stages (argv only, never `sh -c`), reads the tool and cargo configuration, judges the environment (XT-01) |
 
   Pure and application crates get none. A crate's tests share its `clippy.toml`, so a test that
   needs files or a child in a crate without the grant uses `jfl-testkit`'s builders.
@@ -185,7 +186,9 @@ workspace path crates before relying on it.
 - `jfl-architecture` holds the architecture test (§3). It reads `cargo metadata` and the
   repository's files; it is never a dependency.
 - The command surface is the `justfile` (§9) today; the gate is moving to `cargo xtask` (ADR 0035,
-  lane XT).
+  lane XT). Since XT-01 the gate's composition (the stage catalog, its order, each stage's
+  command and the preflight) is the tool-only crate `xtask` (`tools/xtask`), which the justfile's
+  gate recipes run through `scripts/xtask.sh`.
 - `jfl-fuzz` is its own workspace on the pinned nightly (REL-03); `ARCH-fuzz-crate` checks its
   policy rows.
 
@@ -226,7 +229,7 @@ schema = 1
 [workspace]
 production = [ ... ]          # §2.1
 test_only  = ["jfl-testkit", "jfl-conformance", "jfl-architecture"]
-tool_only  = ["jfl-oracle", "jfl-eval", "jfl-jdtls", "jfl-bench"]
+tool_only  = ["jfl-oracle", "jfl-eval", "jfl-jdtls", "jfl-bench", "xtask"]
 fuzz_only  = ["jfl-fuzz"]     # once the fuzz crate exists
 
 [roles]                       # §2.1, inside production
@@ -237,14 +240,14 @@ adapter     = [ ... ]
 root        = ["jfl-composition", "jfl-cli"]
 
 [grants]                      # §2.4: what each crate's clippy.toml may drop from the canonical list
-process = ["jfl-process", "jfl-testkit", "jfl-architecture", "jfl-bench", "jfl-eval", "jfl-jdtls"]
+process = ["jfl-process", "jfl-testkit", "jfl-architecture", "jfl-bench", "jfl-eval", "jfl-jdtls", "xtask"]
 socket  = ["jfl-adapter-ipc", "jfl-jdtls"]
 fs      = [ ... ]             # §2.4's table
 spawn   = ["jfl-adapter-ipc", "jfl-composition", "jfl-jdtls"]
 sleep   = ["jfl-testkit", "jfl-jdtls"]
 clock   = ["jfl-process", "jfl-composition", "jfl-testkit", "jfl-bench", "jfl-eval", "jfl-jdtls"]
-env     = ["jfl-process", "jfl-composition", "jfl-cli", "jfl-conformance", "jfl-architecture", "jfl-bench", "jfl-eval", "jfl-jdtls"]
-independent = ["jfl-oracle", "jfl-eval", "jfl-jdtls", "jfl-bench"]
+env     = ["jfl-process", "jfl-composition", "jfl-cli", "jfl-conformance", "jfl-architecture", "jfl-bench", "jfl-eval", "jfl-jdtls", "xtask"]
+independent = ["jfl-oracle", "jfl-eval", "jfl-jdtls", "jfl-bench", "xtask"]
 
 [dependencies.normal]         # plan §6.3, one key per crate
 [dependencies.build]
@@ -288,8 +291,9 @@ plus a small source scan:
    `should_<outcome>_when_<condition>` and carry `// given`, `// when`, `// then`; no
    `#[ignore]`; no `#[allow]`/`#[expect]`/`#[macro_export]` without an `[exceptions]` row citing
    an ADR; no `cfg!(target_os…)` branch; `#![no_std]` present in each pure crate's `lib.rs`.
-4. **CI lockstep:** `ci.yml` (its `on:` triggers included), the `justfile` (read line by line:
-   `check_stages` and the recipe headers) and `required-checks.md` agree (fnd §7.2).
+4. **CI lockstep:** `ci.yml` (its `on:` triggers included), the `justfile` (its recipe headers,
+   read line by line), xtask's stage catalog (`bash scripts/xtask.sh list --json`, XT-01) and
+   `required-checks.md` agree (fnd §7.2).
 5. **Gate configuration** (`ARCH-gate-config`, FND-08, §3.6): the gate's own recipes and scripts
    match their pins in `.config/gate.sha256`; `.config/nextest.toml`, `mise.toml` and
    `rust-toolchain.toml` keep their allowlisted shapes; the tree holds no cargo configuration
@@ -317,7 +321,7 @@ Each rule names the layer that enforces it and the task that lands it.
 | `ARCH-ignored-test`, `ARCH-test-name`, `ARCH-test-structure`, `ARCH-platform-branch` | `#[ignore]`; a misnamed test; missing sections; a `cfg!(target_os…)` branch | architecture test (source scan) | FND-07 |
 | `ARCH-hidden-source` | `#[path]`, `include!`, a target root outside its crate's directory, or a file the scan's lexer cannot follow to its end (it fails closed): code the source scan would not read | architecture test (source scan, graph) | FND-07 |
 | `ARCH-ci-lockstep` | a stage in no CI job or two; `required` missing a job; a swallowed failure; `on:` other than push to main, pull requests and dispatch | architecture test | FND-05 |
-| `ARCH-gate-config` | a gate recipe, script (every `scripts/test-*.sh` included), stage policy (`.github/zizmor.yml`, `deny.toml`) or tool pin (`mise.toml`, `mise.lock`) that differs from its pin; `.config/nextest.toml`, `mise.toml`, `mise.lock` or `rust-toolchain.toml` outside its shape; a cargo, mise, toolchain or rustfmt configuration file elsewhere in the tree; a dot-entry or `mise*` entry of the root, or an entry of `.github/` or `.config/`, outside its allowlist | architecture test (and `scripts/tool-config-check.sh` before any tool runs) | FND-08, FND-09 |
+| `ARCH-gate-config` | a gate recipe, xtask composition source (`tools/xtask/Cargo.toml`, every file of `tools/xtask/src`; XT-01), script (every `scripts/test-*.sh` and `scripts/xtask.sh` included), stage policy (`.github/zizmor.yml`, `deny.toml`) or tool pin (`mise.toml`, `mise.lock`) that differs from its pin; `.config/nextest.toml`, `mise.toml`, `mise.lock` or `rust-toolchain.toml` outside its shape; a cargo, mise, toolchain or rustfmt configuration file elsewhere in the tree; a dot-entry or `mise*` entry of the root, or an entry of `.github/` or `.config/`, outside its allowlist | architecture test (and xtask's `tool-config` before any tool runs) | FND-08, FND-09, XT-01 |
 | `ARCH-workflow-yaml` | a YAML file under `.github/` that does not parse, holds two documents or an anchor, alias, tag or merge key; a decoded `run` value with a shellcheck directive or zizmor ignore outside `allowed_suppressions` of `scripts/workflows-check.sh` (or one twice, or `disable=all`); a `shell` other than bash or sh | architecture test (`yaml-rust2`, the decoded authority over the `workflows` stage's line checks) | FND-09 |
 | `ARCH-fixtures-lock` | a golden fixture whose digest differs from `fixtures.lock` | architecture test | IDX-07 |
 | `ARCH-fuzz-crate` | the fuzz crate outside its policy rows | architecture test | REL-03 |
@@ -364,21 +368,25 @@ merged tree) compiles and runs the tree's build scripts, proc-macros and tests w
 own privileges, so that code can change the tools, caches and scripts a later gate uses (mise's
 install directories, `~/.cargo`, `~/.local/bin`). The checks below keep configuration files from
 steering the gate silently; for code, review before landing is the control (the FND-09
-review's G2). The `justfile`'s `_preflight` recipe, a dependency of every stage, refuses an
+review's G2). xtask's preflight (`tools/xtask/src/preflight.rs`; the justfile's `_preflight`
+recipe until XT-01 ported it), which every gate command of xtask runs first, refuses an
 environment that steers the build, by allowlist: every `CARGO*`, `RUSTC*`, `RUSTDOC*`,
 `RUSTUP_*`, `CLIPPY_*` and `NEXTEST_*` variable is refused except `CARGO_TARGET_DIR`,
 `CARGO_BUILD_JOBS`, `CARGO_INCREMENTAL`, `CARGO_HOME`, `CARGO_TERM_*`, `CARGO_NET_*`,
 `CARGO_HTTP_*`, `CARGO_REGISTRIES_CRATES_IO_PROTOCOL`, `RUSTUP_HOME` and rustup's download
 settings, `RUSTUP_TOOLCHAIN` naming the pinned toolchain (bare or with one of ADR 0006's host
 triples), `RUSTFLAGS` empty or `-D warnings`, and `NEXTEST_PROFILE` naming a profile of
-`.config/nextest.toml`; `__CARGO_*` and `PROPTEST_*` are refused too (FND-07). Cargo
+`.config/nextest.toml`; `__CARGO_*` and `PROPTEST_*` are refused too (FND-07); the variables
+`cargo run -p xtask` sets for the program it starts (`CARGO`, `CARGO_MANIFEST_*`, `CARGO_PKG_*`,
+rustup's `RUSTUP_TOOLCHAIN_SOURCE`) pass only at exactly the values of xtask's own build and are
+taken out of every stage's environment (XT-01). Cargo
 configuration files are allowlisted by place and shape (FND-08): inside the repository none may
 exist (tracked or untracked, at any depth, or in an ancestor of the working directory up to the
 root), since one can set a runner, an alias or flags before any check runs (the FND-05
 checkpoint's N1 spelled `target` and `runner` with TOML unicode escapes past a line grep); outside
 it (an ancestor of the working directory, `CARGO_HOME`) a file passes only when every line is a
 comment, a blank, a header of `[net]`, `[http]`, `[term]`, `[build]` or `[registries.crates-io]`,
-or a bare key that table allows with a plain value (`plain_config` in the justfile), so any other
+or a bare key that table allows with a plain value (`plain_config` in the preflight), so any other
 TOML form fails closed. mise is held the same way: `mise.toml` is only `[tools]`, each tool
 `just` or an `aqua:` or `github:` backend (a plugin backend's plugin is code) pinned by a plain
 version string, `mise.lock` holds only checksummed GitHub release assets, no other mise
@@ -386,18 +394,33 @@ configuration file inside the repository may load (`mise config ls`, failing clo
 cannot read its configuration), and the stages run the pinned tools from their install
 directories (`mise bin-paths`) rather than through shims, so no mise `[env]` reaches a tool
 after `_preflight` has looked. Since mise runs code from a trusted configuration as it loads it
-(`[env] _.source`, `{{exec(...)}}` templates), nothing calls mise on a tree before
-`scripts/tool-config-check.sh` (bash and awk, no mise) has passed its tool configuration
-(FND-09, the FND-08 re-verification's F3): the justfile's top-level lines run it before
-`mise bin-paths`, `_preflight` runs it again, `scripts/land.sh` runs the landing checkout's own
-copy on each cherry-picked tree before anything there runs, the `cargo update` that resolves a
+(`[env] _.source`, `{{exec(...)}}` templates), nothing calls mise on a tree before xtask's
+`tool-config` (`tools/xtask/src/tool_config.rs`, no mise; `scripts/tool-config-check.sh` in bash
+and awk until XT-01 ported it) has passed its tool configuration (FND-09, the FND-08
+re-verification's F3): the justfile's top-level lines run it (`bash scripts/xtask.sh tool-config`)
+before `mise bin-paths`, the preflight runs it again, `scripts/land.sh` runs the landing
+checkout's own xtask on each cherry-picked tree before anything there runs, the `cargo update` that resolves a
 Cargo.lock conflict included, and no longer trusts the tree for mise (the check also refuses a
 cargo configuration file at any depth and a toolchain file beyond the root
 `rust-toolchain.toml`'s shape, which any cargo command would obey: a `rustc-wrapper`, a
 toolchain `path`; the FND-09 review's G2),
 `scripts/bootstrap-tools.sh` runs it before `mise install` and no longer runs `mise trust`
-(it removes the trust `mise install` records by itself), and the Stop hook runs it before
-`just`, which may be mise's shim. An untrusted `mise.toml` with only `[tools]` loads; one with
+(it removes the trust `mise install` records by itself), and the Stop hook runs it
+(`bash scripts/xtask.sh tool-config`) before `just`, which may be mise's shim, blocking the stop
+when the check refuses or cannot run. xtask itself is built by `scripts/xtask.sh` and then run with
+the caller's environment, and that build is the one step before any preflight, so nothing may
+steer it: it refuses, before cargo runs, any cargo configuration file in an ancestor of the
+directory it builds from (`/` included) and a CARGO_HOME configuration outside the plain shape
+above; it builds with a CARGO_HOME of its own (links to the registry and git caches, nothing
+else), a cleared environment plus an allowlist, RUSTFLAGS `-D warnings`, `RUSTC` and `RUSTDOC`
+set to the pinned toolchain's binaries (`rustup which`) and the pinned toolchain; and it never
+starts xtask through `cargo run`, whose configured `runner` would replace it. A steered build
+could link a binary that exits 0, and the gate would pass having run nothing (the XT-01 review's
+X1). It builds into one directory per checkout (keyed by the SHA-256 of its path), since cargo
+relinks no fresh binary and two checkouts sharing `CARGO_TARGET_DIR` (land.sh and its worktree)
+would otherwise run each other's xtask. The tree's own xtask, `build.rs` included, is built from
+source before its `tool-config` runs: like every build script, proc-macro and test the gate
+compiles, that is code, and review before landing is its control (XT-01). An untrusted `mise.toml` with only `[tools]` loads; one with
 an `[env]` makes mise fail without running it. The same check holds the implicit configuration
 of the other tools of the gate to allowlists: the root's dot-entries and `mise*` entries, and
 the entries of `.github/` and `.config/` (so `.shellcheckrc`, `.yamllint`, `.tool-versions`,
@@ -406,8 +429,9 @@ reads next); the linters also run with explicit configuration (shellcheck `--nor
 `-config-file /dev/null`, zizmor `--config .github/zizmor.yml`, pinned), and no `rustfmt.toml`
 may exist. The architecture test repeats these checks
 with a real TOML parser (`ARCH-gate-config`) and pins the gate itself: the recipes of `check`,
-`quick`, `check-only`, `ci-parity` and `platform-tests`, every stage and their dependencies,
-the justfile's top-level lines, the scripts the stages run (every `scripts/test-*.sh`, which
+`quick`, `check-only`, `ci-parity`, `platform-tests` and `_preflight`, every stage of xtask's
+catalog and their dependencies, the justfile's top-level lines, the xtask composition (its
+manifest and every file of `tools/xtask/src`, with the launcher `scripts/xtask.sh`; XT-01), the scripts the stages run (every `scripts/test-*.sh`, which
 `script-tests` runs by glob, included), the policies a stage reads by path
 (`.github/zizmor.yml`, `deny.toml`) and the tool pins (`mise.toml`, whose new tool would land on
 the stages' PATH, and `mise.lock`) are hashed in `.config/gate.sha256` (FND-09 added all but the
@@ -423,7 +447,9 @@ per rule; `tests/gate_config.rs` fails on a crude edit of `gate.rs`), so a neute
 in plain sight; `.gitleaks.toml` is compared byte for byte with the pinned generator's output. Independently, every cargo of the gate runs with `RUSTFLAGS="-D
 warnings"`, empty `RUSTDOCFLAGS`, `RUSTC_WRAPPER` and `RUSTC_WORKSPACE_WRAPPER` (which beat any
 config file), and nextest with `--retries 0 --no-tests fail`. Never export a steering variable for
-the gate. Each refusal has a negative case in `tools/jfl-architecture/tests/gate_negative_cases.rs`.
+the gate. Each refusal has a negative case in `tools/jfl-architecture/tests/gate_negative_cases.rs`
+(through the justfile) or `tools/xtask/tests/` (`preflight.rs`, `tool_config.rs`, `launcher.rs`,
+`stages.rs`).
 A later recipe that needs a `PROPTEST_*` setting passes it to the test process inside the recipe,
 after `_preflight`, never through the caller's environment.
 
@@ -716,7 +742,8 @@ There is no event store (ADR 0008). What persists:
 0. **Bootstrap.** mise and just themselves come from `scripts/bootstrap-tools.sh` (BOOT-02):
    each at a pinned version, verified against a SHA-256 recorded in the script, installed into
    `~/.local/bin`, a no-op when already present; then `mise install --locked` once `mise.toml`
-   exists and `scripts/tool-config-check.sh` has passed the tool configuration, never trusting
+   exists and xtask's `tool-config` (`scripts/xtask.sh`, which needs cargo and the pinned Rust
+   toolchain) has passed the tool configuration, never trusting
    the repository for mise (FND-09, §3.6). The SessionStart hook runs it in cloud sessions; a cloud environment's setup script may
    call it too (`bash scripts/bootstrap-tools.sh`). Verified in the cloud sandbox on 2026-11-16:
    GitHub release downloads (`github.com/<owner>/<repo>/releases/download/…`) and the static
@@ -780,8 +807,8 @@ needs one becomes a recipe parameter (`just conformance seed=42`).
 | `mise install --locked` | install every pinned tool from `mise.lock` | FND-01 |
 | `just quick` | fmt-check, architecture (from FND-07), clippy, unit tests, script tests: the inner loop | FND-02 |
 | `just check` | the full blocking gate: every stage, in order, stopping at none silently | FND-02 |
-| `just check-only <stage>…` | named stages through the same recipes (what each CI job runs) | FND-02 |
-| `just --list`, `just --dump --dump-format json` | the stage catalog | FND-02 |
+| `just check-only <stage>…` | named stages through the same stage code (what each CI job runs) | FND-02 |
+| `bash scripts/xtask.sh <check\|quick\|check-only <stage>…\|list [--json]\|preflight\|tool-config [ROOT]>` | the gate's composition, which the recipes above delegate to: built from outside the tree with an allowlisted environment, then run; `list --json` is the stage catalog. `cargo run --locked -q -p xtask -- <args>` runs the same binary but builds it under the working directory's cargo configuration; the `cargo xtask` alias is deferred (it needs FND-09's G2 rule to admit one pinned cargo configuration file) | XT-01 |
 | `just clippy-lists` | rewrite every crate's `clippy.toml` from the root list and `[grants]` (§2.4); the `clippy` stage fails when one differs | FND-02 |
 | `just doctor` | `mise doctor`, `mise ls --missing`, `just --version` against the pin, and the five security tools of FND-04 on PATH | FND-01, FND-04 |
 | `adrs new "<title>"`, `just adr-index` (the `docs` stage) | create an ADR from `doc/adr/template.md` (`adrs.toml`); check the index against the files (`scripts/adr-index.sh`) | FND-03 |
@@ -809,7 +836,8 @@ needs one becomes a recipe parameter (`just conformance seed=42`).
 | `just mutation` | cargo-mutants over the configured scope | REL-05 |
 | `just release-check [target]` | package, extract and smoke the archive | REL-06 |
 
-Stages of `check` in order (each a recipe): `fmt-check`, `architecture`, `clippy`, `nostd`
+Stages of `check` in order (each a stage of xtask's catalog and a recipe that runs it):
+`fmt-check`, `architecture`, `clippy`, `nostd`
 (§2.3), `docs` (the ADR index matches the files), `unit-tests`, `integration-tests`, `doctests`,
 `script-tests` (the offline self-tests `scripts/test-*.sh`), `e2e-tests`, `lsp-conformance`, `formal-typecheck`, `formal-test`, `formal-freshness`,
 `conformance-replay`, `java-fixtures`, `coverage`, `changed-lines`, `deny`, `secrets`,

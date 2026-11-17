@@ -2,8 +2,8 @@
 # Install the two tools the gate needs before mise can install the rest: mise and just, each
 # at a pinned version and verified against a SHA-256 recorded here. Idempotent: a tool already
 # on PATH at the pinned version is left alone. Then, once mise.toml exists (FND-01), runs
-# `mise install --locked` for everything else, once scripts/tool-config-check.sh has passed the
-# tool configuration (and without ever trusting the repository for mise).
+# `mise install --locked` for everything else, once xtask's `tool-config` (scripts/xtask.sh) has
+# passed the tool configuration (and without ever trusting the repository for mise).
 #
 # Called by .claude/hooks/session-start.sh in cloud sessions, and usable as (or from) a cloud
 # environment's setup script and on a fresh laptop. It never uses sudo and installs into
@@ -106,14 +106,15 @@ fi
 # untrusted for mise: mise reads an untrusted mise.toml's [tools] and refuses to load an [env], a
 # template or a hook from it, whereas a trusted one runs them as it loads, and a trust by path
 # covers every later edit of the file (the FND-08 re-verification's F3). So the tool configuration
-# passes scripts/tool-config-check.sh (bash and awk, no mise) before mise reads it, a refusal is
+# passes xtask's `tool-config` (scripts/xtask.sh: cargo and the pinned Rust toolchain, no mise;
+# FND-09, XT-01) before mise reads it, a refusal or a failed build of xtask is
 # reported and mise is not run, and the trust that `mise install` records by itself (mise
 # 2026.10 trusts the directory it installs for; an earlier version of this script ran
 # `mise trust --yes`) is removed again afterwards (FND-09).
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
 if [ -f "$repo_root/mise.toml" ] && command -v mise >/dev/null 2>&1; then
-  if ! bash "$repo_root/scripts/tool-config-check.sh" "$repo_root"; then
-    echo "bootstrap-tools: the tool configuration is outside its allowlist (above); mise was not run" >&2
+  if ! bash "$repo_root/scripts/xtask.sh" tool-config "$repo_root"; then
+    echo "bootstrap-tools: the tool configuration is outside its allowlist or could not be checked (above); mise was not run" >&2
     status=1
   else
     if (cd "$repo_root" && mise install --locked); then

@@ -18,8 +18,9 @@
 #      overrides it, for a scratch repository), a `Signed-off-by` matching the author
 #      (scripts/dco-check.sh) and a signature in the commit HEADER (a `gpgsig` line in the message
 #      body does not count; --allow-unsigned waives it for a repository that does not sign);
-#   5. check each cherry-picked tree's tool configuration with THIS checkout's
-#      scripts/tool-config-check.sh before anything there runs, a Cargo.lock resolution included
+#   5. check each cherry-picked tree's tool configuration with THIS checkout's xtask
+#      (`scripts/xtask.sh tool-config`, built from this checkout, from outside the tree) before
+#      anything there runs, a Cargo.lock resolution included
 #      (mise runs code from a trusted configuration as it loads it, `just` evaluates the
 #      justfile's `mise bin-paths`, and any cargo command runs a configured rustc-wrapper or a
 #      toolchain `path`), never trusting the tree for mise (FND-09); a commit that widens that
@@ -45,7 +46,7 @@ set -euo pipefail
 # bootstrap's ~/.local/bin only as the last resort. The justfile runs the stages' tools from their
 # install directories and `_preflight` refuses a mise [env], so how just is found does not change
 # what the gate sees (fnd §3.6, FND-08); a mise shim of just loads the tree's mise.toml, which
-# tool-config-check.sh has passed first (FND-09).
+# xtask's tool-config has passed first (FND-09, XT-01).
 case ":$PATH:" in *":$HOME/.local/bin:"*) ;; *) PATH="$PATH:$HOME/.local/bin" ;; esac
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
@@ -95,12 +96,13 @@ trap cleanup EXIT
 
 # Resolve the two conflicts land.sh may resolve, in the worktree $1 (cherry-pick of $2); abort on
 # any other. Every command is checked: this runs where `set -e` is off.
-# The landing checkout's own scripts/tool-config-check.sh on the tree $1 after the cherry-pick of
-# $2, before anything there runs: mise runs code from a trusted configuration as it loads it, and
-# cargo (even the `cargo update` that resolves a Cargo.lock conflict) runs a configured
-# rustc-wrapper and the toolchain a rust-toolchain file names (FND-09, its review's G2).
+# The landing checkout's own xtask (`tool-config`, scripts/xtask.sh) on the tree $1 after the
+# cherry-pick of $2, before anything there runs: mise runs code from a trusted configuration as it
+# loads it, and cargo (even the `cargo update` that resolves a Cargo.lock conflict) runs a
+# configured rustc-wrapper and the toolchain a rust-toolchain file names (FND-09, its review's G2).
+# xtask is built from this checkout and from outside the tree, so the tree steers nothing of it.
 check_tree() {
-  bash "$here/tool-config-check.sh" "$1" >&2 ||
+  bash "$here/xtask.sh" tool-config "$1" >&2 ||
     die "the tree after the cherry-pick of $2 has tool configuration outside its allowlist (above); nothing in it was run"
 }
 

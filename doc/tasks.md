@@ -497,6 +497,15 @@ and Quint, and the others the gate uses today until a card decides. Tool version
   - [ ] an edited xtask composition source without its `.config/gate.sha256` line fails `ARCH-gate-config`
   - [ ] FND-09's tool-configuration shape check (`scripts/tool-config-check.sh`) runs as an xtask stage; every negative case of `scripts/test-tool-config.sh` is a Rust test that fails before the check and passes after, and both scripts are removed with their pins moved
   - [ ] `cargo xtask check` and `just check` are green; `ci.yml` is unchanged and green
+- **Deviation (orchestrator, 2026-11-17): alias deferred: needs the G2 rule to admit one pinned
+  shape, landed by hand per sdlc step 5.** FND-09's G2 rule refuses any cargo configuration file
+  at any depth (cargo configuration is a code-execution vector), and `land.sh` runs main's own
+  copy of that check, so a commit adding `.cargo/config.toml` cannot land through it. XT-01 adds
+  none: the gate recipes delegate to `bash scripts/xtask.sh <args>`, which builds xtask from
+  outside the tree (where the tree's cargo configuration does not apply, a `runner` included) and
+  runs it; `cargo run --locked -q -p xtask -- <args>` stands for `cargo xtask` meanwhile. The
+  preflight case "a cargo configuration file other than the alias" is today "any cargo
+  configuration file". The alias itself is a follow-up on XT-08's card.
 - **Impact:** none (tooling); dependency graph (a new tool crate).
 
 #### XT-02: Tool pins: `tools/versions.toml`, `cargo xtask doctor`, `install-tools`
@@ -512,6 +521,9 @@ and Quint, and the others the gate uses today until a card decides. Tool version
   - [ ] `doctor` names a missing tool and a wrong version (fixtures); `install-tools` refuses a tampered archive
   - [ ] FND-08's N6 cases (no other mise configuration, tools run from their install directories) hold for both paths
   - [ ] the network facts of fnd §8 hold: every download is a GitHub release asset or a crates.io file, never `api.github.com`
+  - [ ] the XT-01 review's LOWs, carried here:
+    - **PATH:** `scripts/xtask.sh` builds xtask with the pinned toolchain's own `cargo` (and finds rustup from the pinned install, not from the caller's PATH), so a `cargo` or `rustup` earlier on PATH cannot build or replace it; a planted one fails a test
+    - **a shared target directory:** the landing check builds xtask into a target directory the gate never shares, or verifies the binary it runs against cargo's own `deps/xtask-<hash>` artifact, so code a gated tree runs cannot leave a binary the next land's trusted `check_tree` executes; a planted binary fails a test
 - **Impact:** none (tooling).
 
 #### XT-03: Security and workflow stages into xtask
@@ -585,6 +597,12 @@ and Quint, and the others the gate uses today until a card decides. Tool version
 #### XT-08: Remove just and mise
 - **Depends on:** XT-07. **Model:** standard. **Size:** M. **Parallel with:** the EVAL lane.
 - **Cites:** fnd §7.2, §8, §9; ADR 0018, ADR 0035; [`required-checks.md`](required-checks.md).
+- The `cargo xtask` alias deferred from XT-01: alias deferred: needs the G2 rule to admit one
+  pinned shape, landed by hand per sdlc step 5 (one `.cargo/config.toml` holding exactly
+  `[alias] xtask = "run --locked -p xtask --"`, admitted by `tool-config`, the preflight and
+  `ARCH-gate-config` as a pinned shape; the launcher `scripts/xtask.sh` stays the way the gate
+  builds xtask, since `cargo run` under the tree's configuration would honour a `runner`). Until
+  then the commands below read `bash scripts/xtask.sh`.
 - Every `ci.yml` job calls `cargo xtask check-only <stage>…` and installs tools with
   `cargo xtask install-tools` (cached), not `jdx/mise-action`; the `justfile`, `mise.toml`,
   `mise.lock` and `scripts/bootstrap-tools.sh` are removed; `ARCH-ci-lockstep` and

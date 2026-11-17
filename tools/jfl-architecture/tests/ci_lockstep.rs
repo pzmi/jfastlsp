@@ -1,6 +1,7 @@
 //! `ARCH-ci-lockstep`'s negative cases (fnd §7.2 rule 3, §3.4): each case is the repository's own
-//! `ci.yml`, justfile and `doc/required-checks.md` with one small change that must produce the
-//! rule at its path with its reason; the unchanged files must produce nothing.
+//! `ci.yml`, justfile, stage catalog (`bash scripts/xtask.sh list --json`, since XT-01) and
+//! `doc/required-checks.md` with one small change that must produce the rule at its path with its
+//! reason; the unchanged files must produce nothing.
 
 use std::error::Error;
 use std::path::Path;
@@ -10,11 +11,12 @@ use jfl_architecture::{Finding, tree::MemoryTree};
 
 type TestResult = Result<(), Box<dyn Error>>;
 
-/// The three files the rule reads, as the repository has them.
+/// The three files the rule reads and the stage catalog, as the repository has them.
 struct Files {
     workflow: String,
     justfile: String,
     doc: String,
+    catalog: String,
 }
 
 fn repo_file(path: &str) -> Result<String, Box<dyn Error>> {
@@ -26,10 +28,13 @@ fn repo_file(path: &str) -> Result<String, Box<dyn Error>> {
 }
 
 fn baseline() -> Result<Files, Box<dyn Error>> {
+    let catalog = ci::xtask_catalog(&Path::new(env!("CARGO_MANIFEST_DIR")).join("../.."))
+        .map_err(|finding| finding.to_string())?;
     Ok(Files {
         workflow: repo_file(WORKFLOW)?,
         justfile: repo_file(ci::JUSTFILE)?,
         doc: repo_file(REQUIRED_CHECKS)?,
+        catalog,
     })
 }
 
@@ -44,7 +49,7 @@ fn edit(text: &mut String, from: &str, to: &str) -> TestResult {
 }
 
 fn findings(files: &Files) -> Vec<Finding> {
-    ci::check_files(&files.workflow, &files.justfile, &files.doc)
+    ci::check_files(&files.workflow, &files.justfile, &files.doc, &files.catalog)
 }
 
 /// Fails unless a finding of the rule is at `at` and its message contains `reason`.
@@ -719,15 +724,31 @@ fn should_fail_lockstep_when_a_file_is_missing_or_names_no_stages() -> TestResul
         .with(WORKFLOW, &files.workflow)
         .with(ci::JUSTFILE, &files.justfile);
     let mut no_stages = baseline()?;
-    edit(&mut no_stages.justfile, "check_stages :=", "all_stages :=")?;
+    no_stages.catalog = "[\n]\n".to_owned();
+    let mut garbled = baseline()?;
+    edit(
+        &mut garbled.catalog,
+        "\"check\": true",
+        "\"check\": true, \"skip\": true",
+    )?;
+    let mut quick_only = baseline()?;
+    edit(
+        &mut quick_only.catalog,
+        "\"quick\": true, \"check\": true",
+        "\"quick\": true, \"check\": false",
+    )?;
 
     // when
-    let missing = ci::check(&without_doc);
+    let missing = ci::check(&without_doc, &files.catalog);
     let unknown = findings(&no_stages);
+    let unparsed = findings(&garbled);
+    let outside = findings(&quick_only);
 
     // then
     assert_reported(&missing, REQUIRED_CHECKS, "the file is missing");
-    assert_reported(&unknown, ci::JUSTFILE, "no `check_stages");
+    assert_reported(&unknown, ci::CATALOG, "names no stage of `check`");
+    assert_reported(&unparsed, ci::CATALOG, "does not parse");
+    assert_reported(&outside, ci::CATALOG, "`quick` runs only stages of `check`");
     Ok(())
 }
 

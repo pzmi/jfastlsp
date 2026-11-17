@@ -1,6 +1,8 @@
 # The gate's own configuration, pinned (fnd §3.6, FND-08; ARCH-gate-config in
 # tools/jfl-architecture/src/gate.rs): one SHA-256 per justfile recipe of the gate, the
-# justfile's top-level lines, each script the gate runs (every scripts/test-*.sh included), the
+# justfile's top-level lines, the xtask composition (tools/xtask/Cargo.toml and every file of
+# tools/xtask/src: the stage catalog, each stage's command and the preflight; XT-01) and its
+# launcher (scripts/xtask.sh), each script the gate runs (every scripts/test-*.sh included), the
 # policies a stage reads by path (.github/zizmor.yml, deny.toml) and the tool pins (mise.toml,
 # mise.lock), what decides landing (scripts/land.sh, scripts/dco-check.sh) and the session
 # hooks (.claude/hooks/session-start.sh, stop-gate.sh; FND-09). A change to any of them fails the
@@ -8,38 +10,37 @@
 # neutered without a visible edit of this file; review reads every changed line as a change of
 # the gate itself. The failure names the line to write.
 4b89a24d2025e62e8314e78bda859b0fb724690d96e11e2eb7bb48e4e2fb8a82  .claude/hooks/session-start.sh
-216f33f6dea48a8b4727dac023075f6920682b279f1dc3e2dbb719e61fb22bdf  .claude/hooks/stop-gate.sh
+194c797550a474c53947e5d8030896eb611579e16dbd5c41f34a8c0e70495ec0  .claude/hooks/stop-gate.sh
 ee32913359192d786a21e7508344cf085983a1d9a5dec6db9a4f02ee93a9976c  .github/zizmor.yml
 d5778d728fc0ba2b0ff863e72a0d41cddea0e95dbd03e4b3064c859e8f155c51  deny.toml
-34478ea37e6247575843944b7967e1c70ce231f111003aee3f2323d19f0ffc43  justfile::(top-level)
-e867fef97ea6eabae486330a71e5c8c9e26f3ab5e104433cb73bcdf16b74c850  justfile::_preflight
-9dba69f6b0b357b699cc5bf1c69614c5fe3b734f385cc23d2a79f4987c694e6c  justfile::_require
-75195dc83ae3dab6c0d4f811c76c4f53a5c3ebd36fe781891255f70ba3edb395  justfile::architecture
-7761a8e4405aad0b60c6c88516d3578c3391ab9c21403c164efa28cb784fc123  justfile::check
-0188053f655288610a79e6d192c6146310dbdf6971b75b6e1dddc47507d30a6c  justfile::check-only
+b25b7053a64eda6093f275e6f7d6bc8f8fdf2d5966eb99ba57d8126661334844  justfile::(top-level)
+11f44399e6e806702c5e6624945e00883b7ac49cec3abea0d09f856738692f25  justfile::_preflight
+b7c97ab414cb2570661bae0987b0fb2e8857873e21ea0421042fc07b098dea30  justfile::architecture
+fb2a8ff0e1f46fece19b63851e6720fcaff7a100a8df02a98ef6762f4d309d78  justfile::check
+2ddc2bf0ce23240720533f4f82c9213762b689b63eec4cb52377b08e27b1f989  justfile::check-only
 6fc351ec1785ab8da75cd9d2c4dcf45be8ee4eb5e91dc57b2103cc672aaeb936  justfile::ci-parity
-886ff8d83cc0722c36a2cdd761f2b0610a8eb941236dc50abb32971fdf73490a  justfile::clippy
-e56661e3804c2cac1c699aa0c4000f84ad9fd2524c7607fb51397a99b2d062c8  justfile::deny
-033c5690d6c72222374960f18b8143dfb5ea31585bac6283bed38aac3d72cd2c  justfile::docs
-32a478974bd8b45b726914c59d14d8b6b224bb10a4bef3f3ea3a370c268c1ea7  justfile::doctests
-b3ece7f0fc656649e570d2d262d05e7c16fe6d3dd5a0ad2e772dc99be2efe084  justfile::fmt-check
-9305d0265cf8be60b56be288112e4743934d713fd2bae9b7f305806d645974e4  justfile::integration-tests
-44f61c60765b83c7bca637148b93b5f8bff31404b4f31fa8b3afd7084eda4ad8  justfile::nostd
+3e01a637173e42f769fa7da121e1355e00ec0d00ecccf9db3cd55897817b1018  justfile::clippy
+3a453639e6739056c91eec8defa47e10385f489e1408d29d8525031658520a0e  justfile::deny
+25d67d351c351853bdf76773efc14f6916cb723fe8d3392d3caf8933ef9d9ce1  justfile::docs
+fe9a832a9783ea6c20930a2350c7107d2c3f4537247e7c289d5c8f55f84ce87a  justfile::doctests
+32d9d985bc98fe343d605f45c8d44ed041c82f391d5e5e7781320af18e392c6f  justfile::fmt-check
+1e846f6e9826bda19d05907db81b33fa179c502b59e15dffc302d66fcaf12d18  justfile::integration-tests
+5966358f1293c4d47978ddf47637bff65444ad47aaa4317783818c8a208c5be4  justfile::nostd
 164ba2d6f1d705f48e95bfaae5efe76ce48d01330b693c04b221f0e0b3e2c157  justfile::platform-tests
-b3926208ff721cb9c70c23b63e383449bab76a3a92bd9114d7af48ca53d7cc58  justfile::private-names
-ed42d0aac4e8bc9d23f06bd7735674751c09f5585fd44cc87b0a5dc5308b42eb  justfile::quick
-b8bf3b5085067ae5a376c07e29721150a0cd2b2bae88f7e312483e38b1a6b9a9  justfile::script-tests
-47ab8ada3cf628fa277b9da1c17081962ddcc5be0a6e29c9c11908c8ba33853a  justfile::secrets
-4c95a24085c064793213d39baf29a01304bff3f7579deb974818b893ca41623b  justfile::unit-tests
-de4d8630b3a3617ef52886ff29383145d42f04e5b7cfef2ed576cdfb8f6979f8  justfile::workflows
+0d33da9d30be68f3c1baac5e1508e44c1ff943783dbc06e6e32f8a9928478b31  justfile::private-names
+31d5079909be22e58c8899e8783b2eb83998d624a02e4a3de1299384e7d14bed  justfile::quick
+180f88b41056b92a74f049fa844216cb82173e6e29d96bb9d74d9e2fb7197113  justfile::script-tests
+645df4fe869a14e15d490c1c32d30029b1b3462151751e56e69a98edd88f0fa3  justfile::secrets
+18229f39869f6418379932bc88ed67cd1acaaae25ac4a3c5a6afd4df2caef363  justfile::unit-tests
+f3a96899cfe73035eb8d9970f307e778353ef1ea4f07d6a2f45214e8e52e36ea  justfile::workflows
 20465d1733a28182ef067d7463730f94c96b457029e00f5dc15c9963e6a80e21  mise.lock
 b78ef320b09ca720ac030054c905d39189f151200dee44562e58d653f43f08dc  mise.toml
 d1d095b275741a3a7d99a90678ebab77a06ea0088f0d6e5a4a4a76dc341d0a45  scripts/adr-index.sh
-160a82910c40a865b0dcfc6552ac37eb151db7a0c2166d1115ee43e9fc71243a  scripts/bootstrap-tools.sh
+0bf793c940b04f7aadf812dc60714b74f2ab92572b1e61c4616ff1e5760aff7d  scripts/bootstrap-tools.sh
 948f24f7356c375c4d37181de24d47fbda594e631c4935ca22ac95b0d58b83f6  scripts/clippy-lists.sh
 db120d42fc19cde8c34da5c064a284d7f66b33124b78d3aed961bac8076f86dd  scripts/dco-check.sh
 3e452d3b368160755f88ca58646bfd74f1089b3102a9b25be60056b81d097b03  scripts/gitleaks-config.sh
-bbbf873f40669d5219c3c0dbf03debfeb90f483265f3c9b836aa4326fcb9f1f4  scripts/land.sh
+2a54b572848b60fb0a861e46d78a7689bada43d77edbb4c7884d65324868791a  scripts/land.sh
 af2223db8d3d4253e7dc645c53c97b3319acb655e7716f48705bb1e4b038d420  scripts/private-names-check.sh
 4f1e4eef1d49d28c5130b6b9f3ffa7eb75ee911ba8cd7eebeece85dc331b7212  scripts/private-names-fold.pl
 b541a0462b00f86ea05a87581303478768099bce4dd3befdf498780bc0d80974  scripts/secrets-check.sh
@@ -48,7 +49,13 @@ ea950cd1fd5aab4c476a912709b42040373829b7a3145d7a0cc102f188f33779  scripts/test-c
 5900be2118423b0eac99a0d3dc0031204ac40e6ba2affc9ab7cbc28ccc73f178  scripts/test-jdtls-fetch.sh
 16af475462d376b3ba20c5b3fc69cf4427f9df153a1ac37c1b56eda983b10f77  scripts/test-private-names.sh
 1f5bd3086859375aa9122fe0d8eeec28f550121381b95ac28d71e06d4323181e  scripts/test-secrets.sh
-b009b13f17e29ec87b0f6fb219612d6348da1642d6ad493ad3c8b8da35022d43  scripts/test-tool-config.sh
 789be32ee285676ca01aaf67f71ccfae548e5d476cfe3d97025c51d20d5e4b27  scripts/test-workflows.sh
-1ed4cceda4f96c98e54d27a293b2ec436683e7eeedc61cf7eb98f990cd78efe1  scripts/tool-config-check.sh
-a9891a86d62965bcf33afbbb371409be5b5668873087a84608fe9ba688786ae9  scripts/workflows-check.sh
+0055af2ce7e9ba6dabc7f9ecb1abf3859bb9492d78f94b8d6820d7efbe9f7def  scripts/workflows-check.sh
+718ccf8cdbb337da39f892e218f23adb80ecc09afac5443d7f1a27c9840596cd  scripts/xtask.sh
+a1e5df68447c8276b3f38c6c450ece94f55ad95fcf0f2091119b9a40ef5d3453  tools/xtask/Cargo.toml
+c7d5f0fc2251eb804da5b0ea5ba089d36627d001c9b0a0d785a91671b160eed0  tools/xtask/src/catalog.rs
+8c8cb7c4105c4156e28687a1fb8b65ec5aacff39361ffab4615c7077ed4a6483  tools/xtask/src/main.rs
+69d82165d67fca9a25d4debecc5a15d5987746a2a7460024e3c44cc49d95c71a  tools/xtask/src/preflight.rs
+bde0deba71ec0fd67edfa0f898891e8c6aa8f01520c35a2da433c3fb4f2e1340  tools/xtask/src/process.rs
+aed00643743546817327d397dc10aa4a28e98ff5fcfcf75680db9d9360fd9b8d  tools/xtask/src/stages.rs
+6d9a3789ec5a83e514dd4aad0529462ac6fdf3e49681a077c10cd741b55065da  tools/xtask/src/tool_config.rs

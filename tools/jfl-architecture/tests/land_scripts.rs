@@ -5,8 +5,9 @@
 //! every child gets its own global git config (no signing, a fixed author) and a stub `just`
 //! whose `check` runs the scratch repository's `gate.sh`, so a case decides what the gate says.
 //!
-//! The cases run `git`, `bash`, `cargo` (the lockfile case, with no dependencies, so offline) and
-//! the pinned `adrs` from PATH and mise; a missing tool fails a case, never skips it (fnd §8).
+//! The cases run `git`, `bash`, `cargo` (the lockfile case, with no dependencies, so offline, and
+//! land.sh's build of this checkout's xtask for its tree check) and the pinned `adrs` from PATH and
+//! mise; a missing tool fails a case, never skips it (fnd §8).
 
 use std::error::Error;
 use std::ffi::OsString;
@@ -88,7 +89,8 @@ impl Lab {
     }
 
     /// A child with the lab's environment: its own git config, the stub `just` first on PATH and
-    /// the temporary directory inside the lab (land.sh's worktrees).
+    /// the temporary directory inside the lab (land.sh's worktrees); CARGO_TARGET_DIR passes
+    /// through, so land.sh's tree check (scripts/xtask.sh) finds the xtask the gate built.
     fn command(&self, program: impl AsRef<std::ffi::OsStr>, dir: &Path) -> Command {
         let mut path = OsString::from(self.base.join("bin"));
         if let Some(rest) = std::env::var_os("PATH") {
@@ -103,7 +105,7 @@ impl Lab {
             .env("GIT_CONFIG_GLOBAL", self.base.join("gitconfig"))
             .env("GIT_CONFIG_NOSYSTEM", "1")
             .env("TMPDIR", self.base.join("tmp"));
-        for name in ["HOME", "RUSTUP_HOME", "CARGO_HOME"] {
+        for name in ["HOME", "RUSTUP_HOME", "CARGO_HOME", "CARGO_TARGET_DIR"] {
             if let Some(value) = std::env::var_os(name) {
                 command.env(name, value);
             }

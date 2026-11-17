@@ -52,6 +52,17 @@ exchange for one Rust command surface across this repository, mayfly and site-pr
   mise, shell) and nothing shared with the owner's other repositories.
 - Port xtask in one go (ADR 0012): a large change that would stop the gate while it lands.
 
+## Amended 2026-11-17 (XT-01): the `cargo xtask` alias deferred
+
+XT-01 lands `tools/xtask` without the `.cargo/config.toml` alias the Consequences above expected.
+FND-09's G2 rule refuses any cargo configuration file at any depth, and `scripts/land.sh` runs the
+landing checkout's own copy of that check, so a commit adding one cannot land through it; the
+alias waits for a commit that admits its one pinned shape and is landed by hand (doc/sdlc.md step
+5), noted on XT-08's card. Meanwhile the gate runs xtask through `scripts/xtask.sh`, which builds
+it from outside the tree with an allowlisted environment: the tree's cargo configuration cannot
+steer that build or, as a `runner` would under `cargo run`, replace the binary that then judges
+it.
+
 ## Amended 2026-11-17 (FND-10): Rust 1.99.1
 
 `rust-toolchain.toml` pins Rust **1.99.1** (from 1.97.0), with the same profile, components

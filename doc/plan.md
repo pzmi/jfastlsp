@@ -570,6 +570,7 @@ migrated, when its version changes.
 | `jfl-bench` (`tools/jfl-bench`) | tool only, independent | the benchmark harness over the pinned corpus and the comparison arms (ADR 0031) |
 | `jfl-oracle` (`tools/jfl-oracle`) | tool only, independent | SCIP reader, differential and completeness oracles (ver §7); imports no production crate |
 | `jfl-eval` (`tools/jfl-eval`) | tool only, independent | the agent-evaluation harness and phase 0 measurements (§9) |
+| `xtask` (`tools/xtask`) | tool only, independent | the gate's composition: the stage catalog, its order, each stage's command and the preflight (fnd §9, ADR 0035, XT-01); lane XT moves the rest of the command surface in |
 | `jfl-fuzz` (`fuzz/`) | fuzz only | fuzz targets on the pinned nightly, its own workspace (REL-03) |
 
 `jfl-resolve` (pure) joins the map if DEC-04 picks our own resolver (SEM-01). Two JVM helpers
@@ -617,7 +618,7 @@ between workspace crates (`[dependencies.normal]` in `architecture.toml`, ADR 00
 | `jfl-testkit` | `jfl-domain`, `jfl-protocol`, `jfl-application` |
 | `jfl-conformance` | `jfl-testkit`, the pure and application crates, `jfl-adapter-ipc`, `jfl-composition` |
 | `jfl-architecture` | — (reads `cargo metadata`; no workspace crate) |
-| `jfl-oracle`, `jfl-eval`, `jfl-jdtls`, `jfl-bench` | — (no workspace crate) |
+| `jfl-oracle`, `jfl-eval`, `jfl-jdtls`, `jfl-bench`, `xtask` | — (no workspace crate) |
 
 Rules: acyclic; explicit `members`; adapters never name a sibling adapter, composition or the CLI;
 production crates never reach a test-only or tool-only crate; a dev edge targets a test-only crate
@@ -661,7 +662,8 @@ and files for fixture builders; sleep and clock inside `poll` only), `jfl-confor
 environment), `jfl-architecture` (processes and files: `cargo metadata`, `git`, the scripts it
 tests), `jfl-bench` and `jfl-eval` (processes, files, clock, environment), `jfl-jdtls`
 (processes, files, Unix sockets, spawns, clock, environment: it is a daemon), `jfl-oracle`
-(files). TCP stays denied everywhere.
+(files), `xtask` (processes, files, environment: it runs the gate's tools and judges its
+environment). TCP stays denied everywhere.
 
 Enforced by `#![no_std]` and the `nostd` stage on the pure crates, per-crate clippy
 `disallowed-*` lists and `cargo-deny` wrappers, kept in step by the architecture test (fnd §2.3,

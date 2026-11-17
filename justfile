@@ -1,232 +1,92 @@
-# The command surface (fnd §9, ADR 0030): one recipe per gate stage, `quick`, `check` and
-# `check-only <stage>...`; CI jobs call the same recipes (fnd §7.2). A recipe that has not landed
-# does not exist: just exits non-zero naming it. `just --list` and
-# `just --dump --dump-format json` are the catalog.
+# The command surface (fnd §9, ADR 0035): `quick`, `check`, `check-only <stage>...`, one recipe
+# per gate stage, and the tools around them; CI jobs call the same recipes (fnd §7.2). Since XT-01
+# the gate's composition (the stage catalog, its order, each stage's command and the preflight) is
+# tools/xtask, and the gate recipes are one-line delegations to it through scripts/xtask.sh, which
+# builds xtask from outside the tree so the tree's cargo configuration cannot steer that build.
+# `bash scripts/xtask.sh list --json` is the catalog. A recipe that has not landed does not exist:
+# just exits non-zero naming it.
 set shell := ["bash", "-euo", "pipefail", "-c"]
+
+# xtask, built from this checkout and run with the caller's environment (scripts/xtask.sh).
+xtask := quote(justfile_directory() / "scripts/xtask.sh")
 
 # The pinned tools (cargo-nextest, cargo-deny, gitleaks, ...) by their install directories
 # (`mise bin-paths`), so a stage runs the real binary and never a mise shim, which would apply a
-# mise `[env]` after `_preflight` has looked (fnd §3.6, FND-08); then mise's shims, for a shell
+# mise `[env]` after the preflight has looked (fnd §3.6, FND-08); then mise's shims, for a shell
 # without mise's tools installed (`doctor` says what is missing). CI's mise-action installs the
 # same tools. mise runs code from a trusted configuration as it loads it, so the tree's tool
-# configuration passes scripts/tool-config-check.sh (bash and awk, no mise) first; a refusal
-# fails every recipe before mise has run (FND-09).
-mise_bins := shell('cd "$1" && bash scripts/tool-config-check.sh "$1" && { mise bin-paths 2>/dev/null || true; } | paste -s -d : -', justfile_directory())
+# configuration passes xtask's `tool-config` (no mise) first; a refusal fails every recipe before
+# mise has run (FND-09, XT-01).
+mise_bins := shell('cd "$1" && bash scripts/xtask.sh tool-config "$1" && { mise bin-paths 2>/dev/null || true; } | paste -s -d : -', justfile_directory())
 mise_shims := env("MISE_DATA_DIR", env("XDG_DATA_HOME", env("HOME") / ".local/share") / "mise") / "shims"
 export PATH := if mise_bins == "" { mise_shims + ":" + env("PATH") } else { mise_bins + ":" + mise_shims + ":" + env("PATH") }
 
-# Every cargo of the gate runs with the compiler flags set here, not taken from the environment or
-# from a cargo config file: RUSTFLAGS and an empty RUSTC_WRAPPER beat `build.rustflags` and
-# `build.rustc-wrapper` in any `.cargo/config.toml` (fnd §3.6). `_preflight` still refuses such a
-# config and such variables, so a steered environment fails loudly rather than being overridden
-# silently. Pinned by tools/jfl-architecture/tests/gate_negative_cases.rs.
+# The cargo of the recipes outside the gate (bench, jdtls-it), with the compiler flags set here,
+# not taken from the environment or a cargo config file: RUSTFLAGS and an empty RUSTC_WRAPPER beat
+# `build.rustflags` and `build.rustc-wrapper` in any `.cargo/config.toml` (fnd §3.6). The gate's
+# stages set the same in xtask (tools/xtask/src/catalog.rs, CARGO_ENV).
 cargo := "env RUSTFLAGS='-D warnings' RUSTDOCFLAGS= RUSTC_WRAPPER= RUSTC_WORKSPACE_WRAPPER= cargo"
 
-# The stages of `quick` and `check`, in fnd §9's order. A stage enters `check` in the commit of
-# the task that introduces it (`architecture` with FND-07, `docs` with FND-03, ...).
-quick_stages := "fmt-check architecture clippy unit-tests script-tests"
-check_stages := "fmt-check architecture clippy nostd docs unit-tests integration-tests doctests script-tests deny secrets workflows private-names"
+# The stages of `check`, in order, from xtask's catalog: what scripts/land.sh reads with
+# `just --evaluate check_stages` (its private-names hook) until XT-05 ports it.
+check_stages := shell('bash "$1/scripts/xtask.sh" list | paste -s -d " " -', justfile_directory())
 
 # The inner loop: fmt-check, architecture, clippy, unit tests and the scripts' self-tests. Not the
 # gate.
-quick: (check-only quick_stages)
+quick:
+    bash {{xtask}} quick
 
 # The full blocking gate: every stage, in order; the first failure stops it with its exit code.
-check: (check-only check_stages)
+check:
+    bash {{xtask}} check
 
-# Run the named stages through their recipes, in the order given (what each CI job runs). The
-# names reach the shell as arguments, never as interpolated text, and are checked before use.
+# Run the named stages, in the order given (what each CI job runs). The names reach xtask as
+# arguments, never as interpolated text, and are checked before use.
 [positional-arguments]
 check-only +stages:
-    #!/usr/bin/env bash
-    set -euo pipefail -o noglob
-    valid=" {{check_stages}} "
-    names=()
-    for arg in "$@"; do
-      for stage in $arg; do
-        case "$valid" in *" $stage "*) names+=("$stage") ;; *)
-          echo "check-only: unknown stage '$stage'; valid stages: {{check_stages}}" >&2; exit 2 ;;
-        esac
-      done
-    done
-    exec {{quote(just_executable())}} --justfile {{quote(justfile())}} --working-directory "$PWD" "${names[@]}"
+    bash {{xtask}} check-only "$@"
 
-# Refuse an environment that steers the build (fnd §3.6); every stage depends on it. Variables
-# of cargo, rustc, rustup, clippy and nextest are refused unless allowlisted here; so is any
-# cargo config file inside the repository, one outside it (an ancestor of the working directory,
-# CARGO_HOME) beyond a pinned plain shape, and a mise configuration beyond `[tools]`.
+# Refuse an environment that steers the build (fnd §3.6): xtask's preflight, which every xtask
+# gate command runs first (tools/xtask/src/preflight.rs).
 _preflight:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    refused=()
-    pinned="$(sed -n 's/^channel[[:space:]]*=[[:space:]]*"\(.*\)"$/\1/p' {{quote(justfile_directory() / "rust-toolchain.toml")}})"
-    [ -n "$pinned" ] || { echo "preflight: no channel in rust-toolchain.toml" >&2; exit 1; }
-    while IFS= read -r name; do
-      case "$name" in
-        CARGO_TARGET_DIR | CARGO_BUILD_JOBS | CARGO_INCREMENTAL | CARGO_HOME | CARGO_TERM_* | \
-          CARGO_NET_* | CARGO_HTTP_* | CARGO_REGISTRIES_CRATES_IO_PROTOCOL | RUSTUP_HOME | \
-          RUSTUP_DIST_SERVER | RUSTUP_UPDATE_ROOT | RUSTUP_MAX_RETRIES | RUSTUP_IO_THREADS) ;;
-        RUSTUP_TOOLCHAIN)
-          case "$RUSTUP_TOOLCHAIN" in
-            "$pinned" | "$pinned-x86_64-unknown-linux-gnu" | "$pinned-aarch64-unknown-linux-gnu" | \
-              "$pinned-aarch64-apple-darwin") ;;
-            *) refused+=("$name") ;;
-          esac ;;
-        RUSTFLAGS)
-          case "$RUSTFLAGS" in "" | "-D warnings") ;; *) refused+=("$name") ;; esac ;;
-        NEXTEST_PROFILE)
-          case "$NEXTEST_PROFILE" in default | ci | serial) ;; *) refused+=("$name") ;; esac ;;
-        CARGO | CARGO_* | __CARGO_* | RUSTC | RUSTC_* | RUSTDOC | RUSTDOC_* | RUSTDOCFLAGS | RUSTUP_* | \
-          CLIPPY_* | NEXTEST_* | PROPTEST_*)
-          refused+=("$name") ;;
-      esac
-    done < <(compgen -e)
-    # Cargo reads .cargo/config{,.toml} in every ancestor of the working directory and in
-    # CARGO_HOME. Its allowlist (fnd §3.6, FND-08): inside the repository, no such file at all
-    # (tracked or untracked, at any depth, and in the working directory's ancestors up to the
-    # root); outside it, a file whose every line is a comment, a blank, one of the headers [net],
-    # [http], [term], [build] or [registries.crates-io], or `key = value` with a bare key that
-    # table allows (plain_config below) and a plain value: a string without escapes, a boolean
-    # or a number. Anything else, valid TOML or not (a quoted or escaped key, an inline table, a
-    # dotted key, a multi-line value), is refused: the shape is pinned, no bad key is listed.
-    root={{quote(justfile_directory())}}
-    plain_config() {
-      awk '
-        function allowed(table, key) {
-          if (table == "net") return key ~ /^(retry|git-fetch-with-cli|offline)$/
-          if (table == "http") return key ~ /^(proxy|timeout|cainfo|check-revoke|low-speed-limit|multiplexing|user-agent)$/
-          if (table == "term") return key ~ /^(quiet|verbose|color)$/
-          if (table == "build") return key ~ /^(jobs|target-dir)$/
-          if (table == "registries.crates-io") return key == "protocol"
-          return 0
-        }
-        /^[[:space:]]*(#.*)?$/ { next }
-        /^\[(net|http|term|build|registries\.crates-io)\][[:space:]]*(#.*)?$/ {
-          table = $0; sub(/^\[/, "", table); sub(/\].*$/, "", table); next
-        }
-        /^[a-z][a-z0-9-]*[[:space:]]*=[[:space:]]*("[^"\\]*"|true|false|[0-9]+)[[:space:]]*(#.*)?$/ {
-          key = $0; sub(/[[:space:]]*=.*$/, "", key)
-          if (allowed(table, key)) next
-        }
-        { bad = 1; exit }
-        END { exit bad }' "$1"
-    }
-    git -C "$root" rev-parse --git-dir >/dev/null 2>&1 || { echo "preflight: $root is not a git work tree" >&2; exit 1; }
-    while IFS= read -r -d '' file; do refused+=("$root/$file"); done < <(
-      git -C "$root" ls-files -z --cached --others --exclude-standard -- \
-        ':(glob,icase)**/.cargo/config' ':(glob,icase)**/.cargo/config.toml')
-    dir="$PWD"
-    while :; do
-      for file in "$dir/.cargo/config" "$dir/.cargo/config.toml"; do
-        [ -f "$file" ] || continue
-        case "$dir/" in
-          "$root"/*) refused+=("$file") ;;
-          *) plain_config "$file" || refused+=("$file") ;;
-        esac
-      done
-      [ "$dir" = / ] && break
-      dir="$(dirname "$dir")"
-    done
-    home="${CARGO_HOME:-$HOME/.cargo}"
-    for file in "$home/config" "$home/config.toml"; do
-      if [ -f "$file" ] && ! plain_config "$file"; then refused+=("$file"); fi
-    done
-    # mise and the other tools' implicit configuration (fnd §3.6, FND-08, FND-09): the root
-    # mise.toml is only [tools] with allowlisted backends and plain versions, mise.lock holds only
-    # checksummed release assets, and the root, .github/ and .config/ hold only allowlisted
-    # entries (scripts/tool-config-check.sh, which the top-level lines already ran before mise);
-    # mise loads no other configuration file from inside the repository (an [env], a [hooks] or
-    # a task there would reach the tools of the gate).
-    mise_toml="$root/mise.toml"
-    bash "$root/scripts/tool-config-check.sh" "$root" || refused+=("$root (its tool configuration, above)")
-    if command -v mise >/dev/null 2>&1; then
-      # A configuration mise cannot load (an untrusted one with [env], say) fails closed.
-      listing="$(mise config ls --json 2>/dev/null)" || listing='"path": "mise config ls failed"'
-      while IFS= read -r file; do
-        case "$file" in "$mise_toml") ;; "$root"/* | "mise config ls failed") refused+=("$file") ;; esac
-      done < <(sed -n 's/^[[:space:]]*"path":[[:space:]]*"\(.*\)",\{0,1\}$/\1/p' <<<"$listing")
-    fi
-    if [ "${#refused[@]}" -gt 0 ]; then
-      echo "preflight: refusing to run the gate: ${refused[*]} is outside the allowlist of what may steer the build (fnd §3.6); unset or remove it" >&2
-      exit 1
-    fi
+    bash {{xtask}} preflight
 
-# Formatting, checked, never applied.
-fmt-check: _preflight
-    {{cargo}} fmt --all --check
+# One recipe per stage of the catalog, each the stage alone through xtask.
+fmt-check:
+    bash {{xtask}} check-only fmt-check
 
-# The architecture test (fnd §3.2, FND-07): the dependency law over `cargo metadata` for each
-# target of ADR 0006, the clippy lists against `[grants]` and the source scan, over the tree
-# (tests/architecture.rs, with ARCH-ci-lockstep over ci.yml); plus the checker's own table-driven
-# negative cases and the meta-test (tests/rules.rs), the lockstep's (tests/ci_lockstep.rs) and the
-# gate configuration's (tests/gate_config.rs, ARCH-gate-config) and the decoded YAML under
-# .github/ (tests/workflow_yaml.rs, ARCH-workflow-yaml). The fixture workspaces run in
-# `integration-tests`.
-architecture: _preflight (_require "cargo-nextest")
-    {{cargo}} nextest run --locked --retries 0 --no-tests fail -p jfl-architecture --test architecture --test rules --test ci_lockstep --test gate_config --test workflow_yaml
+architecture:
+    bash {{xtask}} check-only architecture
 
-# Clippy with the authority lists (fnd §2.4): the per-crate lists must match the root one first,
-# and a list entry naming a path that does not exist fails the stage (clippy only warns, and
-# `-D warnings` does not reach configuration warnings).
-clippy: _preflight
-    #!/usr/bin/env bash
-    set -euo pipefail
-    bash {{quote(justfile_directory() / "scripts/clippy-lists.sh")}} --check
-    log="${CARGO_TARGET_DIR:-target}/clippy-stage.log"
-    mkdir -p "$(dirname "$log")"
-    {{cargo}} clippy --workspace --all-targets --locked -- -D warnings 2>&1 | tee "$log"
-    if grep -q "does not refer to a" "$log"; then
-      echo "clippy: a clippy.toml entry names a path that does not exist (above); fix it or, for a crate absent from the graph, add allow-invalid" >&2
-      exit 1
-    fi
+clippy:
+    bash {{xtask}} check-only clippy
 
 # Rewrite every crate's clippy.toml from the root list and architecture.toml's grants.
 clippy-lists:
     bash scripts/clippy-lists.sh
 
-# Build every pure crate of architecture.toml for a target with no std (fnd §2.3, ARCH-domain-purity).
-nostd: _preflight
-    #!/usr/bin/env bash
-    set -euo pipefail
-    line="$(sed -n 's/^pure[[:space:]]*=[[:space:]]*\[\(.*\)\][[:space:]]*$/\1/p' architecture.toml)"
-    crates="$(tr -d '" ' <<<"$line" | tr ',' '\n' | sed '/^$/d')"
-    if [ -z "$crates" ]; then echo "nostd: architecture.toml names no pure crate" >&2; exit 1; fi
-    args=()
-    for crate in $crates; do args+=(-p "$crate"); done
-    {{cargo}} build --locked "${args[@]}" --target x86_64-unknown-none
+nostd:
+    bash {{xtask}} check-only nostd
 
-# Unit and property tests: the lib and bin targets, under nextest (CI picks its profile with
-# NEXTEST_PROFILE=ci; stages take no parameters, so `just a b` runs both). `--retries 0` and
-# `--no-tests fail` on the command line beat any configuration or variable.
-unit-tests: _preflight (_require "cargo-nextest")
-    {{cargo}} nextest run --workspace --locked --retries 0 --no-tests fail --lib --bins
+unit-tests:
+    bash {{xtask}} check-only unit-tests
 
 # The tests that can differ by platform, natively on each target of ADR 0006: what the
 # `linux-arm` and `macos` jobs of ci.yml run (fnd §7.2 rule 4). Not a stage of `check`: on Linux
 # x86-64 the `tests` job runs the same stages, so each stage of `check` stays in one job.
 platform-tests: unit-tests integration-tests doctests
 
-# Integration, component and contract tests: every tests/ target, under nextest.
-integration-tests: _preflight (_require "cargo-nextest")
-    {{cargo}} nextest run --workspace --locked --retries 0 --no-tests fail --test '*'
+integration-tests:
+    bash {{xtask}} check-only integration-tests
 
-# Doctests (nextest does not run them).
-doctests: _preflight
-    {{cargo}} test --workspace --locked --doc
+doctests:
+    bash {{xtask}} check-only doctests
 
-# The scripts' own offline self-tests (scripts/test-*.sh), e.g. the bench corpus fetch.
-script-tests: _preflight
-    #!/usr/bin/env bash
-    set -euo pipefail
-    shopt -s nullglob
-    tests=(scripts/test-*.sh)
-    if [ "${#tests[@]}" -eq 0 ]; then echo "script-tests: no scripts/test-*.sh" >&2; exit 1; fi
-    for t in "${tests[@]}"; do echo "script-tests: $t" >&2; bash "$t"; done
+script-tests:
+    bash {{xtask}} check-only script-tests
 
-# The ADR index of doc/adr/README.md agrees with the records (FND-03; scripts/adr-index.sh, which
-# does what `adrs generate toc` cannot: our status annotations). Needs only bash and awk.
-docs: _preflight
-    bash scripts/adr-index.sh check doc/adr
+docs:
+    bash {{xtask}} check-only docs
 
 alias adr-index := docs
 
@@ -240,23 +100,15 @@ dco range="origin/main..HEAD":
 dco-event event before base head:
     bash scripts/dco-check.sh --event {{quote(event)}} {{quote(before)}} {{quote(base)}} {{quote(head)}}
 
-# Advisories, licences, sources and bans (fnd §2.5, §7.4).
-deny: _preflight (_require "cargo-deny")
-    {{cargo}} deny --locked check
+deny:
+    bash {{xtask}} check-only deny
 
-# gitleaks over the full history with its default rules and none of its default path allowlist
-# (FND-04, FND-08, fnd §7.4; scripts/secrets-check.sh, scripts/gitleaks-config.sh). A shallow
-# clone fails: fetch the history in full.
-secrets: _preflight
-    bash scripts/secrets-check.sh
+# A shallow clone fails the secrets stage: fetch the history in full.
+secrets:
+    bash {{xtask}} check-only secrets
 
-# The static checks of GitHub Actions files and shell scripts, offline (FND-04, fnd §7.3;
-# scripts/workflows-check.sh): actionlint with shellcheck, zizmor's offline audits with the
-# hash-pin policy, pinact's syntactic pin check, then shellcheck over scripts/ and the hooks.
-# A tree without workflow files passes with a notice.
-workflows: _preflight
-    bash scripts/workflows-check.sh workflows
-    bash scripts/workflows-check.sh shell
+workflows:
+    bash {{xtask}} check-only workflows
 
 # pinact's comment check: each `# vX.Y.Z` names the SHA it sits on. Needs the GitHub API (set
 # GITHUB_TOKEN in CI), so it is outside `check`; ci.yml's security job runs it (FND-05).
@@ -278,12 +130,9 @@ ci-parity:
 workflows-online:
     bash scripts/workflows-check.sh online
 
-# No name whose salted hash is in .private-names.sha256 in the lines this change adds, the
-# untracked files or the commit messages since `git merge-base HEAD origin/main` (FND-04, fnd
-# §7.4; scripts/private-names-check.sh). The hash file is required under CI=true; add a name
-# with scripts/private-name-add.sh (owner).
-private-names: _preflight
-    bash scripts/private-names-check.sh
+# The hash file is required under CI=true; add a name with scripts/private-name-add.sh (owner).
+private-names:
+    bash {{xtask}} check-only private-names
 
 # Fetch the pinned benchmark corpus of doc/bench-corpus.md into its cache (BENCH-01).
 bench-corpus size="small" cache="":

@@ -6,7 +6,7 @@ schema = 1
 [workspace]
 production = ["jfl-domain", "jfl-protocol", "jfl-application", "jfl-process", "jfl-adapter-fs", "jfl-adapter-git", "jfl-adapter-java", "jfl-adapter-classfile", "jfl-adapter-store", "jfl-adapter-ipc", "jfl-adapter-lsp", "jfl-adapter-javac", "jfl-adapter-gradle", "jfl-composition", "jfl-cli"]
 test_only = ["jfl-testkit", "jfl-conformance", "jfl-architecture"]
-tool_only = ["jfl-oracle", "jfl-eval", "jfl-jdtls", "jfl-bench"]
+tool_only = ["jfl-oracle", "jfl-eval", "jfl-jdtls", "jfl-bench", "xtask"]
 # fuzz_only = ["jfl-fuzz"] arrives with REL-03 (its own workspace under fuzz/).
 
 [roles]
@@ -19,14 +19,14 @@ root = ["jfl-composition", "jfl-cli"]
 # What each crate's clippy.toml may drop from the canonical disallowed list (fnd §2.4). The
 # git, javac and gradle adapters spawn only through jfl-process, so they hold no process grant.
 [grants]
-process = ["jfl-process", "jfl-testkit", "jfl-architecture", "jfl-bench", "jfl-eval", "jfl-jdtls"]
+process = ["jfl-process", "jfl-testkit", "jfl-architecture", "jfl-bench", "jfl-eval", "jfl-jdtls", "xtask"]
 socket = ["jfl-adapter-ipc", "jfl-jdtls"]
-fs = ["jfl-adapter-fs", "jfl-adapter-git", "jfl-adapter-store", "jfl-adapter-classfile", "jfl-adapter-javac", "jfl-adapter-gradle", "jfl-adapter-ipc", "jfl-composition", "jfl-testkit", "jfl-conformance", "jfl-architecture", "jfl-bench", "jfl-eval", "jfl-jdtls", "jfl-oracle"]
+fs = ["jfl-adapter-fs", "jfl-adapter-git", "jfl-adapter-store", "jfl-adapter-classfile", "jfl-adapter-javac", "jfl-adapter-gradle", "jfl-adapter-ipc", "jfl-composition", "jfl-testkit", "jfl-conformance", "jfl-architecture", "jfl-bench", "jfl-eval", "jfl-jdtls", "jfl-oracle", "xtask"]
 spawn = ["jfl-adapter-ipc", "jfl-composition", "jfl-jdtls"]
 sleep = ["jfl-testkit", "jfl-jdtls"]
 clock = ["jfl-process", "jfl-composition", "jfl-testkit", "jfl-bench", "jfl-eval", "jfl-jdtls"]
-env = ["jfl-process", "jfl-composition", "jfl-cli", "jfl-conformance", "jfl-architecture", "jfl-bench", "jfl-eval", "jfl-jdtls"]
-independent = ["jfl-oracle", "jfl-eval", "jfl-jdtls", "jfl-bench"]
+env = ["jfl-process", "jfl-composition", "jfl-cli", "jfl-conformance", "jfl-architecture", "jfl-bench", "jfl-eval", "jfl-jdtls", "xtask"]
+independent = ["jfl-oracle", "jfl-eval", "jfl-jdtls", "jfl-bench", "xtask"]
 
 # The only legal normal edges between workspace crates (plan §6.3).
 [dependencies.normal]
@@ -52,6 +52,7 @@ jfl-oracle = []
 jfl-eval = []
 jfl-jdtls = []
 jfl-bench = []
+xtask = []
 
 [dependencies.build]
 
@@ -66,7 +67,10 @@ jfl-bench = []
 # yaml-rust2 reads every YAML file under .github/ event by event for ARCH-workflow-yaml (FND-09):
 # the anchors, aliases and tags a serde reader resolves silently are events here; MIT OR
 # Apache-2.0, no build script, default features off (no encoding_rs).
-jfl-architecture = { cargo_metadata = ["default"], serde = ["default", "derive"], serde_norway = ["default"], sha2 = ["default"], toml = ["default"], yaml-rust2 = [] }
+# serde_json parses xtask's stage catalog (`list --json`) for ARCH-ci-lockstep and ARCH-gate-config
+# (XT-01): it was a dev-dependency (the synthetic `cargo metadata` JSON of tests/rules.rs) and is in
+# the graph through cargo_metadata already.
+jfl-architecture = { cargo_metadata = ["default"], serde = ["default", "derive"], serde_json = ["default"], serde_norway = ["default"], sha2 = ["default"], toml = ["default"], yaml-rust2 = [] }
 # jfl-jdtls (EVAL-11, ADR 0028): serde_json parses only the JSON-RPC envelope and forwards params,
 # result and error as raw values (raw_value); serde derives the envelope; sha1_smol keys jdtls's
 # -data on the full worktree path; rustix gives the effective uid, the socket peer's uid and the
@@ -77,11 +81,15 @@ jfl-jdtls = { rustix = ["net", "process", "std"], serde = ["default", "derive"],
 # .gitignore-aware walk), rayon (the pool), blake3, tree-sitter and the orchard grammar (the E1
 # pipeline's stages) reproduce the archived spike; toml reads suites, serde and serde_json write
 # results. The tree-sitter crates are wrapped to jfl-bench in deny.toml for the same reason.
+# xtask (XT-01, ADR 0035): regex holds the shapes the preflight and the tool configuration check
+# ported from awk and sed (the same patterns, line for line); already in the graph (ignore, under
+# jfl-bench), MIT OR Apache-2.0, no build script. No clap: a hand parser keeps the launcher's first
+# build one crate deep (scripts/xtask.sh).
+xtask = { regex = ["default"] }
+
 jfl-bench = { blake3 = ["default"], ignore = ["default"], rayon = ["default"], serde = ["default", "derive"], serde_json = ["default"], toml = ["default"], tree-sitter = ["default"], tree-sitter-java-orchard = ["default"] }
 
 [external.dev]
-# The architecture test's synthetic `cargo metadata` JSON (tests/rules.rs).
-jfl-architecture = { serde_json = ["default"] }
 
 [external.build]
 

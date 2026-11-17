@@ -25,6 +25,7 @@ members = [
     "tools/jfl-eval",
     "tools/jfl-jdtls",
     "tools/jfl-bench",
+    "tools/xtask",
 ]
 exclude = ["spikes"]
 resolver = "3"

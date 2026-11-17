@@ -22,7 +22,8 @@
 # runs with `--norc` (a `.shellcheckrc` with `disable=all` turned it off), actionlint with
 # `-config-file /dev/null` (it reads `.github/actionlint.yaml` by itself; its embedded shellcheck
 # already ignores rc files) and zizmor with the pinned `.github/zizmor.yml` (.config/gate.sha256).
-# pinact's own configuration files are refused by scripts/tool-config-check.sh's allowlists.
+# pinact's own configuration files are refused by xtask's tool-config allowlists
+# (tools/xtask/src/tool_config.rs).
 # Inline suppressions are held like `#[allow]` (the FND-09 review's G3, H1, H2): every line of a
 # linted file (a shell script, or a workflow's `run:` block) with a shellcheck directive comment,
 # at its start or trailing a command (`{ # ...`, which shellcheck honours too), and every zizmor

@@ -8,8 +8,8 @@
 # `binary()` filter that matches no binary yet, so the convention is on the test path).
 daemon-or-jvm = { max-threads = 2 }
 # Tests that run a nested cargo, clippy or cargo-deny over a fixture workspace (the gate's negative
-# cases and the architecture test's fixture workspaces, tools/jfl-architecture/tests/): each is a
-# build, so two at a time. The architecture test's table-driven cases run in memory, outside it.
+# cases and the architecture test's fixture workspaces, tools/jfl-architecture/tests/; xtask's stage
+# and launcher cases, tools/xtask/tests/): each is a build, so two at a time. The architecture test's table-driven cases run in memory, outside it.
 nested-cargo = { max-threads = 2 }
 
 [profile.default]
@@ -23,6 +23,10 @@ test-group = 'daemon-or-jvm'
 
 [[profile.default.overrides]]
 filter = 'package(jfl-architecture) & (binary(gate_negative_cases) | binary(fixture_workspaces))'
+test-group = 'nested-cargo'
+
+[[profile.default.overrides]]
+filter = 'package(xtask) & (binary(stages) | binary(launcher))'
 test-group = 'nested-cargo'
 
 # CI: every failure reported, JUnit for the job summary (target/nextest/ci/junit.xml).

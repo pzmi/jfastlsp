@@ -1,46 +1,45 @@
 //! `ARCH-gate-config`'s negative cases (fnd §3.6, FND-08): each case is the repository's own gate
-//! files (the justfile, the pin manifest, the pinned scripts, `.config/nextest.toml`, `mise.toml`,
-//! `rust-toolchain.toml`) in memory with one small change that must produce the rule at its path
-//! with its reason; the unchanged files must produce nothing. Several reproduce the FND-05
-//! checkpoint's bypasses (N1, N3, N6).
+//! files (the justfile, the pin manifest, the pinned scripts, the xtask composition sources,
+//! `.config/nextest.toml`, `mise.toml`, `rust-toolchain.toml`) in memory with one small change that
+//! must produce the rule at its path with its reason; the unchanged files must produce nothing.
+//! Several reproduce the FND-05 checkpoint's bypasses (N1, N3, N6). The stage catalog is the
+//! repository's own (`bash scripts/xtask.sh list --json`, since XT-01).
 
 use std::error::Error;
 use std::path::Path;
 
-use jfl_architecture::gate::{self, GATE_FILES, MISE, MISE_LOCK, NEXTEST, PINS, RULE, TOOLCHAIN};
-use jfl_architecture::{Finding, ci, tree::MemoryTree};
+use jfl_architecture::gate::{self, MISE, MISE_LOCK, NEXTEST, PINS, RULE, TOOLCHAIN};
+use jfl_architecture::tree::{DiskTree, MemoryTree};
+use jfl_architecture::{Finding, ci};
 
 type TestResult = Result<(), Box<dyn Error>>;
 
+fn root() -> std::path::PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
+}
+
 fn repo_file(path: &str) -> Result<String, Box<dyn Error>> {
-    Ok(std::fs::read_to_string(
-        Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../..")
-            .join(path),
-    )?)
+    Ok(std::fs::read_to_string(root().join(path))?)
 }
 
-/// The repository's `scripts/test-*.sh`, which the pin manifest covers by glob.
-fn test_scripts() -> Result<Vec<String>, Box<dyn Error>> {
-    let mut found = Vec::new();
-    for entry in std::fs::read_dir(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scripts"))? {
-        let name = entry?.file_name().to_string_lossy().into_owned();
-        if name.starts_with("test-") && name.ends_with(".sh") {
-            found.push(format!("scripts/{name}"));
-        }
+/// The rule over `tree` with the repository's stage catalog; a catalog that cannot be listed is
+/// its finding, so no case passes for want of one.
+fn check(tree: &MemoryTree) -> Vec<Finding> {
+    match ci::xtask_catalog(&root()) {
+        Ok(catalog) => gate::check(tree, &catalog),
+        Err(finding) => vec![finding],
     }
-    found.sort();
-    Ok(found)
 }
 
-/// The gate's files as the repository has them.
+/// The gate's files as the repository has them: the fixed ones and every file the pin manifest
+/// covers ([`gate::gate_files`]: `GATE_FILES`, the `scripts/test-*.sh`, the xtask sources).
 fn baseline() -> Result<MemoryTree, Box<dyn Error>> {
     let mut tree = MemoryTree::new();
-    let fixed = [ci::JUSTFILE, PINS, NEXTEST, MISE, TOOLCHAIN, MISE_LOCK]
+    let fixed = [ci::JUSTFILE, PINS, NEXTEST, MISE, TOOLCHAIN, MISE_LOCK].map(str::to_owned);
+    for path in fixed
         .into_iter()
-        .chain(GATE_FILES)
-        .map(str::to_owned);
-    for path in fixed.chain(test_scripts()?) {
+        .chain(gate::gate_files(&DiskTree::new(&root())))
+    {
         tree = tree.with(&path, &repo_file(&path)?);
     }
     Ok(tree)
@@ -75,7 +74,7 @@ fn should_find_nothing_when_the_gate_files_are_the_repository_s_own() -> TestRes
     let tree = baseline()?;
 
     // when
-    let found = gate::check(&tree);
+    let found = check(&tree);
 
     // then
     let report: Vec<String> = found.iter().map(ToString::to_string).collect();
@@ -88,12 +87,12 @@ fn should_fail_gate_config_when_a_stage_recipe_changes_without_its_pin() -> Test
     // given: the first review's probe, `check` running the quick stages only
     let tree = edited(
         ci::JUSTFILE,
-        "check: (check-only check_stages)",
-        "check: (check-only quick_stages)",
+        "    bash {{xtask}} check\n",
+        "    bash {{xtask}} quick\n",
     )?;
 
     // when
-    let found = gate::check(&tree);
+    let found = check(&tree);
 
     // then
     assert_reported(&found, PINS, "`justfile::check` changed");
@@ -102,19 +101,32 @@ fn should_fail_gate_config_when_a_stage_recipe_changes_without_its_pin() -> Test
 
 #[test]
 fn should_fail_gate_config_when_any_pinned_part_of_the_gate_changes() -> TestResult {
-    // given: a stage body, the preflight, a top-level variable and a pinned script, each neutered
+    // given: a stage body (in xtask's catalog since XT-01), the preflight (its recipe and its
+    // code), a stage recipe, a top-level variable and a pinned script, each neutered
     let cases = [
         (
-            ci::JUSTFILE,
-            "--retries 0 --no-tests fail --lib --bins",
-            "--retries 0 --no-tests pass --lib --bins",
-            "`justfile::unit-tests` changed",
+            "tools/xtask/src/catalog.rs",
+            "\"fail\",\n                    \"--lib\",",
+            "\"pass\",\n                    \"--lib\",",
+            "`tools/xtask/src/catalog.rs` changed",
         ),
         (
             ci::JUSTFILE,
-            "    refused=()\n",
-            "    refused=()\n    exit 0\n",
+            "    bash {{xtask}} preflight\n",
+            "    true\n",
             "`justfile::_preflight` changed",
+        ),
+        (
+            "tools/xtask/src/preflight.rs",
+            "\"RUSTFLAGS\" => !matches!(value.as_ref(), \"\" | \"-D warnings\"),",
+            "\"RUSTFLAGS\" => false,",
+            "`tools/xtask/src/preflight.rs` changed",
+        ),
+        (
+            ci::JUSTFILE,
+            "    bash {{xtask}} check-only unit-tests\n",
+            "    true\n",
+            "`justfile::unit-tests` changed",
         ),
         (
             ci::JUSTFILE,
@@ -133,7 +145,7 @@ fn should_fail_gate_config_when_any_pinned_part_of_the_gate_changes() -> TestRes
     // when
     let mut found = Vec::new();
     for (path, from, to, reason) in cases {
-        found.push((gate::check(&edited(path, from, to)?), reason));
+        found.push((check(&edited(path, from, to)?), reason));
     }
 
     // then
@@ -159,9 +171,9 @@ fn should_fail_gate_config_when_the_manifest_lists_too_much_or_too_little() -> T
     let gone = baseline()?.without(PINS);
 
     // when
-    let extra_found = gate::check(&extra);
-    let missing_found = gate::check(&missing);
-    let gone_found = gate::check(&gone);
+    let extra_found = check(&extra);
+    let missing_found = check(&missing);
+    let gone_found = check(&gone);
 
     // then
     assert_reported(
@@ -183,12 +195,12 @@ fn should_fail_gate_config_when_a_gate_recipe_runs_an_unpinned_script() -> TestR
     // given
     let tree = edited(
         ci::JUSTFILE,
-        "    bash scripts/secrets-check.sh\n",
-        "    bash scripts/secrets-check.sh\n    bash scripts/bench-corpus.sh fetch small\n",
+        "    bash {{xtask}} check-only secrets\n",
+        "    bash {{xtask}} check-only secrets\n    bash scripts/bench-corpus.sh fetch small\n",
     )?;
 
     // when
-    let found = gate::check(&tree);
+    let found = check(&tree);
 
     // then
     assert_reported(&found, ci::JUSTFILE, "runs `scripts/bench-corpus.sh`");
@@ -221,7 +233,7 @@ fn should_fail_gate_config_when_nextest_toml_leaves_its_shape() -> TestResult {
     // when
     let mut found = Vec::new();
     for (from, to) in cases {
-        found.push(gate::check(&edited(NEXTEST, from, to)?));
+        found.push(check(&edited(NEXTEST, from, to)?));
     }
 
     // then
@@ -244,7 +256,7 @@ fn should_fail_gate_config_when_mise_toml_holds_more_than_tools() -> TestResult 
     let mut found = Vec::new();
     for extra in cases {
         let text = format!("{}{extra}", repo_file(MISE)?);
-        found.push(gate::check(&baseline()?.with(MISE, &text)));
+        found.push(check(&baseline()?.with(MISE, &text)));
     }
 
     // then
@@ -268,8 +280,8 @@ fn should_fail_gate_config_when_a_toolchain_file_leaves_its_shape() -> TestResul
     );
 
     // when
-    let path_found = gate::check(&path);
-    let nested_found = gate::check(&nested);
+    let path_found = check(&path);
+    let nested_found = check(&nested);
 
     // then
     assert_reported(&path_found, TOOLCHAIN, "`toolchain.path` is not allowed");
@@ -311,7 +323,7 @@ fn should_fail_gate_config_when_the_tree_holds_a_cargo_or_mise_config() -> TestR
     // when
     let mut found = Vec::new();
     for (path, contents, reason) in files {
-        found.push((gate::check(&baseline()?.with(path, contents)), path, reason));
+        found.push((check(&baseline()?.with(path, contents)), path, reason));
     }
 
     // then
@@ -379,7 +391,7 @@ fn should_fail_gate_config_when_a_tool_reads_an_unlisted_configuration_file() ->
     // when
     let mut found = Vec::new();
     for (path, contents, at, reason) in files {
-        found.push((gate::check(&baseline()?.with(path, contents)), at, reason));
+        found.push((check(&baseline()?.with(path, contents)), at, reason));
     }
 
     // then
@@ -411,7 +423,7 @@ fn should_fail_gate_config_when_mise_names_a_plugin_backend_or_a_template() -> T
     let mut found = Vec::new();
     for (line, reason) in cases {
         let text = format!("{}{line}", repo_file(MISE)?);
-        found.push((gate::check(&baseline()?.with(MISE, &text)), reason));
+        found.push((check(&baseline()?.with(MISE, &text)), reason));
     }
 
     // then
@@ -452,7 +464,7 @@ fn should_fail_gate_config_when_mise_lock_leaves_its_shape() -> TestResult {
     // when
     let mut found = Vec::new();
     for text in &cases {
-        found.push(gate::check(&baseline()?.with(MISE_LOCK, text)));
+        found.push(check(&baseline()?.with(MISE_LOCK, text)));
     }
 
     // then
@@ -464,8 +476,10 @@ fn should_fail_gate_config_when_mise_lock_leaves_its_shape() -> TestResult {
 
 #[test]
 fn should_fail_gate_config_when_a_test_script_or_a_policy_changes_without_its_pin() -> TestResult {
-    // given: the FND-08 re-verification's F4, files that define the gate besides its recipes
+    // given: the FND-08 re-verification's F4, files that define the gate besides its recipes,
+    // and (XT-01) a new module of xtask, which composes the gate
     let new_test = baseline()?.with("scripts/test-anything.sh", "exit 0\n");
+    let new_module = baseline()?.with("tools/xtask/src/skip.rs", "//! x\n");
     let cases = [
         (
             "scripts/test-secrets.sh",
@@ -488,10 +502,11 @@ fn should_fail_gate_config_when_a_test_script_or_a_policy_changes_without_its_pi
     ];
 
     // when
-    let new_found = gate::check(&new_test);
+    let new_found = check(&new_test);
+    let module_found = check(&new_module);
     let mut found = Vec::new();
     for (path, from, to, reason) in cases {
-        found.push((gate::check(&edited(path, from, to)?), reason));
+        found.push((check(&edited(path, from, to)?), reason));
     }
 
     // then
@@ -499,6 +514,11 @@ fn should_fail_gate_config_when_a_test_script_or_a_policy_changes_without_its_pi
         &new_found,
         PINS,
         "`scripts/test-anything.sh` is part of the gate but not pinned",
+    );
+    assert_reported(
+        &module_found,
+        PINS,
+        "`tools/xtask/src/skip.rs` is part of the gate but not pinned",
     );
     for (findings, reason) in found {
         assert_reported(&findings, PINS, reason);
@@ -540,7 +560,7 @@ fn should_fail_gate_config_when_what_decides_landing_changes_without_its_pin() -
     // when
     let mut found = Vec::new();
     for (path, from, to, reason) in cases {
-        found.push((gate::check(&edited(path, from, to)?), reason));
+        found.push((check(&edited(path, from, to)?), reason));
     }
 
     // then
@@ -558,8 +578,8 @@ fn should_fail_gate_config_when_a_cargo_dir_or_a_nested_gitleaks_policy_exists()
     let nested = baseline()?.with("crates/x/.gitleaks.toml", "title = \"x\"\n");
 
     // when
-    let cargo_found = gate::check(&cargo_dir);
-    let nested_found = gate::check(&nested);
+    let cargo_found = check(&cargo_dir);
+    let nested_found = check(&nested);
 
     // then
     assert_reported(&cargo_found, ".cargo", "not an allowed entry at the root");
@@ -579,8 +599,8 @@ fn should_fail_gate_config_when_a_cargo_or_toolchain_file_differs_only_by_case()
     let toolchain = baseline()?.with("crates/x/Rust-Toolchain.toml", "[toolchain]\n");
 
     // when
-    let cargo_found = gate::check(&cargo);
-    let toolchain_found = gate::check(&toolchain);
+    let cargo_found = check(&cargo);
+    let toolchain_found = check(&toolchain);
 
     // then
     assert_reported(
