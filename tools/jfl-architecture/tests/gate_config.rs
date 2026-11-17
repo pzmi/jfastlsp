@@ -259,8 +259,8 @@ fn should_fail_gate_config_when_a_toolchain_file_leaves_its_shape() -> TestResul
     // given
     let path = edited(
         TOOLCHAIN,
-        "channel = \"1.97.0\"",
-        "channel = \"1.97.0\"\npath = \"/elsewhere/toolchain\"",
+        "channel = \"1.99.1\"",
+        "channel = \"1.99.1\"\npath = \"/elsewhere/toolchain\"",
     )?;
     let nested = baseline()?.with(
         "crates/x/rust-toolchain.toml",

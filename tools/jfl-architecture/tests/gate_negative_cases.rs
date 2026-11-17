@@ -286,7 +286,7 @@ fn should_refuse_the_gate_when_any_steering_variable_is_set() -> TestResult {
         ("NEXTEST_PROFILE", "lenient"),
         // FND-02's review, LOW: a lookalike toolchain, cargo's internal channel override, and
         // proptest's knobs (fnd §9: never inline PROPTEST_*).
-        ("RUSTUP_TOOLCHAIN", "1.97.0-evil"),
+        ("RUSTUP_TOOLCHAIN", "1.99.1-evil"),
         ("__CARGO_TEST_CHANNEL_OVERRIDE_DO_NOT_USE_THIS", "nightly"),
         ("PROPTEST_CASES", "1"),
     ];
@@ -414,7 +414,7 @@ fn should_pass_preflight_when_nothing_steers_the_build() -> TestResult {
         .arg("_preflight")
         .env("RUSTFLAGS", "-D warnings")
         .env("NEXTEST_PROFILE", "ci")
-        .env("RUSTUP_TOOLCHAIN", "1.97.0-x86_64-unknown-linux-gnu");
+        .env("RUSTUP_TOOLCHAIN", "1.99.1-x86_64-unknown-linux-gnu");
 
     // when
     let output = preflight.output()?;

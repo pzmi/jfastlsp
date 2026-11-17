@@ -27,7 +27,7 @@ is replaced; nothing is dropped to make the move.
   today (pinact, adrs, cargo-llvm-cov, diff-cover, cargo-mutants) until a card decides otherwise.
 - **Tool versions** live in `tools/versions.toml`, checked by `cargo xtask doctor` and installed
   checksum-verified, as ADR 0011 described; `rust-toolchain.toml` keeps the Rust pin, recorded here
-  (1.97.0, ADR 0011's pin, until FND-10 moves it to 1.99.1 by amending this record).
+  (ADR 0011's 1.97.0 at first; 1.99.1 since FND-10, see the amendment below).
 - **The architecture checks move in**: `jfl-architecture`'s rules, fixtures and meta-test become
   `cargo xtask architecture`, keeping every negative case.
 - **Every check the gate runs today keeps running**: each XT card lists the stages, negative
@@ -51,3 +51,14 @@ exchange for one Rust command surface across this repository, mayfly and site-pr
 - Keep ADR 0030's maintained-tool foundation: fewer lines to own, but three surfaces (just,
   mise, shell) and nothing shared with the owner's other repositories.
 - Port xtask in one go (ADR 0012): a large change that would stop the gate while it lands.
+
+## Amended 2026-11-17 (FND-10): Rust 1.99.1
+
+`rust-toolchain.toml` pins Rust **1.99.1** (from 1.97.0), with the same profile, components
+(`rustfmt`, `clippy`, `llvm-tools-preview`) and `x86_64-unknown-none` target, and
+`[workspace.package] rust-version` moves to `"1.99"`. The reason is ADR 0023's amendment of the
+same day: `ristretto_jimage` 0.35.0, the reader of the JDK's `lib/modules`, needs 1.99.1; the
+dependency itself arrives with PROJ-03. CI installs whatever `rust-toolchain.toml` names and
+`Swatinem/rust-cache` keys its cache by `rustc -vV`, so neither needed an edit; no tool in
+`mise.toml` is built against the toolchain. ADR 0011 stays as written (superseded); its 1.97.0 is
+history.

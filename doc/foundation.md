@@ -433,10 +433,11 @@ after `_preflight`, never through the caller's environment.
 
 ### 4.1 Baseline
 
-Stable toolchain pinned exactly in `rust-toolchain.toml` (ADR 0030, carrying ADR 0011's pin:
-1.97.0, edition 2024, resolver 3, `rustfmt`, `clippy`, `llvm-tools-preview`). `Cargo.lock`
-committed; every cargo command in the gate runs `--locked`. `publish = false` everywhere. A dated
-nightly is pinned in `mise.toml` for `cargo-fuzz` only and never builds a shipped artefact.
+Stable toolchain pinned exactly in `rust-toolchain.toml` (ADR 0035, amended 2026-11-17, carrying
+ADR 0011's pin forward: 1.99.1, edition 2024, resolver 3, `rust-version = "1.99"`, `rustfmt`,
+`clippy`, `llvm-tools-preview`). `Cargo.lock` committed; every cargo command in the gate runs
+`--locked`. `publish = false` everywhere. A dated nightly is pinned in `mise.toml` for
+`cargo-fuzz` only and never builds a shipped artefact.
 
 ### 4.2 Workspace lints
 
