@@ -10,8 +10,7 @@ session after reading only what the card names.
 **Live gate:** `just check` (and `just quick` while iterating), with tools from
 `mise install --locked`, since FND-02; before it, the fallback gate (`cargo fmt --all --check &&
 cargo clippy --workspace --all-targets --locked -- -D warnings && cargo test --workspace --locked`).
-Until FND-03 lands, the orchestrator lands commits by hand ([`sdlc.md`](sdlc.md) §2); from then
-on with `scripts/land.sh`. mise and just come from `scripts/bootstrap-tools.sh` (fnd §8), which
+Since FND-03 the orchestrator lands commits with `scripts/land.sh` ([`sdlc.md`](sdlc.md) §2). mise and just come from `scripts/bootstrap-tools.sh` (fnd §8), which
 the SessionStart hook runs in cloud sessions. Until FND-01 lands there is no Cargo workspace and
 the gate is vacuous; BOOT-00 (plan, process and agent instructions), BOOT-01 (the reuse survey
 and early benchmarks applied) and BOOT-02 (the bootstrap review applied) are the only commits.
@@ -88,7 +87,7 @@ the skills plugin).
 8. **Golden first:** a change to a protocol message, the `--json` output or an LSP response
    writes or extends the golden fixture before the code (fnd §11.2).
 9. **Decisions:** a new or reversed architectural decision adds an ADR (`adrs new`, or the
-   template copied by hand for a reserved number or before FND-03), or amends or supersedes one,
+   template copied by hand for a reserved number), or amends or supersedes one,
    in the same commit, with the tests and rules that pin it. Agents never flip Proposed to
    Accepted and never decide a `DEC-` task.
 10. **Scope:** do not edit `CLAUDE.md` or `.claude/` (the orchestrator's); report a needed change.

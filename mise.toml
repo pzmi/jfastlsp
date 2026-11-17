@@ -9,3 +9,8 @@ just = "1.59.0"
 
 # Licences, advisories, sources and bans: the `deny` stage (FND-02); prebuilt release asset.
 "aqua:EmbarkStudios/cargo-deny" = "0.21.0"
+
+# ADR tooling: `adrs new` (FND-03, ADR 0030). No aqua registry entry, so the github backend over the
+# project's dist release assets; the lock entries carry the SHA-256 of each asset (sha256.sum of
+# the release). Version 0.13.0 is the current release on 2026-11-17.
+"github:joshrotenberg/adrs" = "0.13.0"

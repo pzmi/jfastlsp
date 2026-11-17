@@ -1,0 +1,10 @@
+# The ADR tool's configuration (FND-03, ADR 0030): `adrs new "<title>"` writes the next record from
+# doc/adr/template.md in the Nygard format of ADR 0001, as Proposed. Compatible mode, not
+# NextGen: no YAML frontmatter, so the records stay plain Nygard files. Add the index row to
+# doc/adr/README.md afterwards; `just adr-index` checks it.
+adr_dir = "doc/adr"
+default_status = "proposed"
+no_edit = true
+
+[templates]
+custom = "doc/adr/template.md"

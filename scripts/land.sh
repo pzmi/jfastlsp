@@ -1,0 +1,197 @@
+#!/usr/bin/env bash
+# Land reviewed commits on origin/main (FND-03, ADR 0002 as amended, fnd §10.2). The orchestrator's
+# one way to integrate: each commit is cherry-pickable, gated on the MERGED tree, and pushed only
+# on green. Nothing in the calling checkout moves until the push has succeeded.
+#
+# Usage: scripts/land.sh [--no-push] [--allow-unsigned] [--author "Name <email>"]
+#                        [--remote NAME] [--branch NAME] SHA...
+#
+#   1. refuse a dirty checkout (modified, staged or untracked files), fetch the remote;
+#   2. make a temporary worktree at <remote>/<branch>, cherry-pick each SHA in order, keeping its
+#      author, message and trailers (the committer, and the signature, are the environment's);
+#   3. resolve only two conflicts: Cargo.lock (take the integration side, then `cargo update -w`)
+#      and doc/adr/README.md (union of both sides' rows, sorted); any other conflict aborts and
+#      names its files. The index is resolved only when every conflicting line is an index row
+#      (prose in the README that both sides changed aborts), and the resulting Cargo.lock diff
+#      against the lane's own is printed;
+#   4. check the merged commits: each is authored by the owner identity of ADR 0003 (--author
+#      overrides it, for a scratch repository), a `Signed-off-by` matching the author
+#      (scripts/dco-check.sh) and a signature in the commit HEADER (a `gpgsig` line in the message
+#      body does not count; --allow-unsigned waives it for a repository that does not sign);
+#   5. run `just check` on the merged tree. Once FND-04 adds the `private-names` stage to `check`,
+#      a missing or empty `.private-names.sha256` aborts here (fnd §7.4); a tree whose justfile
+#      names the stage but leaves it out of `check` aborts too; so does a gate that left the tree
+#      changed (what was gated must be what is pushed);
+#   6. push the result to <remote> <branch>, never forced; on a non-fast-forward fetch and redo
+#      everything (cherry-pick and gate included) once.
+#
+# --no-push stops after step 5 (a dry run: the gate on what would land). In both modes the result
+# is kept as refs/land/last; after a push the local branch fast-forwards to it when it can.
+# CARGO_TARGET_DIR passes through to the gate (a fresh worktree otherwise builds from scratch).
+# Exit: 0 landed (or dry run green), 1 refused, aborted or gate red, 2 usage.
+#
+# Pinned by: tools/jfl-architecture/tests/land_scripts.rs (land cases)
+set -euo pipefail
+
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+remote=origin
+branch=main
+push=1
+allow_unsigned=0
+owner="Patryk Żmigrodzki <pzmi@users.noreply.github.com>"
+requested=()
+
+die() { echo "land: $*" >&2; exit 1; }
+usage() { sed -n '2,/^set -euo/p' "${BASH_SOURCE[0]}" | sed '$d; s/^# \{0,1\}//' >&2; exit 2; }
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --no-push) push=0 ;;
+    --allow-unsigned) allow_unsigned=1 ;;
+    --remote | --branch | --author)
+      [ $# -ge 2 ] || usage
+      case "$1" in --remote) remote="$2" ;; --branch) branch="$2" ;; *) owner="$2" ;; esac
+      shift ;;
+    -h | --help) usage ;;
+    -*) echo "land: unknown option $1" >&2; usage ;;
+    *) requested+=("$1") ;;
+  esac
+  shift
+done
+[ "${#requested[@]}" -gt 0 ] || usage
+
+root="$(git rev-parse --show-toplevel)"
+cd "$root"
+[ -z "$(git status --porcelain)" ] || die "the checkout is dirty; commit, stash or remove the changes first"
+commits=()
+for ref in "${requested[@]}"; do
+  sha="$(git rev-parse --verify --quiet "$ref^{commit}")" || die "$ref is not a commit"
+  commits+=("$sha")
+done
+
+work=""
+cleanup() {
+  if [ -n "$work" ]; then
+    git -C "$root" worktree remove --force "$work/tree" >/dev/null 2>&1 || true
+    rm -rf "$work"
+  fi
+}
+trap cleanup EXIT
+
+# Resolve the two conflicts land.sh may resolve, in the worktree $1 (cherry-pick of $2); abort on
+# any other. Every command is checked: this runs where `set -e` is off.
+resolve_conflicts() {
+  local tree="$1" file others=() lock=0 index=0 files
+  files="$(git -C "$tree" diff --name-only --diff-filter=U)" || die "cannot list the conflicts"
+  [ -n "$files" ] || die "cherry-pick of $2 failed: $3"
+  while IFS= read -r file; do
+    case "$file" in
+      Cargo.lock) lock=1 ;;
+      doc/adr/README.md) index=1 ;;
+      *) others+=("$file") ;;
+    esac
+  done <<<"$files"
+  [ "${#others[@]}" -eq 0 ] || die "cherry-pick of $2 conflicts in files land.sh does not resolve: ${others[*]}"
+  if [ "$index" -eq 1 ]; then
+    local f="doc/adr/README.md" t
+    t="$(mktemp -d)" || die "cannot make a temporary directory"
+    git -C "$tree" show :1:"$f" >"$t/base" 2>/dev/null || : >"$t/base"
+    git -C "$tree" show :2:"$f" >"$t/ours" 2>/dev/null || die "$f was deleted on one side; resolve it by hand"
+    git -C "$tree" show :3:"$f" >"$t/theirs" 2>/dev/null || die "$f was deleted on one side; resolve it by hand"
+    # Only index rows may be in conflict: the plain merge shows the hunks, which must hold rows only.
+    git merge-file -p "$t/ours" "$t/base" "$t/theirs" >"$t/plain" || true
+    awk '/^<<<<<<< /{in_hunk=1; next} /^>>>>>>> /{in_hunk=0; next} /^=======$/{next}
+         in_hunk && $0 !~ /^\| \[[0-9][0-9][0-9][0-9]\]\(/ {bad=1}
+         END{exit bad}' "$t/plain" || die "$f conflicts outside the index rows; resolve it by hand"
+    git merge-file --union -p "$t/ours" "$t/base" "$t/theirs" >"$tree/$f" || true
+    rm -rf "$t"
+    bash "$here/adr-index.sh" sort "$tree/doc/adr" || die "cannot sort the ADR index"
+    git -C "$tree" add -- "$f" || die "cannot stage $f"
+  fi
+  if [ "$lock" -eq 1 ]; then
+    git -C "$tree" checkout --ours -- Cargo.lock || die "Cargo.lock has no integration side; resolve it by hand"
+    (cd "$tree" && cargo update --workspace --quiet) || die "cargo update -w failed while resolving Cargo.lock"
+    echo "land: Cargo.lock re-resolved over integration's; diff against the lane's own:" >&2
+    git -C "$tree" diff "$2" -- Cargo.lock >&2 || true
+    git -C "$tree" add -- Cargo.lock || die "cannot stage Cargo.lock"
+  fi
+  GIT_EDITOR=true git -C "$tree" cherry-pick --continue >/dev/null 2>&1 || die "could not continue the cherry-pick of $2"
+}
+
+# The private-names hook (fnd §7.4): until FND-04 the recipe does not exist and nothing is
+# required; from then on the stage must be part of `check` and its hash file present and non-empty.
+require_private_names() {
+  local tree="$1" recipes stages
+  recipes="$(cd "$tree" && just --summary)"
+  grep -qx private-names < <(tr ' ' '\n' <<<"$recipes") || return 0
+  stages="$(cd "$tree" && just --evaluate check_stages)"
+  grep -qx private-names < <(tr ' ' '\n' <<<"$stages") ||
+    die "the justfile has a private-names recipe but \`check\` does not run it"
+  grep -qvE '^[[:space:]]*(#|$)' "$tree/.private-names.sha256" 2>/dev/null ||
+    die ".private-names.sha256 is missing or has no entry; the private-names stage fails closed (fnd §7.4)"
+}
+
+# One try: 0 landed, 10 the push lost a race (fetch and retry), anything else aborted. Called in a
+# `||` list, where `set -e` is off, so every command that can fail carries its own `|| die`.
+attempt() {
+  local base tree head sha n why who changed
+  git fetch --quiet "$remote" || die "cannot fetch $remote"
+  base="$(git rev-parse --verify --quiet "refs/remotes/$remote/$branch^{commit}")" ||
+    die "$remote/$branch does not exist"
+  work="$(mktemp -d "${TMPDIR:-/tmp}/land.XXXXXX")" || die "cannot make a temporary directory"
+  tree="$work/tree"
+  git worktree add --quiet --detach "$tree" "$base" || die "cannot create the worktree"
+  for sha in "${commits[@]}"; do
+    echo "land: cherry-pick $(git log -1 --format='%h %s' "$sha")" >&2
+    if ! why="$(git -C "$tree" cherry-pick "$sha" 2>&1)"; then resolve_conflicts "$tree" "$sha" "$why"; fi
+  done
+  head="$(git -C "$tree" rev-parse HEAD)" || die "cannot read the merged head"
+  [ "$head" != "$base" ] || die "nothing to land: the commits change nothing on $remote/$branch"
+
+  (cd "$tree" && bash "$here/dco-check.sh" "$base..HEAD") >&2 || die "a commit lacks its author's sign-off"
+  for sha in $(git -C "$tree" rev-list --reverse "$base..$head"); do
+    who="$(git -C "$tree" log -1 --format='%an <%ae>' "$sha")"
+    [ "$who" = "$owner" ] || die "$(git -C "$tree" log -1 --format=%h "$sha") is authored by $who, not the owner identity of ADR 0003 (--author overrides)"
+    n="$(git -C "$tree" cat-file commit "$sha" | sed '/^$/q' | grep -c '^gpgsig' || true)"
+    if [ "$n" -eq 0 ] && [ "$allow_unsigned" -eq 0 ]; then
+      die "$(git -C "$tree" log -1 --format=%h "$sha") is not signed (the environment signs; --allow-unsigned waives this)"
+    fi
+  done
+  require_private_names "$tree"
+  echo "land: just check on the merged tree ($(git -C "$tree" rev-parse --short "$head"))" >&2
+  (cd "$tree" && MISE_TRUSTED_CONFIG_PATHS="$tree" just check) || die "just check failed; nothing was pushed"
+  changed="$(git -C "$tree" status --porcelain)" || die "cannot read the gated tree's status"
+  [ "$(git -C "$tree" rev-parse HEAD)" = "$head" ] && [ -z "$changed" ] ||
+    die "the gate changed the tree, so what was gated is not what would be pushed: $(tr '\n' ' ' <<<"$changed")"
+  git update-ref refs/land/last "$head" || die "cannot record refs/land/last"
+  if [ "$push" -eq 0 ]; then
+    echo "land: --no-push: green on $head (kept as refs/land/last); nothing pushed"
+    return 0
+  fi
+  if ! git push --quiet "$remote" "$head:refs/heads/$branch"; then
+    git fetch --quiet "$remote" || die "cannot fetch $remote after the refused push"
+    [ "$(git rev-parse "refs/remotes/$remote/$branch")" = "$base" ] || return 10
+    die "the push to $remote $branch was refused"
+  fi
+  echo "land: landed $head on $remote/$branch"
+  if git merge-base --is-ancestor "refs/heads/$branch" "$head" 2>/dev/null; then
+    if [ "$(git symbolic-ref --quiet --short HEAD || true)" = "$branch" ]; then
+      git merge --ff-only --quiet "$head" || true
+    else
+      git branch -f "$branch" "$head" >/dev/null 2>&1 || true
+    fi
+  fi
+  return 0
+}
+
+rc=0
+attempt || rc=$?
+if [ "$rc" -eq 10 ]; then
+  echo "land: $remote/$branch moved; redoing the cherry-pick and the gate once" >&2
+  cleanup
+  work=""
+  rc=0
+  attempt || rc=$?
+  [ "$rc" -ne 10 ] || die "$remote/$branch moved again; run land.sh once more"
+fi
+exit "$rc"

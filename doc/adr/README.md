@@ -12,10 +12,15 @@ can change, deliberately and on the record. Never cite an ADR as a reason not to
 thing; never drift from one silently either. Change it on purpose, say why, and change the
 rules, fixtures and tests that pin it in the same commit.
 
-**Creating.** From FND-03 on, `adrs new "<title>"` (the `adrs` tool, pinned by mise; ADR 0030)
-creates the next record from [`template.md`](template.md) and `just adr-index` checks the rows
-here against the files. A number the orchestrator reserved at dispatch is created by copying the
-template to `NNNN-kebab-title.md`. Before FND-03, copy the template by hand and add the row. A
+**Creating.** `adrs new "<title>"` (the `adrs` tool, pinned by mise; ADR 0030; configured by the
+root `adrs.toml`) creates the next record from [`template.md`](template.md), as Proposed, and
+`just adr-index` (the `docs` stage of `check`) checks the rows here against the files: every file
+has one row with its title, its link and its status keyword (and `(owner, date)`). Add the row by
+hand after `adrs new`. `template.md` is an `adrs` template: its first line, date and status are
+placeholders (`{{ number }}`, `{{ title }}`, `{{ date }}`, `{{ status }}`). A number the
+orchestrator reserved at dispatch is created by copying the template to `NNNN-kebab-title.md` and
+replacing the placeholders by hand (`# NNNN. Title`, today's date, `Proposed`). `scripts/land.sh`
+merges two lanes' new rows itself and sorts them. A
 change that adds or reverses an architectural decision (a crate boundary, a dependency of
 consequence, a protocol, a security or lifecycle policy, a tool or CI topology, a rule exception)
 adds or changes an ADR in the same commit.

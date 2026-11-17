@@ -1,10 +1,10 @@
-# NNNN. Title
+# {% if number < 10 %}000{% elif number < 100 %}00{% elif number < 1000 %}0{% endif %}{{ number }}. {{ title }}
 
-Date: YYYY-MM-DD
+Date: {{ date }}
 
 ## Status
 
-Proposed | Accepted | Rejected | Superseded by NNNN
+{{ status }}
 
 ## Context
 

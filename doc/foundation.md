@@ -543,8 +543,9 @@ There is no event store (ADR 0008). What persists:
   which writes only its hash. The salt is public, so a dictionary guess of a short name is
   possible: the file keeps names out of plain sight and out of every grep, not out of reach of a
   determined guesser.
-- **DCO:** a step of `ci.yml` checks that every pushed commit carries a `Signed-off-by` matching
-  its author (about 15 lines; FND-03).
+- **DCO:** `scripts/dco-check.sh` (`just dco [range]`, FND-03) checks that every commit of a range
+  carries a `Signed-off-by` matching its author, read as a trailer (a quoted line does not count);
+  a step of `ci.yml` runs it over the pushed commits, and `land.sh` over the ones it lands.
 - CodeQL, Scorecard, Dependabot as in 7.1.
 - Releases (REL-06): dist builds the archives with GitHub artifact attestations and
   `cargo-auditable`; `SHA256SUMS`, a CycloneDX SBOM (`cargo-cyclonedx` if dist's support is not
@@ -577,8 +578,10 @@ There is no event store (ADR 0008). What persists:
    (`aqua:`, then `github:`) over `cargo:`, which compiles from source in every fresh session and
    uncached CI job; `aqua:` for gitleaks, actionlint, shellcheck, zizmor, pinact, jq, hyperfine,
    ripgrep and, where the registry has them, cargo-nextest, cargo-deny, cargo-llvm-cov and
-   cargo-mutants; `cargo:` only for a tool with no prebuilt release (adrs, release-plz if so,
-   cargo-fuzz); `pipx:` for diff-cover; `npm:@informalsystems/quint` (with Node); `java` for a
+   cargo-mutants; `cargo:` only for a tool with no prebuilt release (release-plz if so,
+   cargo-fuzz); `github:` for adrs, which has no aqua entry but ships dist release archives
+   (`mise.lock` records each archive's URL and the SHA-256 of the release's `sha256.sum`; mise
+   installs it with `--locked` in the sandbox, where the GitHub API is refused); `pipx:` for diff-cover; `npm:@informalsystems/quint` (with Node); `java` for a
    Temurin JDK; `github:`/`ubi:` for Apalache. Entries arrive with the stage that needs them,
    each with a comment naming it: just and cargo-nextest (FND-01), cargo-deny (FND-02), adrs
    (FND-03), gitleaks, actionlint, shellcheck, zizmor, pinact (FND-04), cargo-llvm-cov,
@@ -622,8 +625,9 @@ needs one becomes a recipe parameter (`just conformance seed=42`).
 | `just --list`, `just --dump --dump-format json` | the stage catalog | FND-02 |
 | `just clippy-lists` | rewrite every crate's `clippy.toml` from the root list and `[grants]` (§2.4); the `clippy` stage fails when one differs | FND-02 |
 | `just doctor` | `mise doctor` and `mise ls --missing` | FND-01 |
-| `adrs new "<title>"`, `just adr-index` | create an ADR; check the index against the files | FND-03 |
-| `scripts/land.sh <sha>… [--no-push]` | cherry-pick onto a fresh `origin/main` worktree, `just check`, push only on green | FND-03 |
+| `adrs new "<title>"`, `just adr-index` (the `docs` stage) | create an ADR from `doc/adr/template.md` (`adrs.toml`); check the index against the files (`scripts/adr-index.sh`) | FND-03 |
+| `just dco [range]` | every commit of the range is signed off by its author (`scripts/dco-check.sh`) | FND-03 |
+| `scripts/land.sh <sha>… [--no-push]` | cherry-pick onto a fresh `origin/main` worktree, check sign-offs and signatures, `just check`, push only on green | FND-03 |
 | `just coverage`, `just changed-lines` | llvm-cov vs `coverage-floor.toml`; diff-cover on the lines changed since `git merge-base HEAD origin/main` (plus the working tree) | FND-06 |
 | `just mutants-diff [base]` | cargo-mutants `--in-diff` over the same diff, with a time cap; outside `check` (below) | FND-06 |
 | `just private-names` | the hashed private-name check of §7.4 | FND-04 |
@@ -693,13 +697,13 @@ Integration is directly on `main` (ADR 0002): the orchestrator reviews each task
 lands it with `scripts/land.sh` (ADR 0030), which fetches, creates a worktree at `origin/main`,
 cherry-picks, runs `just check` (with `private-names` failing closed) on the merged tree, and
 pushes only on green, retrying once after a fetch on a non-fast-forward. Conflicts are auto-resolved only in `Cargo.lock` (take integration's
-side, then `cargo update -w`) and in the ADR index (regenerated, then `just adr-index`); anything
+side, then `cargo update -w`) and in the ADR index (both sides' rows kept and sorted, then
+`just adr-index` in the gate); anything
 else aborts and names the files. One commit lands per green CI run on `main` once `ci.yml`
 exists (FND-05); before that the local gate on the merged tree is the only gate, and the next
 commit may land as soon as the previous one is pushed. A red `main` is fixed
-immediately, by a new commit. Until FND-03 lands `land`, the orchestrator does the same by hand:
-cherry-pick onto a clean `main`, run the gate on the merged tree in the foreground, push only on
-green ([`sdlc.md`](sdlc.md)).
+immediately, by a new commit. Before FND-03 the orchestrator did the same by hand
+([`sdlc.md`](sdlc.md)).
 
 ### 10.3 ADRs
 

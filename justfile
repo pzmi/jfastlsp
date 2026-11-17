@@ -18,7 +18,7 @@ cargo := "env RUSTFLAGS='-D warnings' RUSTDOCFLAGS= RUSTC_WRAPPER= RUSTC_WORKSPA
 # The stages of `quick` and `check`, in fnd §9's order. A stage enters `check` in the commit of
 # the task that introduces it (`architecture` with FND-07, `docs` with FND-03, ...).
 quick_stages := "fmt-check architecture clippy unit-tests script-tests"
-check_stages := "fmt-check architecture clippy nostd unit-tests integration-tests doctests script-tests deny"
+check_stages := "fmt-check architecture clippy nostd docs unit-tests integration-tests doctests script-tests deny"
 
 # The inner loop: fmt-check, architecture, clippy, unit tests and the scripts' self-tests. Not the
 # gate.
@@ -164,6 +164,18 @@ script-tests: _preflight
     if [ "${#tests[@]}" -eq 0 ]; then echo "script-tests: no scripts/test-*.sh" >&2; exit 1; fi
     for t in "${tests[@]}"; do echo "script-tests: $t" >&2; bash "$t"; done
 
+# The ADR index of doc/adr/README.md agrees with the records (FND-03; scripts/adr-index.sh, which
+# does what `adrs generate toc` cannot: our status annotations). Needs only bash and awk.
+docs: _preflight
+    bash scripts/adr-index.sh check doc/adr
+
+alias adr-index := docs
+
+# Every commit of a range carries a Signed-off-by matching its author (FND-03, fnd §7.4; what
+# ci.yml and scripts/land.sh run).
+dco range="origin/main..HEAD":
+    bash scripts/dco-check.sh {{quote(range)}}
+
 # Advisories, licences, sources and bans (fnd §2.5, §7.4).
 deny: _preflight (_require "cargo-deny")
     {{cargo}} deny --locked check
@@ -171,6 +183,11 @@ deny: _preflight (_require "cargo-deny")
 # Fetch the pinned benchmark corpus of doc/bench-corpus.md into its cache (BENCH-01).
 bench-corpus size="small" cache="":
     bash scripts/bench-corpus.sh fetch {{quote(size)}} {{ if cache != "" { "--cache " + quote(cache) } else { "" } }}
+
+# The pinned jdtls behind jfl-jdtls on the synthetic fixture (EVAL-11); needs Java 21+ and the download.
+jdtls-it:
+    bash scripts/jdtls-fetch.sh
+    {{cargo}} nextest run -p jfl-jdtls --locked --retries 0 --features real-jdtls --test real_jdtls
 
 # just must be the version mise.toml and scripts/bootstrap-tools.sh pin.
 # Fail when a pinned tool is missing or wrong, or just is not its pinned version.

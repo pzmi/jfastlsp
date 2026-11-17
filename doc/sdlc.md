@@ -57,9 +57,10 @@ are the real procedure; this section summarises it.
    commit's CI is green; `just check` on the merged tree; push only on green (ADR 0002, ADR 0030).
    Before `ci.yml` exists (FND-05) there is no CI run to wait for: the gate on the merged tree is
    the only gate, and the next commit may land once the previous one is pushed.
-   **Until FND-03 lands `land`**, the orchestrator does it by hand: `git fetch`, a clean `main`
-   equal to `origin/main`, `git cherry-pick <sha>`, the live gate on the merged tree in the
-   foreground (the fallback until FND-02), `git push origin main` only on green.
+   `land.sh` refuses a dirty checkout, resolves only `Cargo.lock` and the ADR index, checks each
+   commit's sign-off and signature, and takes `--no-push` for a dry run; any other conflict aborts
+   and names its files. Before FND-03 the orchestrator did the same by hand (`git fetch`,
+   `git cherry-pick`, the gate on the merged tree, `git push origin main` only on green).
 6. **Watch CI.** From FND-05 on, the orchestrator waits for the run of the pushed commit and
    reads the `Required` result. Without `gh` it uses the GitHub MCP tools. Before FND-05 it
    records `ci: none (pre-FND-05)` and moves on.
