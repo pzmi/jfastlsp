@@ -210,13 +210,13 @@ workflows-verify:
     bash scripts/workflows-check.sh verify
 
 # The cargo stages as CI runs them (fnd §7.2): the default target directory inside the checkout
-# (so `cargo metadata` from a test's scratch directory finds this workspace) and the `ci` nextest
-# profile, which child processes inherit. A laptop or sandbox gate keeps its target outside the
+# (so `cargo metadata` from a test's scratch directory finds this workspace) and ci.yml's
+# workflow `env:` (CARGO_TERM_COLOR=always, NEXTEST_PROFILE=ci), which child processes inherit. A laptop or sandbox gate keeps its target outside the
 # repository and no profile, so a test that depends on either passes here and fails in CI only;
 # run this before landing a change to tests that start cargo, nextest or a scratch workspace. It
 # builds a second copy into ./target. Not a stage of `check` (it doubles the build).
 ci-parity:
-    env -u CARGO_TARGET_DIR NEXTEST_PROFILE=ci {{quote(just_executable())}} --justfile {{quote(justfile())}} --working-directory {{quote(justfile_directory())}} check-only architecture unit-tests integration-tests doctests
+    env -u CARGO_TARGET_DIR CARGO_TERM_COLOR=always NEXTEST_PROFILE=ci {{quote(just_executable())}} --justfile {{quote(justfile())}} --working-directory {{quote(justfile_directory())}} check-only architecture unit-tests integration-tests doctests
 
 # zizmor's online audits (impostor commits, known-vulnerable actions, ref confusion) over the
 # workflows, the local actions and dependabot.yml. Needs the GitHub API (GH_TOKEN), so it is

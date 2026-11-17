@@ -438,13 +438,14 @@ fn should_fail_the_unit_tests_stage_when_a_test_passes_only_on_a_retry() -> Test
 
 #[test]
 fn should_pass_plain_nextest_when_the_flaky_test_is_retried() -> TestResult {
-    // given: the control, nextest without the gate's flags, and without the runner's own
-    // profile (CI's NEXTEST_PROFILE=ci names a profile the fixture does not have)
+    // given: the control, nextest without the gate's flags, without the runner's own profile
+    // (CI's NEXTEST_PROFILE=ci names a profile the fixture does not have) and without colour
+    // (CI's CARGO_TERM_COLOR=always splits "1 flaky" with escape codes)
     let workspace = fixture("flaky-test");
 
     // when
     let output = Command::new("cargo")
-        .args(["nextest", "run", "--locked"])
+        .args(["nextest", "run", "--locked", "--color", "never"])
         .current_dir(&workspace)
         .env("CARGO_TARGET_DIR", fresh_target("flaky-plain")?)
         .env_remove("NEXTEST_RETRIES")

@@ -660,7 +660,7 @@ needs one becomes a recipe parameter (`just conformance seed=42`).
 | `just secrets`, `just workflows`, `just private-names` | gitleaks over the history; actionlint, zizmor, pinact (offline) and shellcheck; the hashed private-name check of §7.4 (`scripts/private-names-check.sh [--all]`) | FND-04 |
 | `just workflows-verify` | pinact's version-comment check; needs the GitHub API, so outside `check` (§7.3) | FND-04 |
 | `just workflows-online` | zizmor with its online audits over the workflows and `dependabot.yml`; needs the GitHub API (`GH_TOKEN`), so outside `check`; `security.yml` runs it | FND-05 |
-| `just ci-parity` | the cargo stages with CI's environment: the target directory inside the checkout and `NEXTEST_PROFILE=ci`; outside `check` (a second build), run before landing a change to tests that start cargo, nextest or a scratch workspace | FND-05 |
+| `just ci-parity` | the cargo stages with CI's environment: the target directory inside the checkout and `ci.yml`'s workflow `env:` (`CARGO_TERM_COLOR=always`, `NEXTEST_PROFILE=ci`); outside `check` (a second build), run before landing a change to tests that start cargo, nextest or a scratch workspace | FND-05 |
 | `just platform-tests` | the unit, integration and doctest stages; what `ci.yml`'s `linux-arm` and `macos` jobs run natively (§7.2 rule 4); not a stage of `check` | FND-05 |
 | `just bench-corpus` | fetch the pinned corpus of `doc/bench-corpus.md` into the cache directory | BENCH-01 |
 | `just bench [suite] [corpus=small]` | the benchmark suites with machine facts, JSON results; reports, never gates | BENCH-02 |
