@@ -24,6 +24,17 @@ synthetic fixtures (ver §4).
 snippets, positions or expectations derived from it; it contributes timings and memory numbers
 only.
 
+## Fetching
+
+`scripts/bench-corpus.sh [fetch] [small|medium|huge-files|large|large-permissive|all]` clones each
+repository shallow at its pin into `${XDG_CACHE_HOME:-$HOME/.cache}/jfastlsp/bench-corpus` (override
+with `--cache DIR`; a directory inside this repository is refused),
+verifies the commit, the `.java` count of the table above and a clean tree, and is a no-op on a
+cached checkout. `scripts/bench-corpus.sh worktrees SIZE [N]` adds N (default 10) linked worktrees
+under the checkout's `.claude/worktrees/`; `clean-worktrees SIZE` removes them; `check-doc` fails
+when the script's pins and this table differ. `scripts/test-bench-corpus.sh` tests the logic against
+a local stand-in repository.
+
 ## E1 spike, measured 2026-11-16
 
 Measured on a 4 vCPU Xeon 2.3 GHz VM (15 GB RAM, virtio disk, Linux, Rust 1.97.0) with a
