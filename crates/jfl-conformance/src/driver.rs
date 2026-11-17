@@ -7,6 +7,7 @@ use std::fmt::Debug;
 
 use itf::Value;
 use itf::value::Record;
+use serde::Serialize;
 use serde::de::DeserializeOwned;
 
 /// One step handed to a driver: the action the model took and its nondeterministic picks.
@@ -84,8 +85,9 @@ impl StepError {
 pub trait Driver {
     /// The canonical observation compared with the model's state after every step: decoded from
     /// the model's variables (ITF through serde) and built from the real code by
-    /// [`Driver::observe`].
-    type State: DeserializeOwned + PartialEq + Debug;
+    /// [`Driver::observe`]. It is `Serialize` so the replay can check that it names exactly the
+    /// trace's variables: an observation narrower than the model would compare too little.
+    type State: DeserializeOwned + Serialize + PartialEq + Debug;
 
     /// Applies the step's action, with its picks, to the real code (never a re-implementation of
     /// the transition, ver §6.2 item 3).

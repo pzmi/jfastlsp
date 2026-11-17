@@ -14,8 +14,8 @@ fn root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
 }
 
-/// One model of the registry: (name, file, main, steps).
-type Model = (String, String, String, i64);
+/// One model of the registry: (name, file, main, steps, sim_steps).
+type Model = (String, String, String, i64, i64);
 
 /// The registry's models.
 fn registry(text: &str) -> Result<Vec<Model>, Box<dyn Error>> {
@@ -28,7 +28,7 @@ fn registry(text: &str) -> Result<Vec<Model>, Box<dyn Error>> {
         for (name, model) in value.as_table().ok_or("models is not a table")? {
             let model = model.as_table().ok_or("a model is not a table")?;
             let keys: BTreeSet<&str> = model.keys().map(String::as_str).collect();
-            if keys != BTreeSet::from(["file", "main", "steps"]) {
+            if keys != BTreeSet::from(["file", "main", "sim_steps", "steps"]) {
                 return Err(format!("models.{name} has the keys {keys:?}").into());
             }
             let text = |k: &str| {
@@ -45,6 +45,10 @@ fn registry(text: &str) -> Result<Vec<Model>, Box<dyn Error>> {
                     .get("steps")
                     .and_then(toml::Value::as_integer)
                     .ok_or("steps is not an integer")?,
+                model
+                    .get("sim_steps")
+                    .and_then(toml::Value::as_integer)
+                    .ok_or("sim_steps is not an integer")?,
             ));
         }
     }
@@ -99,9 +103,13 @@ fn should_register_every_model_file_when_the_registry_is_read() -> TestResult {
     assert!(!models.is_empty());
     assert_eq!(registered, files);
     assert_eq!(registered.len(), models.len(), "a file registered twice");
-    for (name, file, main, steps) in &models {
+    for (name, file, main, steps, sim_steps) in &models {
         let source = std::fs::read_to_string(root().join(file))?;
         assert!(*steps > 0, "models.{name}.steps");
+        assert!(
+            sim_steps >= steps,
+            "models.{name}.sim_steps below its Apalache bound"
+        );
         assert!(
             source.contains(&format!("module {main} {{")),
             "{file}: no module {main}"
@@ -134,7 +142,7 @@ fn should_see_a_difference_when_the_matrix_and_the_registry_part() -> TestResult
     // given: the control for the test above, a registry with one model more
     let text = std::fs::read_to_string(root().join("formal/models.toml"))?;
     let grown = format!(
-        "{text}\n[models.extra]\nfile = \"formal/extra.qnt\"\nmain = \"extra\"\nsteps = 1\n"
+        "{text}\n[models.extra]\nfile = \"formal/extra.qnt\"\nmain = \"extra\"\nsteps = 1\nsim_steps = 1\n"
     );
     let workflow = std::fs::read_to_string(root().join(".github/workflows/formal.yml"))?;
 

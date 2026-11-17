@@ -17,6 +17,23 @@ type TestResult = Result<(), Box<dyn Error>>;
 /// The committed regression trace of the repository.
 const COMMITTED: &str = "formal/traces/regression/smoke-counts-up.itf.json";
 
+/// `text` (formal/models.toml or the regression manifest) without the tables of other models
+/// than smoke: a table is kept when its header names smoke (`[models.smoke]`, `[traces.smoke-…]`).
+fn smoke_only(text: &str) -> String {
+    let mut keep = true;
+    let mut kept = String::new();
+    for line in text.lines() {
+        if line.starts_with('[') {
+            keep = line.starts_with("[models.smoke]") || line.starts_with("[traces.smoke-");
+        }
+        if keep {
+            kept.push_str(line);
+            kept.push('\n');
+        }
+    }
+    kept
+}
+
 fn repo_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
 }
@@ -96,12 +113,19 @@ impl World {
             "mise.toml",
             "mise.lock",
             "tools/versions.toml",
-            "formal/models.toml",
             "formal/smoke.qnt",
-            "formal/traces/regression/manifest.toml",
             COMMITTED,
         ] {
             fs::copy(repo_root().join(file), world.repo.join(file))?;
+        }
+        // The world holds the smoke model alone, whatever else the repository registers: the fake
+        // `quint run` writes the smoke trace for every run.
+        for file in [
+            "formal/models.toml",
+            "formal/traces/regression/manifest.toml",
+        ] {
+            let text = fs::read_to_string(repo_root().join(file))?;
+            fs::write(world.repo.join(file), smoke_only(&text))?;
         }
         let init = Command::new("git")
             .args(["init", "-q"])
@@ -308,12 +332,9 @@ fn should_generate_twice_and_replay_at_the_printed_seed_when_conformance_runs() 
     // then
     assert!(output.status.success(), "{}", printed(&output));
     let text = printed(&output);
+    assert!(text.contains("seed 0x2a: 2 traces per model"), "{text}");
     assert!(
-        text.contains("seed 0x2a: 2 traces of 3 steps per model"),
-        "{text}"
-    );
-    assert!(
-        text.contains("repeat smoke with: just conformance smoke 0x2a 2 3"),
+        text.contains("repeat smoke (2 traces of 3 steps) with: just conformance smoke 0x2a 2 3"),
         "{text}"
     );
     let calls = world.calls();

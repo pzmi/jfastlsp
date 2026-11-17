@@ -4,12 +4,23 @@
 # `.qnt` file under formal/ that no entry names fails `formal-typecheck`.
 #
 # Pinned shape, one table per model: `[models.<name>]` with `file` (formal/<name>.qnt), `main`
-# (the module the stages run) and `steps` (Apalache's `--length`, and the simulation's
-# `--max-steps`, in `formal-verify`). Every model declares `init`, `step` and
-# `val allInvariants`, and at least one Quint test (a `run <name>Test`).
+# (the module the stages run), `steps` (Apalache's `--length` in `formal-verify`) and `sim_steps`
+# (the depth of `formal-verify`'s simulation, 20000 samples, and of `conformance-replay`'s
+# generated traces; at least `steps`). Apalache's time grows steeply with its bound, so a model's
+# simulation reaches the interleavings its bound cannot (FORMAL-03's review). Every model declares
+# `init`, `step` and `val allInvariants`, and at least one Quint test (a `run <name>Test`).
 
 # The toolchain's own check: a counter (FORMAL-01). FORMAL-02 proves the conformance harness on it.
 [models.smoke]
 file = "formal/smoke.qnt"
 main = "smoke"
 steps = 10
+sim_steps = 25
+
+# Views, generations, freshness and completeness (FORMAL-03, plan §7.1, doc/formal-models.md,
+# which holds the measured budget). Its driver lands with IDX-09.
+[models.views]
+file = "formal/views.qnt"
+main = "views"
+steps = 5
+sim_steps = 30

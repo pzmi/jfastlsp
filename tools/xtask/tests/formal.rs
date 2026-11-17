@@ -12,6 +12,22 @@ use std::process::{Command, Output};
 
 type TestResult = Result<(), Box<dyn Error>>;
 
+/// formal/models.toml's `text` with only its `[models.smoke]` table.
+fn smoke_only(text: &str) -> String {
+    let mut keep = true;
+    let mut kept = String::new();
+    for line in text.lines() {
+        if line.starts_with('[') {
+            keep = line.starts_with("[models.smoke]");
+        }
+        if keep {
+            kept.push_str(line);
+            kept.push('\n');
+        }
+    }
+    kept
+}
+
 fn repo_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
 }
@@ -64,11 +80,13 @@ impl World {
             "mise.toml",
             "mise.lock",
             "tools/versions.toml",
-            "formal/models.toml",
             "formal/smoke.qnt",
         ] {
             fs::copy(repo_root().join(file), world.repo.join(file))?;
         }
+        // The world registers the smoke model alone, whatever else the repository registers.
+        let models = fs::read_to_string(repo_root().join("formal/models.toml"))?;
+        fs::write(world.repo.join("formal/models.toml"), smoke_only(&models))?;
         let init = Command::new("git")
             .args(["init", "-q"])
             .current_dir(&world.repo)

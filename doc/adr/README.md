@@ -92,3 +92,4 @@ for the owner's decisions.
 | [0034](0034-two-carriers-lsp-first-cli-second.md) | Two carriers over one query engine: LSP first, CLI second | Accepted (owner, 2026-11-17) |
 | [0035](0035-port-mayfly-xtask-piece-by-piece.md) | Port mayfly's xtask, piece by piece | Accepted (owner, 2026-11-17) |
 | [0036](0036-javac-worker-our-own-warm-context-with-scip-java.md) | javac worker: our own small worker with one warm javac context, scip-java's plugin | Accepted (owner, 2026-11-17) |
+| [0037](0037-completeness-requires-a-watched-cookie-synced-view.md) | Completeness requires a watched, cookie-synced view | Proposed |

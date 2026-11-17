@@ -4,7 +4,8 @@
 //!
 //! - **The registry** is read in a pinned line shape, like `tools/versions.toml` (a TOML parser
 //!   reads it independently in crates/jfl-conformance/tests/models.rs): `[models.<name>]` tables,
-//!   each with exactly `file` (`formal/<name>.qnt`), `main` (the module) and `steps` (the bound).
+//!   each with exactly `file` (`formal/<name>.qnt`), `main` (the module), `steps` (Apalache's
+//!   bound) and `sim_steps` (the simulation's depth, also `conformance-replay`'s).
 //!   Every model declares `init`, `step` and `val allInvariants` (ver §6.1).
 //! - **`formal-typecheck`**: every `.qnt` under `formal/` must be registered (an unregistered model
 //!   would be checked by nothing) and every registered file must exist; then `quint typecheck`
@@ -14,9 +15,10 @@
 //!   inside the pinned npm package: Quint's default `rust` backend downloads an evaluator at run
 //!   time (fnd §8 rule 5).
 //! - **`formal-verify [MODEL]`**: per model (or the one named), Apalache's bounded verification of
-//!   `allInvariants` for `steps` steps, then a Quint simulation of the same invariant (1000
-//!   samples, its seed printed). Apalache runs on Quint's JSON IR (`quint compile --target json`)
-//!   directly, in a scratch directory outside the repository (removed on success, kept and named on
+//!   `allInvariants` for `steps` steps, then a Quint simulation of the same invariant ([`SAMPLES`]
+//!   samples of `sim_steps` steps, its seed printed). Apalache runs on Quint's JSON IR (`quint
+//!   compile --target json --out`, checked whole before use: Quint's stdout to a pipe is cut at
+//!   64 KiB) directly, in a scratch directory outside the repository (removed on success, kept and named on
 //!   failure, for the counterexample): `quint verify` would start Apalache as a gRPC server on a
 //!   TCP port and download it unless told otherwise.
 //!
@@ -51,8 +53,9 @@ pub(crate) const INVARIANT: &str = "allInvariants";
 pub(crate) const INIT: &str = "init";
 pub(crate) const STEP: &str = "step";
 
-/// The simulation's sample count in `formal-verify`.
-const SAMPLES: &str = "1000";
+/// The simulation's sample count in `formal-verify` (FORMAL-03's review: 20k samples of a deep
+/// enough simulation find what a short Apalache bound cannot reach).
+const SAMPLES: &str = "20000";
 
 /// The fix `formal-verify` names for a missing or wrong tool.
 const VERIFY_HINT: &str = "run 'bash scripts/bootstrap-tools.sh --formal-verify' (or 'mise install --locked node npm:@informalsystems/quint java github:apalache-mc/apalache'); just doctor says what else is missing";
@@ -69,12 +72,16 @@ pub(crate) struct Model {
     pub(crate) file: String,
     /// The module the stages run.
     pub(crate) main: String,
-    /// The verification bound: Apalache's `--length` and the simulation's `--max-steps`.
+    /// Apalache's bound (`--length`): its time grows steeply with it.
     pub(crate) steps: u32,
+    /// The simulation's depth (`--max-steps`), in `formal-verify` and in `conformance-replay`'s
+    /// generated traces: deep enough for the model's interleavings, which Apalache's bound may
+    /// not reach.
+    pub(crate) sim_steps: u32,
 }
 
 /// Parses the registry in its pinned shape: comments, blanks and `[models.<name>]` tables, each
-/// with `file`, `main` and `steps` exactly once; at least one model; no file twice.
+/// with `file`, `main`, `steps` and `sim_steps` exactly once; at least one model; no file twice.
 pub(crate) fn parse(text: &str) -> Result<Vec<Model>, String> {
     let r = |p: &str| Regex::new(p).map_err(|e| format!("{REGISTRY}: pattern {p}: {e}"));
     let blank = r(r"^[ \t]*(#.*)?$")?;
@@ -82,12 +89,13 @@ pub(crate) fn parse(text: &str) -> Result<Vec<Model>, String> {
     let file = r(r#"^file = "(formal/[a-z0-9_-]+\.qnt)"$"#)?;
     let main = r(r#"^main = "([A-Za-z_][A-Za-z0-9_]*)"$"#)?;
     let steps = r(r"^steps = ([1-9][0-9]{0,3})$")?;
+    let sim_steps = r(r"^sim_steps = ([1-9][0-9]{0,3})$")?;
     let mut models: Vec<Model> = Vec::new();
-    let mut open: Option<(usize, String, [Option<String>; 3])> = None;
-    let close = |open: Option<(usize, String, [Option<String>; 3])>,
+    let mut open: Option<(usize, String, [Option<String>; 4])> = None;
+    let close = |open: Option<(usize, String, [Option<String>; 4])>,
                  models: &mut Vec<Model>|
      -> Result<(), String> {
-        let Some((at, name, [file, main, steps])) = open else {
+        let Some((at, name, [file, main, steps, sim_steps])) = open else {
             return Ok(());
         };
         let missing = |key: &str| format!("{REGISTRY}:{at}: models.{name} has no `{key}`");
@@ -103,6 +111,10 @@ pub(crate) fn parse(text: &str) -> Result<Vec<Model>, String> {
                 .ok_or_else(|| missing("steps"))?
                 .parse()
                 .map_err(|e| format!("{REGISTRY}:{at}: models.{name}.steps: {e}"))?,
+            sim_steps: sim_steps
+                .ok_or_else(|| missing("sim_steps"))?
+                .parse()
+                .map_err(|e| format!("{REGISTRY}:{at}: models.{name}.sim_steps: {e}"))?,
             file,
             name,
         });
@@ -115,7 +127,7 @@ pub(crate) fn parse(text: &str) -> Result<Vec<Model>, String> {
         if let Some(caps) = header.captures(line) {
             close(open.take(), &mut models)?;
             let name = caps.get(1).map_or("", |m| m.as_str()).to_owned();
-            open = Some((number, name, [None, None, None]));
+            open = Some((number, name, [None, None, None, None]));
             continue;
         }
         let Some((_, _, fields)) = open.as_mut() else {
@@ -129,9 +141,11 @@ pub(crate) fn parse(text: &str) -> Result<Vec<Model>, String> {
             (1, c.get(1))
         } else if let Some(c) = steps.captures(line) {
             (2, c.get(1))
+        } else if let Some(c) = sim_steps.captures(line) {
+            (3, c.get(1))
         } else {
             return Err(format!(
-                "{REGISTRY}:{number}: outside the pinned shape (file = \"formal/<name>.qnt\", main = \"<module>\", steps = <1..9999>): {line}"
+                "{REGISTRY}:{number}: outside the pinned shape (file = \"formal/<name>.qnt\", main = \"<module>\", steps = <1..9999>, sim_steps = <1..9999>): {line}"
             ));
         };
         let Some(field) = fields.get_mut(slot) else {
@@ -436,21 +450,38 @@ fn verify_in(context: &Context, models: &[&Model], scratch: &Path) -> i32 {
         let file = root.join(&model.file).to_string_lossy().into_owned();
         let steps = model.steps.to_string();
         eprintln!("{stage}: {}: Apalache, {steps} steps", model.name);
+        // Quint writes the IR with `--out`: its stdout is cut at 64 KiB when it is a pipe (Node
+        // exits before the pipe drains), which truncated any model larger than the smoke one. The
+        // copy it still prints is captured and dropped.
+        let json = dir.join(format!("{}.qnt.json", model.name));
+        let json_arg = json.to_string_lossy().into_owned();
         let compile = Call::new(
             "quint",
-            &["compile", "--target", "json", "--main", &model.main, &file],
+            &[
+                "compile",
+                "--target",
+                "json",
+                "--main",
+                &model.main,
+                "--out",
+                &json_arg,
+                &file,
+            ],
         );
-        let ir = match compile.output(context) {
-            Ok((0, json)) => json,
+        match compile.output(context) {
+            Ok((0, _)) => {}
             Ok((code, _)) => return code,
             Err(message) => {
                 eprintln!("{message}");
                 return 1;
             }
-        };
-        let json = dir.join(format!("{}.qnt.json", model.name));
-        if let Err(e) = std::fs::write(&json, ir) {
-            eprintln!("{stage}: cannot write {}: {e}", json.display());
+        }
+        let whole = std::fs::read_to_string(&json).map(|text| json_complete(&text));
+        if !matches!(whole, Ok(true)) {
+            eprintln!(
+                "{stage}: quint compile wrote no whole JSON IR to {} ({whole:?})",
+                json.display()
+            );
             return 1;
         }
         let out = dir.join("apalache-out").to_string_lossy().into_owned();
@@ -475,8 +506,9 @@ fn verify_in(context: &Context, models: &[&Model], scratch: &Path) -> i32 {
             );
             return code;
         }
+        let sim_steps = model.sim_steps.to_string();
         eprintln!(
-            "{stage}: {}: simulation, {SAMPLES} samples of {steps} steps",
+            "{stage}: {}: simulation, {SAMPLES} samples of {sim_steps} steps",
             model.name
         );
         let simulate = Call::new(
@@ -494,7 +526,7 @@ fn verify_in(context: &Context, models: &[&Model], scratch: &Path) -> i32 {
                 "--invariant",
                 INVARIANT,
                 "--max-steps",
-                &steps,
+                &sim_steps,
                 "--max-samples",
                 SAMPLES,
                 &file,
@@ -509,12 +541,75 @@ fn verify_in(context: &Context, models: &[&Model], scratch: &Path) -> i32 {
     0
 }
 
+/// Whether `text` is one whole JSON value: its brackets balance (outside strings, escapes
+/// honoured) and close exactly at its end. A truncated IR never is. Pinned by
+/// `tests::should_take_only_a_whole_ir_when_its_json_is_checked`.
+pub(crate) fn json_complete(text: &str) -> bool {
+    let text = text.trim_end();
+    let (mut depth, mut in_string, mut escaped, mut closed_at) = (0_usize, false, false, None);
+    for (at, c) in text.char_indices() {
+        if in_string {
+            match (escaped, c) {
+                (true, _) => escaped = false,
+                (false, '\\') => escaped = true,
+                (false, '"') => in_string = false,
+                _ => {}
+            }
+            continue;
+        }
+        if c.is_whitespace() {
+            continue;
+        }
+        if closed_at.is_some() || (depth == 0 && c != '{' && c != '[') {
+            return false;
+        }
+        match c {
+            '"' => in_string = true,
+            '{' | '[' => depth = depth.saturating_add(1),
+            '}' | ']' => {
+                let Some(less) = depth.checked_sub(1) else {
+                    return false;
+                };
+                depth = less;
+                if depth == 0 {
+                    closed_at = Some(at);
+                }
+            }
+            _ => {}
+        }
+    }
+    !in_string && depth == 0 && closed_at.is_some_and(|at| at.saturating_add(1) == text.len())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    const ONE: &str =
-        "# c\n[models.smoke]\nfile = \"formal/smoke.qnt\"\nmain = \"smoke\"\nsteps = 10\n";
+    const ONE: &str = "# c\n[models.smoke]\nfile = \"formal/smoke.qnt\"\nmain = \"smoke\"\nsteps = 10\nsim_steps = 25\n";
+
+    #[test]
+    fn should_take_only_a_whole_ir_when_its_json_is_checked() {
+        // given: an IR over 64 KiB with strings holding brackets, quotes and escapes, and its
+        // first 64 KiB, which is what Quint's piped stdout holds
+        let entry = r#"{"name":"a\"]}{","value":[1,2,{"k":"\\"}]},"#;
+        let whole = format!("{{\"modules\":[{}{{}}]}}\n", entry.repeat(2000));
+        let cut = whole.get(..65536).unwrap_or_default();
+
+        // when
+        let verdicts = [
+            json_complete(&whole),
+            json_complete(cut),
+            json_complete(""),
+            json_complete("{} {}"),
+            json_complete("{\"a\":\"}"),
+            json_complete("]["),
+            json_complete("x{}"),
+        ];
+
+        // then
+        assert!(whole.len() > 65536);
+        assert_eq!(verdicts, [true, false, false, false, false, false, false]);
+    }
 
     #[test]
     fn should_read_the_repository_s_registry_when_it_is_parsed() {
@@ -549,6 +644,7 @@ mod tests {
                 file: "formal/smoke.qnt".to_owned(),
                 main: "smoke".to_owned(),
                 steps: 10,
+                sim_steps: 25,
             }])
         );
     }
@@ -556,7 +652,7 @@ mod tests {
     #[test]
     fn should_refuse_the_registry_when_a_line_leaves_the_shape() {
         // given: each edit, and what the refusal names
-        let edits: [(&str, &str, &str); 8] = [
+        let edits: [(&str, &str, &str); 10] = [
             (
                 "formal/smoke.qnt",
                 "../smoke.qnt",
@@ -570,6 +666,12 @@ mod tests {
             ("steps = 10", "steps = 0", "outside the pinned shape"),
             ("steps = 10", "steps = \"10\"", "outside the pinned shape"),
             ("main = \"smoke\"\n", "", "has no `main`"),
+            ("sim_steps = 25\n", "", "has no `sim_steps`"),
+            (
+                "sim_steps = 25",
+                "sim_steps = 0",
+                "outside the pinned shape",
+            ),
             ("steps = 10", "steps = 10\nsteps = 11", "twice"),
             (
                 "# c",

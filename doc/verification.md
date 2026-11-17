@@ -149,7 +149,8 @@ delete, a worker crash), the fake can be told to fail the same way.
 ### 6.1 Models and invariants
 
 The models of plan §7, registered in `formal/models.toml` (the `MODELS` registry, FORMAL-01:
-one `[models.<name>]` table per model with `file`, `main` and `steps`, in a pinned line shape that
+one `[models.<name>]` table per model with `file`, `main`, `steps` (Apalache's bound) and
+`sim_steps` (the simulation's depth, FORMAL-03), in a pinned line shape that
 xtask reads and `crates/jfl-conformance/tests/models.rs` reads again with a TOML parser, which
 also keeps `formal.yml`'s matrix equal to it). `formal-typecheck` fails on a `.qnt` under
 `formal/` that no entry names; `formal-test` fails on a model without a Quint test. The
@@ -158,7 +159,7 @@ on it). The product's models:
 
 | Model | Invariants | Model task | Driver task |
 |:--|:--|:--|:--|
-| `views.qnt` | `NoMixedGeneration`, `GenerationsIncrease`, `AtomicPublish`, `FreshAfterStat`, `CompleteIsHonest`, `NoCrossView` | FORMAL-03 | IDX-09 |
+| `views.qnt` | `NoMixedGeneration`, `GenerationsIncrease`, `AtomicPublish`, `FreshAfterStat`, `CompleteIsHonest`, `NoCrossView`, `SyncIsBarrier` | FORMAL-03 | IDX-09 |
 | `daemon.qnt` | `AtMostOneOwner`, `ServedOnlyByOwner`, `NoGhostBuffers`, `ShutdownReleases`; liveness `EventuallyServed` | FORMAL-04 | IDX-12 |
 | `diagnostics.qnt` | `NeverOlderOverNewer`, `PublishedMatchesVersion`, `ClosedPublishesNothing` | FORMAL-05 | LSP-04 |
 
@@ -166,6 +167,11 @@ Each model has named scenarios (`run`s) for the interleavings that matter (a che
 reconcile; two proxies spawning at once; results arriving in reverse order), a `val
 allInvariants`, and a **broken-model control**: an action variant that must violate a named
 invariant within the simulation bound, so an invariant that can never fail is caught.
+[`formal-models.md`](formal-models.md) states each model's stimuli, the observation its driver
+produces, its invariants, scenarios, controls and verification budget (FORMAL-03 onwards). A
+scenario's regression trace comes from a scripted step (guarded branches, exactly one enabled per
+state), so it does not depend on the seed; its Quint test replays the same steps as named
+actions, since `quint test` runs a test that draws a value 10000 times.
 
 ### 6.2 Trace replay
 
@@ -187,18 +193,24 @@ generates traces (it holds the process grant) and the `jfl-conformance` binary r
    the command that regenerates it.
 2. `conformance-replay` generates, per registered model, traces with `quint run --mbt` at a fresh
    seed it prints with the command that repeats the run (`just conformance <model> <seed>
-   <traces> <steps>`; a budget per model, starting at 10 traces × 25 steps, measured and
-   ratcheted), generates them again and fails unless the seed reproduces them, then replays them
+   <traces> <steps>`; a budget per model, 10 traces of the model's `sim_steps` steps, measured
+   and ratcheted), generates them again and fails unless the seed reproduces them, then replays them
    and the committed traces through the same drivers. Generated traces live in a private scratch
    directory outside the repository, kept and named when the stage fails. A trace that is not an
    ITF trace with Quint's `--mbt` metadata, a state the driver cannot decode, an action it has no
    case for or an empty run is `HARNESS_ERROR` (exit 3), never a pass; a model registered before
-   its driver is listed as pending with the task that brings the driver.
+   its driver is listed as pending with the task that brings the driver, which must have a card
+   in `doc/tasks.md` with an unticked `Accept:` box (otherwise `HARNESS_ERROR`), and the replay
+   prints a warning naming each pending model (its traces are read, not replayed).
 3. A driver decodes each step's action and nondeterministic picks, applies it to the **real** code
    (never a re-implementation of the transition), observes the real state through a canonical
    observation, and compares it with the model's projected state **after every step**, the
-   initial state included. A divergence reports model, seed, trace, step, action, expected,
-   actual and a line diff.
+   initial state included. The comparison is the harness's, not the driver's: a driver supplies
+   only `step` and `observe`, and reaches the replay only as a `Replayer` built from it, whose
+   comparison is private to the replay (FORMAL-03), so no driver can skip it; and the
+   observation must serialise to exactly the trace's variables (else `HARNESS_ERROR`), so a
+   narrow observation cannot make it vacuous. A divergence reports model, seed, trace, step,
+   action, expected, actual and a line diff.
 4. **Negative controls:** each driver has a test that swaps in a deliberately faulty component
    (plan §7: publish before store, release the lock before removing the socket, publish every
    result) and asserts the replay fails at a named step; `conformance-replay` also runs it over
@@ -211,9 +223,12 @@ generates traces (it holds the process grant) and the `jfl-conformance` binary r
 
 `just formal-verify [model]` runs Apalache (0.62.4, Quint 0.33.1's own pairing, pinned and
 checksum-verified by mise) bounded verification of each model's `allInvariants` for its
-registered `steps` (`init` and `step` as the initial and next actions), on Quint's JSON IR in a
-scratch directory, then a Quint simulation of the same invariant (1000 samples on the TypeScript
-backend, its seed printed). It runs weekly and by hand (`formal.yml`, one job per model), not in
+registered `steps` (`init` and `step` as the initial and next actions), on Quint's JSON IR (written
+with `--out` and checked whole: Quint's stdout to a pipe is cut at 64 KiB) in a scratch
+directory, then a Quint simulation of the same invariant (20000 samples of the model's
+`sim_steps` steps on the TypeScript backend, its seed printed). Apalache's time grows steeply with
+its bound, so the simulation's depth is the model's own number: the FORMAL-03 review's 13-step
+counterexample lay beyond any affordable Apalache bound and within a 30-step simulation. It runs weekly and by hand (`formal.yml`, one job per model), not in
 `check`. On a violation the scratch directory is kept and named, and its counterexample
 (`violation1.itf.json`) becomes a regression trace.
 

@@ -21,6 +21,7 @@ a pinned real-repository corpus (plan §1.7, ADR 0031). Reuse before building (A
 | `doc/bench-corpus.md` | The pinned benchmark repositories and the E1 spike's numbers |
 | `doc/foundation.md` | Engineering rules: dependency law and authority (§2), enforcement (§3), language and lints (§4), logging (§5), persistent state (§6), CI (§7), tool pins (§8), commands (§9), commits (§10), agent contract (§11) |
 | `doc/verification.md` | Test levels (§2), determinism (§3), goldens (§4), contract suites (§5), formal models (§6), oracles (§7), fuzz (§8), benchmarks (§10), agent evaluation (§11) |
+| `doc/formal-models.md` | Per Quint model: the design it fixes, the driver's stimuli and observation, invariants, scenarios, controls, the verify budget, and the obligations its driver task inherits |
 | `doc/sdlc.md` | Ready, procedure, Done, the gate, integration, checkpoints, owner decisions |
 | `doc/required-checks.md` | The CI jobs and the `Required` aggregate |
 | `doc/tasks.md` | Decisions (ADR numbers), rules for every task, the live gate, lanes and task cards, ⛳ checkpoints |

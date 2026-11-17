@@ -22,3 +22,69 @@ step = "step"
 invariant = "allInvariants"
 max_steps = 6
 seed = "0x2a"
+
+# The views model's scenarios (FORMAL-03, doc/formal-models.md): each scenario's scripted step,
+# which enables exactly one action in each state, so the trace does not depend on the seed. Read,
+# not replayed, until IDX-09 brings the views driver (crates/jfl-conformance/src/registry.rs).
+[traces.views-checkout-during-reconcile]
+model = "views"
+main = "views"
+init = "init"
+step = "checkoutDuringReconcile"
+invariant = "allInvariants"
+max_steps = 20
+seed = "0x3"
+
+[traces.views-lost-hint-caught-by-stat]
+model = "views"
+main = "views"
+init = "init"
+step = "lostHintCaughtByStat"
+invariant = "allInvariants"
+max_steps = 12
+seed = "0x3"
+
+[traces.views-nested-worktree-request]
+model = "views"
+main = "views"
+init = "init"
+step = "nestedWorktreeRequest"
+invariant = "allInvariants"
+max_steps = 16
+seed = "0x3"
+
+[traces.views-sync-after-burst]
+model = "views"
+main = "views"
+init = "init"
+step = "syncAfterBurst"
+invariant = "allInvariants"
+max_steps = 10
+seed = "0x3"
+
+[traces.views-two-views-share-a-generation]
+model = "views"
+main = "views"
+init = "init"
+step = "twoViewsShareAGeneration"
+invariant = "allInvariants"
+max_steps = 8
+seed = "0x3"
+
+[traces.views-head-moved-outside-the-root]
+model = "views"
+main = "views"
+init = "init"
+step = "headMovedOutsideTheRoot"
+invariant = "allInvariants"
+max_steps = 15
+seed = "0x3"
+
+[traces.views-concurrent-edits-during-request]
+model = "views"
+main = "views"
+init = "init"
+step = "concurrentEditsDuringRequest"
+invariant = "allInvariants"
+max_steps = 10
+seed = "0x3"

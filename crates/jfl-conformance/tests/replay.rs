@@ -13,7 +13,7 @@ use jfl_conformance::HarnessError;
 use jfl_conformance::cli;
 use jfl_conformance::manifest;
 use jfl_conformance::registry;
-use jfl_conformance::replay::{Context, Failure};
+use jfl_conformance::replay::{self, Context, Failure};
 use jfl_conformance::smoke;
 use jfl_conformance::trace;
 
@@ -50,10 +50,13 @@ impl Generated {
         Ok(fs::write(self.dir.join("smoke").join(name), text)?)
     }
 
-    /// `jfl-conformance replay --seed 0x7 --generated <dir>` on the repository: (code, out, err).
+    /// `jfl-conformance replay --model smoke --seed 0x7 --generated <dir>` on the repository:
+    /// (code, out, err).
     fn replay(&self) -> (u8, String, String) {
         let args = [
             "replay".to_owned(),
+            "--model".to_owned(),
+            "smoke".to_owned(),
             "--seed".to_owned(),
             "0x7".to_owned(),
             "--generated".to_owned(),
@@ -104,7 +107,7 @@ fn should_fail_at_the_skipped_value_when_the_negative_control_replays_a_trace() 
     };
 
     // when
-    let replayed = smoke::control(&context, steps);
+    let replayed = replay::replay(smoke::control(), &context, steps);
 
     // then
     let Err(Failure::Diverged(divergence)) = replayed else {
@@ -277,12 +280,13 @@ fn should_report_a_harness_error_when_the_itf_file_is_malformed() -> TestResult 
 
     for (case, text, why) in cases {
         // when
-        let replayed =
-            trace::parse("case", &text).and_then(|steps| match smoke::replay(&context, steps) {
+        let replayed = trace::parse("case", &text).and_then(|steps| {
+            match replay::replay(smoke::driver(), &context, steps) {
                 Ok(n) => Ok(n),
                 Err(Failure::Harness(error)) => Err(error),
                 Err(Failure::Diverged(d)) => Err(HarnessError::new(format!("diverged: {d}"))),
-            });
+            }
+        });
         let generated = Generated::new(&format!("malformed-{}", case.replace(' ', "-")))?;
         generated.trace("trace_0.itf.json", &text)?;
         let (code, out, err) = generated.replay();
@@ -336,17 +340,18 @@ fn should_report_a_harness_error_when_a_run_is_empty_or_holds_a_stranger() -> Te
 fn should_refuse_the_manifest_when_it_and_the_directory_disagree() -> TestResult {
     // given
     let text = fs::read_to_string(root().join(manifest::DIR).join(manifest::MANIFEST))?;
-    let present = vec!["smoke-counts-up.itf.json".to_owned()];
+    let present: Vec<String> = manifest::read(&root())?
+        .iter()
+        .map(|r| format!("{}{}", r.name, manifest::SUFFIX))
+        .collect();
+    let with_stray: Vec<String> = present
+        .iter()
+        .cloned()
+        .chain(["stray.itf.json".to_owned()])
+        .collect();
     let cases = [
         (text.clone(), vec![], "is missing"),
-        (
-            text.clone(),
-            vec![
-                "smoke-counts-up.itf.json".to_owned(),
-                "stray.itf.json".to_owned(),
-            ],
-            "stray.itf.json: not listed",
-        ),
+        (text.clone(), with_stray, "stray.itf.json: not listed"),
         (
             text.replacen("seed = ", "colour = \"red\"\nseed = ", 1),
             present.clone(),
@@ -380,8 +385,9 @@ fn should_refuse_the_manifest_when_it_and_the_directory_disagree() -> TestResult
         assert!(refusal.contains(why), "{why}: {refusal}");
     }
     let read = manifest::read(&root())?;
-    assert_eq!(read.len(), 1);
     assert_eq!(manifest::parse(&text, &present)?, read);
+    assert!(read.iter().any(|r| r.model == "smoke"));
+    assert!(read.iter().any(|r| r.model == "views"));
     Ok(())
 }
 
@@ -389,7 +395,7 @@ fn should_refuse_the_manifest_when_it_and_the_directory_disagree() -> TestResult
 fn should_refuse_the_registry_when_a_model_has_no_driver() -> TestResult {
     // given
     let registered = registry::models(&root())?;
-    let one_more = vec!["smoke".to_owned(), "views".to_owned()];
+    let one_more = vec!["smoke".to_owned(), "views".to_owned(), "daemon".to_owned()];
     let unregistered = vec!["other".to_owned()];
 
     // when
@@ -409,10 +415,14 @@ fn should_refuse_the_registry_when_a_model_has_no_driver() -> TestResult {
             .map(|e| e.to_string())
             .unwrap_or_default()
     };
-    assert!(error(1).contains("views is registered"), "{}", error(1));
+    assert!(error(1).contains("daemon is registered"), "{}", error(1));
     assert!(error(2).contains("other is registered"), "{}", error(2));
     assert!(error(2).contains("no driver"), "{}", error(2));
     assert!(error(3).contains("smoke has a driver"), "{}", error(3));
+    assert!(
+        registry::check(&["smoke".to_owned()]).is_err(),
+        "views is pending, so registered"
+    );
     Ok(())
 }
 
@@ -423,6 +433,8 @@ fn should_report_a_harness_error_when_a_model_has_no_regression_trace() -> TestR
     let bare = scratch.dir.join("root");
     fs::create_dir_all(bare.join(manifest::DIR))?;
     fs::copy(root().join(registry::MODELS), bare.join(registry::MODELS))?;
+    fs::create_dir_all(bare.join("doc"))?;
+    fs::copy(root().join(registry::TASKS), bare.join(registry::TASKS))?;
     fs::write(
         bare.join(manifest::DIR).join(manifest::MANIFEST),
         "# no trace\n",
@@ -440,5 +452,133 @@ fn should_report_a_harness_error_when_a_model_has_no_regression_trace() -> TestR
         err.contains("smoke has no committed regression trace"),
         "{err}"
     );
+    Ok(())
+}
+
+#[test]
+fn should_refuse_a_pending_entry_when_its_task_is_unknown_or_done() -> TestResult {
+    // given
+    let tasks = "\
+#### IDX-09: View registry (views driver)
+- **Accept:**
+  - [x] one
+  - [ ] two
+
+#### IDX-12: Daemon host
+- [ ] an unticked note outside the Accept list does not keep the task open
+- **Accept:**
+  - [x] one
+  - [X] two
+- **Impact:** none
+  - [ ] nor does a box under another item
+
+#### LSP-04: Diagnostics
+- no box here
+";
+    let cases = [
+        (("views", "IDX-09"), None),
+        (
+            ("daemon", "IDX-12"),
+            Some("IDX-12 is done (every `Accept:` box is ticked)"),
+        ),
+        (
+            ("diagnostics", "LSP-04"),
+            Some("LSP-04's card has no `Accept:` box"),
+        ),
+        (
+            ("views", "IDX-99"),
+            Some("IDX-99 has no card (`#### IDX-99:`)"),
+        ),
+        (("views", "IDX-0"), Some("IDX-0 has no card")),
+    ];
+
+    // when
+    let checked: Vec<_> = cases
+        .iter()
+        .map(|(entry, _)| registry::check_pending_in(&[*entry], tasks))
+        .collect();
+
+    // then
+    for ((entry, why), result) in cases.iter().zip(checked) {
+        match (why, result) {
+            (None, Ok(())) => {}
+            (Some(why), Err(error)) => {
+                let error = error.to_string();
+                assert!(error.contains(why), "{entry:?}: {error}");
+                assert!(
+                    error.contains(&format!("{} is pending on {}", entry.0, entry.1)),
+                    "{error}"
+                );
+            }
+            (want, got) => return Err(format!("{entry:?}: wanted {want:?}, got {got:?}").into()),
+        }
+    }
+    assert_eq!(registry::check_pending(&registry::tasks(&root())?), Ok(()));
+    Ok(())
+}
+
+#[test]
+fn should_warn_of_each_pending_model_when_the_traces_are_replayed() {
+    // given
+    let args = ["replay".to_owned()];
+    let (mut out, mut err) = (Vec::new(), Vec::new());
+
+    // when
+    let code = cli::run(&args, &root(), &mut out, &mut err);
+
+    // then
+    let (out, err) = (String::from_utf8_lossy(&out), String::from_utf8_lossy(&err));
+    assert_eq!(code, cli::OK, "{out}{err}");
+    for (model, task) in registry::PENDING {
+        assert!(
+            err.contains(&format!(
+                "warning: {model} is pending: its driver lands with {task}"
+            )),
+            "{err}"
+        );
+        assert!(out.contains(&format!("conformance: {model}: ")), "{out}");
+    }
+    assert!(!err.contains("warning: smoke"), "{err}");
+}
+
+#[test]
+fn should_read_a_pending_model_s_generated_traces_when_its_driver_has_not_landed() -> TestResult {
+    // given: a well-formed and a malformed generated run of the pending views model
+    let scratch = Generated::new("pending")?;
+    let views = scratch.dir.join("views");
+    fs::create_dir_all(&views)?;
+    let committed_views = fs::read_to_string(
+        root().join("formal/traces/regression/views-two-views-share-a-generation.itf.json"),
+    )?;
+    let run = |text: &str| -> Result<(u8, String, String), Box<dyn Error>> {
+        fs::write(views.join("trace_0.itf.json"), text)?;
+        let args: Vec<String> = ["replay", "--model", "views", "--seed", "0x7", "--generated"]
+            .iter()
+            .map(|w| (*w).to_owned())
+            .chain([scratch.dir.display().to_string()])
+            .collect();
+        let (mut out, mut err) = (Vec::new(), Vec::new());
+        let code = cli::run(&args, &root(), &mut out, &mut err);
+        Ok((
+            code,
+            String::from_utf8_lossy(&out).into_owned(),
+            String::from_utf8_lossy(&err).into_owned(),
+        ))
+    };
+
+    // when
+    let (good, bad) = (run(&committed_views)?, run("{")?);
+
+    // then
+    assert_eq!(good.0, cli::OK, "{}{}", good.1, good.2);
+    assert!(
+        good.1.contains(
+            "views: 1 generated traces read, not replayed (its driver lands with IDX-09)"
+        ),
+        "{}",
+        good.1
+    );
+    assert_eq!(bad.0, cli::HARNESS, "{}{}", bad.1, bad.2);
+    assert!(bad.2.contains("not an ITF trace"), "{}", bad.2);
     Ok(())
 }

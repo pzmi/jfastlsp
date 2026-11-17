@@ -955,11 +955,40 @@ before LSP-04.
   generation mid-request (violates `NoMixedGeneration`), skip the stat (violates
   `FreshAfterStat`). Regression traces for each scenario, registered. Document the observation
   the IDX-09 driver must produce in `doc/formal-models.md` (created here).
+- **As built (FORMAL-03):** `formal/views.qnt` with two worktrees (`n` a linked worktree nested
+  in `m`, its HEAD and index outside its root), three files, one in-order watcher instance, two
+  requests and a `sync` per view; the six invariants plus `SyncIsBarrier`; seven scenarios, the
+  card's four plus `twoViewsShareAGeneration` (completeness is tied to a (view, generation) pair,
+  the IDX-02 review), `headMovedOutsideTheRoot` (round 2) and `concurrentEditsDuringRequest`
+  (round 3); thirteen controls. Each scenario's
+  regression trace comes from a scripted step that enables one action per state, so the trace is
+  the same at every seed; its Quint test takes the same steps as named actions, since `quint
+  test` runs a test that draws a value 10000 times. `views` is pending on IDX-09.
+  - **Round 2 (the review's FIX FIRST):** the correct model broke `CompleteIsHonest` in 13 steps
+    (a checkout reconciled through file events only kept the old HEAD under `complete=true`). The
+    design is now ADR 0037 (Proposed): the pin re-stats HEAD and the index; HEAD-only moves and
+    staging are stimuli; events arrive in order and the request's cookie is modelled as an event;
+    a per-view watched/certain state (watch, then scan; every loss signal, an overflow for every
+    view of the instance); git's racy-mtime rule. IDX-09's obligations are on its card.
+  - **Round 3 (the re-verify's HIGH):** round 2's `CompleteIsHonest` bounded each file
+    separately, so a complete answer could mix versions no disk state held (a call moved from A
+    to B in neither). The invariant now requires a snapshot (the pinned index equals one state of
+    the request's ghost history from sync point to pin), and the model has the mechanism: read
+    stamps on summaries and a second cookie at the pin; the control
+    `requestPinIgnoringLateReads` is the review's counterexample. ADR 0037 states the snapshot
+    rule, the second cookie and the `mmap` limitation. A pin waits for a queued cookie, and `step`
+    picks among four equally likely groups of stimuli, so the simulation reaches a complete answer
+    through a second cookie.
+  - **The registry carries two numbers:** `steps` (Apalache's bound) and `sim_steps` (the depth of
+    `formal-verify`'s 20000-sample simulation and of `conformance-replay`'s generated traces);
+    `formal-verify` reads Quint's IR from `--out` and checks it whole. The FORMAL-02 review's V1
+    (a pending task must have an open `Accept:` box) and V2 (the replay owns the comparison, and
+    the observation must name every trace variable) are in `jfl-conformance`.
 - **Accept:**
-  - [ ] typecheck, Quint tests and simulation of `allInvariants` green at the registered budget
-  - [ ] each broken-model control violates its named invariant within the bound (a Quint test)
-  - [ ] regression traces committed and fresh
-  - [ ] `doc/formal-models.md` states stimuli, observation and invariants for `views`
+  - [x] typecheck, Quint tests and simulation of `allInvariants` green at the registered budget
+  - [x] each broken-model control violates its named invariant within the bound (a Quint test)
+  - [x] regression traces committed and fresh
+  - [x] `doc/formal-models.md` states stimuli, observation and invariants for `views`
 - **Impact:** none (model).
 
 #### FORMAL-04: `daemon.qnt`: single owner, spawn, reconnect, no ghost buffers
@@ -1561,6 +1590,24 @@ but follow in lane CLI (M2). Starts after the go decision.
   the `views` conformance driver in `jfl-conformance` over the registry with testkit fakes, then
   the code; the negative control (publish before the last summary is stored) fails at its named
   step.
+- **Obligations from `formal/views.qnt` and ADR 0037 (Proposed; doc/formal-models.md lists
+  them with the model's names):** watch, then scan, then publish (at open, start and every
+  re-established watch); scan each new directory after adding its watch; treat an `add_watch`
+  error (ENOSPC, EMFILE), `IN_IGNORED`, `IN_DELETE_SELF`, `IN_UNMOUNT`, `IN_Q_OVERFLOW` (every
+  view on the instance) and FSEvents' drop, `RootChanged` and `EventIdsWrapped` flags as losses
+  that leave the view uncertain until a full scan started after the watch is back; check the
+  filesystem type with `statfs` and never claim `complete` on network, FUSE or overlay
+  filesystems (NFS, SMB, sshfs, 9p, virtiofs, an overlayfs lower layer); apply git's racy-mtime
+  rule in every stat; a cookie per request through the in-order event stream, the cookie and the
+  view's files on one inotify instance or FSEvents stream with no debouncer or other reordering
+  layer between (`FSEventStreamFlushSync` on macOS); a read stamp on every summary and a second
+  cookie at the pin when the pinned generation holds a summary read after the first (at most two
+  round trips per completeness-claiming request, measured against plan §1.7's 100 ms freshness
+  target), so a complete answer is a snapshot of one real disk state; re-stat `HEAD` and the
+  index at the pin (a linked worktree's live under the common directory's `worktrees/<name>/`);
+  writes through a writable `mmap` are an accepted limitation (ADR 0037). The driver observes the
+  view identity of each pin, read and completeness, and every type of its observation, nested
+  ones included, uses `deny_unknown_fields` and a derived `PartialEq`.
 - **Reuse considered:** `salsa` weighed and deferred (per-process database, experimental
   persistence); turborepo's cookie file to prove the watcher caught up for `sync`.
 - **Accept:**

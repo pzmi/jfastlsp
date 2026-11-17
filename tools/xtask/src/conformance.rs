@@ -13,8 +13,8 @@
 //!   for byte outside its top-level `#meta` (Quint's timestamp and source path), naming each stale
 //!   trace and the command that regenerates it. A committed file that is not a trace Quint wrote
 //!   is stale too. Pinned by tools/xtask/tests/conformance.rs.
-//! - **`conformance-replay`** generates, per registered model, [`TRACES`] traces of [`STEPS`]
-//!   steps with `quint run --mbt` at one seed (fresh unless given; printed with the command that
+//! - **`conformance-replay`** generates, per registered model, [`TRACES`] traces of the model's
+//!   `sim_steps` steps (formal/models.toml: the simulation's depth, not Apalache's bound) with `quint run --mbt` at one seed (fresh unless given; printed with the command that
 //!   repeats the run), generates them a second time and fails unless both runs are equal outside
 //!   their `#meta` (the seed reproduces the run), then runs `jfl-conformance replay` over them and
 //!   the committed traces (cargo, with the gate's compiler flags). The traces live in a fresh
@@ -43,11 +43,9 @@ pub(crate) const MANIFEST: &str = "manifest.toml";
 /// A trace file's suffix.
 const SUFFIX: &str = ".itf.json";
 
-/// The traces each model gets per run, and their steps: the budget of ver §6.2 item 2, to be
-/// measured and ratcheted.
+/// The traces each model gets per run: the budget of ver §6.2 item 2, to be measured and
+/// ratcheted. Their steps are each model's `sim_steps`.
 pub(crate) const TRACES: u32 = 10;
-/// See [`TRACES`].
-pub(crate) const STEPS: u32 = 25;
 
 /// The largest TRACES or STEPS `conformance` accepts.
 const MOST: u32 = 1000;
@@ -56,7 +54,7 @@ const MOST: u32 = 1000;
 pub(crate) const FRESHNESS: &str = "quint run --backend typescript --mbt --seed <seed> <each trace of formal/traces/regression/manifest.toml>, equal byte for byte to the committed trace outside its #meta";
 
 /// What `conformance-replay` stands for.
-pub(crate) const REPLAY: &str = "quint run --backend typescript --mbt --seed <fresh seed, printed> <each model of formal/models.toml> (10 traces of 25 steps, generated twice and equal), then cargo run --locked -q -p jfl-conformance -- replay --seed <seed> --generated <dir> (and formal/traces/regression)";
+pub(crate) const REPLAY: &str = "quint run --backend typescript --mbt --seed <fresh seed, printed> <each model of formal/models.toml> (10 traces of the model's sim_steps steps, generated twice and equal), then cargo run --locked -q -p jfl-conformance -- replay --seed <seed> --generated <dir> (and formal/traces/regression)";
 
 /// One committed regression trace, as its manifest table says.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -419,8 +417,8 @@ pub(crate) struct Run {
     pub(crate) seed: Option<String>,
     /// Traces per model.
     pub(crate) traces: u32,
-    /// Steps per trace.
-    pub(crate) steps: u32,
+    /// Steps per trace; each model's `sim_steps` when `None`.
+    pub(crate) steps: Option<u32>,
 }
 
 impl Default for Run {
@@ -429,7 +427,7 @@ impl Default for Run {
             model: None,
             seed: None,
             traces: TRACES,
-            steps: STEPS,
+            steps: None,
         }
     }
 }
@@ -461,7 +459,9 @@ pub(crate) fn parse_run(words: &[String]) -> Result<Run, String> {
         Ok(())
     };
     count("TRACES", &mut run.traces)?;
-    count("STEPS", &mut run.steps)?;
+    let mut steps = 0;
+    count("STEPS", &mut steps)?;
+    run.steps = (steps > 0).then_some(steps);
     if words.next().is_some() {
         return Err("conformance: at most MODEL SEED TRACES STEPS".to_owned());
     }
@@ -501,11 +501,12 @@ pub(crate) fn conformance(context: &Context, run: &Run) -> i32 {
     if let Err(code) = formal::require(context, stage, &["node", "quint"]) {
         return code;
     }
-    let (traces, steps) = (run.traces.to_string(), run.steps.to_string());
-    eprintln!("{stage}: seed {seed}: {traces} traces of {steps} steps per model");
+    let traces = run.traces.to_string();
+    eprintln!("{stage}: seed {seed}: {traces} traces per model");
     for model in &chosen {
+        let steps = run.steps.unwrap_or(model.sim_steps);
         eprintln!(
-            "{stage}: repeat {} with: just conformance {} {seed} {traces} {steps}",
+            "{stage}: repeat {} ({traces} traces of {steps} steps) with: just conformance {} {seed} {traces} {steps}",
             model.name, model.name
         );
     }
@@ -536,8 +537,9 @@ fn generate_and_replay(
     scratch: &Path,
 ) -> i32 {
     let stage = "conformance-replay";
-    let (traces, steps) = (run.traces.to_string(), run.steps.to_string());
+    let traces = run.traces.to_string();
     for model in models {
+        let steps = run.steps.unwrap_or(model.sim_steps).to_string();
         let mut runs: Vec<PathBuf> = Vec::new();
         for pass in ["run", "again"] {
             let dir = scratch.join(pass).join(&model.name);
@@ -714,6 +716,7 @@ mod tests {
             file: "formal/smoke.qnt".to_owned(),
             main: "smoke".to_owned(),
             steps: 10,
+            sim_steps: 25,
         }];
 
         // when
@@ -822,7 +825,7 @@ mod tests {
                 model: None,
                 seed: Some("0x2a".to_owned()),
                 traces: 3,
-                steps: 7
+                steps: Some(7)
             })
         );
         assert!(refused.iter().all(Result::is_err), "{refused:?}");

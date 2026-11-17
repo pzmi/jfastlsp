@@ -8,7 +8,9 @@
 //! Exit codes: 0 every trace conforms; 1 a divergence (`DIVERGENCE: ...`, with model, seed, trace,
 //! step, action, expected, actual and a diff); 2 usage; 3 a harness error (`HARNESS_ERROR: ...`):
 //! a malformed trace, a model without a driver or without a committed regression trace, a
-//! generated model with no trace, or a negative control that passed. Pinned by tests/replay.rs.
+//! pending model whose task is unknown or done, a generated model with no trace, or a negative
+//! control that passed. A pending model is named in a warning on stderr. Pinned by
+//! tests/replay.rs.
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -16,7 +18,7 @@ use std::path::{Path, PathBuf};
 use crate::HarnessError;
 use crate::manifest;
 use crate::registry;
-use crate::replay::{Context, Failure};
+use crate::replay::{self, Context, Failure};
 use crate::trace;
 
 /// The usage text.
@@ -84,7 +86,7 @@ pub fn run(args: &[String], root: &Path, out: &mut dyn Write, err: &mut dyn Writ
             return USAGE_ERROR;
         }
     };
-    match replay(&command, root, out) {
+    match replay_all(&command, root, out, err) {
         Ok(()) => OK,
         Err(failure) => {
             let _ = writeln!(err, "{failure}");
@@ -96,13 +98,27 @@ pub fn run(args: &[String], root: &Path, out: &mut dyn Write, err: &mut dyn Writ
     }
 }
 
-fn replay(command: &Replay, root: &Path, out: &mut dyn Write) -> Result<(), Failure> {
+fn replay_all(
+    command: &Replay,
+    root: &Path,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> Result<(), Failure> {
     let models = registry::models(root)?;
     registry::check(&models)?;
+    registry::check_pending(&registry::tasks(root)?)?;
     let chosen: Vec<&String> = models
         .iter()
         .filter(|m| command.model.as_ref().is_none_or(|only| only == *m))
         .collect();
+    for model in &chosen {
+        if let Some(task) = registry::pending(model) {
+            let _ = writeln!(
+                err,
+                "warning: {model} is pending: its driver lands with {task}; its traces are read, not replayed"
+            );
+        }
+    }
     if chosen.is_empty() {
         return Err(HarnessError::new(format!(
             "no model {} in {}; registered: {}",
@@ -152,7 +168,7 @@ fn replay(command: &Replay, root: &Path, out: &mut dyn Write) -> Result<(), Fail
         };
         match registry::driver(&regression.model) {
             Some(entry) => {
-                let n = (entry.replay)(&context, steps)?;
+                let n = replay::replay((entry.driver)(), &context, steps)?;
                 let _ = writeln!(
                     out,
                     "conformance: {}: {file}: {n} states conform",
@@ -172,16 +188,9 @@ fn replay(command: &Replay, root: &Path, out: &mut dyn Write) -> Result<(), Fail
     Ok(())
 }
 
-/// Replays `dir/<model>/*.itf.json` through the model's driver, then its negative control.
+/// Reads `dir/<model>/*.itf.json` (failing closed on any that is not a trace) and replays them
+/// through the model's driver, then its negative control; a pending model's are read only.
 fn generated(model: &str, seed: &str, dir: &Path, out: &mut dyn Write) -> Result<(), Failure> {
-    let Some(entry) = registry::driver(model) else {
-        let task = registry::pending(model).unwrap_or_default();
-        let _ = writeln!(
-            out,
-            "conformance: {model}: generated traces not replayed (its driver lands with {task})"
-        );
-        return Ok(());
-    };
     let files = trace_files(&dir.join(model))?;
     let mut traces = Vec::with_capacity(files.len());
     for file in &files {
@@ -189,6 +198,15 @@ fn generated(model: &str, seed: &str, dir: &Path, out: &mut dyn Write) -> Result
         let steps = trace::read(file, &name)?;
         traces.push((name, steps));
     }
+    let Some(entry) = registry::driver(model) else {
+        let task = registry::pending(model).unwrap_or_default();
+        let _ = writeln!(
+            out,
+            "conformance: {model}: {} generated traces read, not replayed (its driver lands with {task})",
+            traces.len()
+        );
+        return Ok(());
+    };
     let mut states = 0_usize;
     for (name, steps) in &traces {
         let context = Context {
@@ -196,7 +214,7 @@ fn generated(model: &str, seed: &str, dir: &Path, out: &mut dyn Write) -> Result
             seed,
             trace: name,
         };
-        states = states.saturating_add((entry.replay)(&context, steps.clone())?);
+        states = states.saturating_add(replay::replay((entry.driver)(), &context, steps.clone())?);
     }
     let _ = writeln!(
         out,
@@ -209,7 +227,7 @@ fn generated(model: &str, seed: &str, dir: &Path, out: &mut dyn Write) -> Result
             seed,
             trace: name,
         };
-        match (entry.control)(&context, steps.clone()) {
+        match replay::replay((entry.control)(), &context, steps.clone()) {
             Err(Failure::Diverged(divergence)) => Some(divergence),
             _ => None,
         }

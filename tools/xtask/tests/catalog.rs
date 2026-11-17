@@ -39,7 +39,7 @@ const FROZEN: &str = r#"[
   {"id": "formal-typecheck", "command": "quint typecheck <each model of formal/models.toml> (an unregistered formal/**/*.qnt fails)", "quick": false, "check": true},
   {"id": "formal-test", "command": "quint test --backend typescript --main <main> <each model of formal/models.toml> (a model without a test fails)", "quick": false, "check": true},
   {"id": "formal-freshness", "command": "quint run --backend typescript --mbt --seed <seed> <each trace of formal/traces/regression/manifest.toml>, equal byte for byte to the committed trace outside its #meta", "quick": false, "check": true},
-  {"id": "conformance-replay", "command": "quint run --backend typescript --mbt --seed <fresh seed, printed> <each model of formal/models.toml> (10 traces of 25 steps, generated twice and equal), then cargo run --locked -q -p jfl-conformance -- replay --seed <seed> --generated <dir> (and formal/traces/regression)", "quick": false, "check": true},
+  {"id": "conformance-replay", "command": "quint run --backend typescript --mbt --seed <fresh seed, printed> <each model of formal/models.toml> (10 traces of the model's sim_steps steps, generated twice and equal), then cargo run --locked -q -p jfl-conformance -- replay --seed <seed> --generated <dir> (and formal/traces/regression)", "quick": false, "check": true},
   {"id": "deny", "command": "cargo deny --locked check", "quick": false, "check": true},
   {"id": "secrets", "command": "bash scripts/secrets-check.sh", "quick": false, "check": true},
   {"id": "workflows", "command": "bash scripts/workflows-check.sh workflows, then bash scripts/workflows-check.sh shell", "quick": false, "check": true}

@@ -355,7 +355,10 @@ Before answering, the daemon stats the request's file plus the worktree's `HEAD`
 last-seen tree plus `git status -z`, then re-summarise what changed. Filesystem watcher events are
 hints that start the same reconcile early; the stat catches checkout, rebase, reset, stash and
 commit without a tree walk. `jfl sync` is the explicit barrier: it returns once every pending
-change is in a published generation.
+change is in a published generation. A request stats `HEAD` and the index again when it pins, and
+a `complete=true` answer also needs its view's watcher trusted and caught up to the request
+(ADR 0037, Proposed: a cookie through the in-order event stream; git's racy-mtime rule in every
+stat).
 
 ### 4.4 Shell edits and overlays
 
@@ -759,15 +762,24 @@ models state the design, the state-machine tests the implementation, and both ar
 
 ### 7.1 `views.qnt`: views, generations and freshness
 
-- **Stimuli:** disk write, delete, `git checkout`/`stash`/`reset` (changes `HEAD` and many files),
-  watcher hint (possibly lost, duplicated or reordered), reconcile step, publish, request start
-  (stat, pin), request finish, `sync`.
+- **Stimuli:** disk write (racy or not), delete, the mtime tick, `git checkout`/`stash`/`reset`
+  (changes `HEAD`, the index and many files), a HEAD-only move (`commit`, `reset --soft`),
+  staging (`git add`), watcher event delivered in order or duplicated, an overflow, a watch lost
+  and re-established, reconcile step, publish, request start (stat, cookie), a second cookie,
+  pin (re-stat of `HEAD` and the index), read, finish, `sync`.
 - **Invariants:** `NoMixedGeneration` (every value a request reads belongs to its pinned
   generation); `GenerationsIncrease`; `AtomicPublish` (a published generation's summaries are all
   stored); `FreshAfterStat` (a change the request's stat observed is in the generation it
-  answers from); `CompleteIsHonest` (`complete=true` implies every file of every visible module
-  is indexed at the pinned generation and its disk version equals the indexed one at pin time);
-  `NoCrossView` (a request is answered only from its own worktree's view).
+  answers from); `CompleteIsHonest` (`complete=true` only for the request's own view at its
+  pinned generation, since generation numbers count per view; the pinned index a snapshot, equal
+  to one state the view's files had between the request's sync point, its stat and cookie, and
+  its pin; `HEAD` and the index equal to the disk's at the pin);
+  `NoCrossView` (a request is answered only from its own worktree's view, and no view indexes a
+  nested worktree's files); `SyncIsBarrier` (a finished `sync` has published what the disk held
+  when it started). How `complete=true` is earned (a watched, certain view, the request's cookie
+  back through the in-order event stream, a second cookie when a summary was read after the
+  first, nothing unpublished, the pin's re-stat, the racy-mtime rule) is ADR 0037 (Proposed); [`formal-models.md`](formal-models.md) holds the model's
+  decisions, IDX-09's obligations, the driver's observation and the budget.
 - **Driver:** `jfl-application`'s view registry over the testkit's scripted source tree, repo
   probe and store (IDX-09). **Negative control:** publishing before the last summary is stored.
 

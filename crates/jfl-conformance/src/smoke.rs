@@ -4,11 +4,10 @@
 //! diverge at the step whose model state is [`SKIPPED`] (ver §6.2 item 4). Pinned by
 //! tests/replay.rs::should_fail_at_the_skipped_value_when_the_negative_control_replays_a_trace.
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::driver::{Driver, Step, StepError};
-use crate::replay::{self, Context, Failure};
-use crate::trace::RawStep;
+use crate::replay::Replayer;
 
 /// The value the faulty counter of the negative control skips.
 pub const SKIPPED: i64 = 3;
@@ -61,7 +60,7 @@ impl Counter {
 }
 
 /// The smoke model's variables, as the driver observes them.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct SmokeState {
     /// The counter.
@@ -102,14 +101,14 @@ impl Driver for SmokeDriver {
     }
 }
 
-/// Replays `steps` through the correct counter.
-pub fn replay(context: &Context<'_>, steps: Vec<RawStep>) -> Result<usize, Failure> {
-    replay::replay(SmokeDriver::new(Counter::new()), context, steps)
+/// The driver over the correct counter.
+pub fn driver() -> Replayer {
+    Replayer::new(SmokeDriver::new(Counter::new()))
 }
 
-/// The negative control: replays `steps` through a counter that skips [`SKIPPED`].
-pub fn control(context: &Context<'_>, steps: Vec<RawStep>) -> Result<usize, Failure> {
-    replay::replay(SmokeDriver::new(Counter::skipping(SKIPPED)), context, steps)
+/// The negative control: the driver over a counter that skips [`SKIPPED`].
+pub fn control() -> Replayer {
+    Replayer::new(SmokeDriver::new(Counter::skipping(SKIPPED)))
 }
 
 #[cfg(test)]

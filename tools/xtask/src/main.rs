@@ -365,7 +365,7 @@ mod tests {
                     model: Some("smoke".to_owned()),
                     seed: Some("0x2a".to_owned()),
                     traces: 3,
-                    steps: 4,
+                    steps: Some(4),
                 }),
             ),
         ];
