@@ -717,6 +717,49 @@ fn should_pass_dco_check_when_every_commit_is_signed_off_by_its_author() -> Test
     Ok(())
 }
 
+fn dco_event(lab: &Lab, args: [&str; 4]) -> Result<Output, Box<dyn Error>> {
+    Ok(lab
+        .command("bash", &lab.dir("work"))
+        .arg(script("dco-check.sh"))
+        .arg("--event")
+        .args(args)
+        .output()?)
+}
+
+#[test]
+fn should_check_the_event_s_range_when_dco_check_runs_for_a_github_event() -> TestResult {
+    // given: an unsigned commit, then a signed one on top
+    let lab = Lab::new("dco-event")?;
+    lab.seed(&[])?;
+    let base = lab.git_out("work", &["rev-parse", "HEAD"])?;
+    commit_as(&lab, "Ann Author <ann@example.test>", "unsigned", "1.txt")?;
+    let middle = lab.git_out("work", &["rev-parse", "HEAD"])?;
+    commit_as(
+        &lab,
+        "Ann Author <ann@example.test>",
+        "signed\n\nSigned-off-by: Ann Author <ann@example.test>",
+        "2.txt",
+    )?;
+    let head = lab.git_out("work", &["rev-parse", "HEAD"])?;
+    let zero = "0000000000000000000000000000000000000000";
+
+    // when
+    let push_last = dco_event(&lab, ["push", &middle, "", &head])?;
+    let push_all = dco_event(&lab, ["push", &base, "", &head])?;
+    let first_push = dco_event(&lab, ["push", zero, "", &head])?;
+    let pull_request = dco_event(&lab, ["pull_request", "", &base, &head])?;
+    let dispatch = dco_event(&lab, ["workflow_dispatch", "", "", &head])?;
+
+    // then
+    assert!(succeeded(&push_last)?.contains("1 commit(s)"));
+    assert!(!push_all.status.success(), "{}", printed(&push_all));
+    assert!(!first_push.status.success(), "{}", printed(&first_push));
+    assert!(printed(&first_push).contains("is not a commit here"));
+    assert!(!pull_request.status.success(), "{}", printed(&pull_request));
+    assert!(succeeded(&dispatch)?.contains("1 commit(s)"));
+    Ok(())
+}
+
 fn adr_index(lab: &Lab, mode: &str, dir: &Path) -> Result<Output, Box<dyn Error>> {
     Ok(lab
         .command("bash", &lab.base)

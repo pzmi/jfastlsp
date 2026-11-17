@@ -12,7 +12,9 @@
 #   * the names of the added and untracked files (a match masks the path in the report).
 # A change that removes an entry from .private-names.sha256, or alters its salt, fails.
 # With no `origin/main` (a fork or a shallow checkout), or with --all, the scope is every tracked
-# and untracked file plus every commit message of HEAD's history: a superset, never a gap.
+# and untracked file plus every commit message of HEAD's history: a superset, never a gap. Under
+# CI=true the same superset is scanned when the base is HEAD itself (a push to main, where the
+# diff is empty) or, with --base, the all-zero commit (a first push).
 #
 # Matching: the text is folded to ASCII (NFKD, combining marks dropped, ł ø đ ß æ mapped:
 # scripts/private-names-fold.pl, shared with the add script), lower-cased and split on everything
@@ -182,8 +184,17 @@ if [ "$all" -eq 0 ]; then
       echo "private-names: no origin/main to diff against; scanning every file and every commit message" >&2
       all=1
     fi
+  elif [ "${CI:-}" = "true" ] && [[ "$base" =~ ^0+$ ]]; then
+    echo "private-names: the base is the all-zero commit (a first push); scanning every file and every commit message" >&2
+    all=1
   else
     base="$(git rev-parse --verify --quiet "$base^{commit}")" || die "$base is not a commit"
+  fi
+  # In CI a push to main has HEAD == origin/main, so the diff would be empty and the check green
+  # having read nothing: scan everything instead (fnd §7.4).
+  if [ "$all" -eq 0 ] && [ "${CI:-}" = "true" ] && [ "$base" = "$(git rev-parse HEAD)" ]; then
+    echo "private-names: the diff base is HEAD under CI=true (a push to main); scanning every file and every commit message" >&2
+    all=1
   fi
 fi
 

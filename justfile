@@ -106,10 +106,11 @@ fmt-check: _preflight
 
 # The architecture test (fnd §3.2, FND-07): the dependency law over `cargo metadata` for each
 # target of ADR 0006, the clippy lists against `[grants]` and the source scan, over the tree
-# (tests/architecture.rs); plus the checker's own table-driven negative cases and the meta-test
-# (tests/rules.rs). The fixture workspaces run in `integration-tests`.
+# (tests/architecture.rs, with ARCH-ci-lockstep over ci.yml); plus the checker's own table-driven
+# negative cases and the meta-test (tests/rules.rs) and the lockstep's (tests/ci_lockstep.rs). The
+# fixture workspaces run in `integration-tests`.
 architecture: _preflight (_require "cargo-nextest")
-    {{cargo}} nextest run --locked --retries 0 --no-tests fail -p jfl-architecture --test architecture --test rules
+    {{cargo}} nextest run --locked --retries 0 --no-tests fail -p jfl-architecture --test architecture --test rules --test ci_lockstep
 
 # Clippy with the authority lists (fnd §2.4): the per-crate lists must match the root one first,
 # and a list entry naming a path that does not exist fails the stage (clippy only warns, and
@@ -147,6 +148,11 @@ nostd: _preflight
 unit-tests: _preflight (_require "cargo-nextest")
     {{cargo}} nextest run --workspace --locked --retries 0 --no-tests fail --lib --bins
 
+# The tests that can differ by platform, natively on each target of ADR 0006: what the
+# `linux-arm` and `macos` jobs of ci.yml run (fnd §7.2 rule 4). Not a stage of `check`: on Linux
+# x86-64 the `tests` job runs the same stages, so each stage of `check` stays in one job.
+platform-tests: unit-tests integration-tests doctests
+
 # Integration, component and contract tests: every tests/ target, under nextest.
 integration-tests: _preflight (_require "cargo-nextest")
     {{cargo}} nextest run --workspace --locked --retries 0 --no-tests fail --test '*'
@@ -176,6 +182,11 @@ alias adr-index := docs
 dco range="origin/main..HEAD":
     bash scripts/dco-check.sh {{quote(range)}}
 
+# The DCO check over the commits a GitHub event brought (ci.yml's `dco` job): push before..head,
+# pull_request base..head, anything else head~1..head (scripts/dco-check.sh --event).
+dco-event event before base head:
+    bash scripts/dco-check.sh --event {{quote(event)}} {{quote(before)}} {{quote(base)}} {{quote(head)}}
+
 # Advisories, licences, sources and bans (fnd §2.5, §7.4).
 deny: _preflight (_require "cargo-deny")
     {{cargo}} deny --locked check
@@ -197,6 +208,12 @@ workflows: _preflight
 # GITHUB_TOKEN in CI), so it is outside `check`; ci.yml's security job runs it (FND-05).
 workflows-verify:
     bash scripts/workflows-check.sh verify
+
+# zizmor's online audits (impostor commits, known-vulnerable actions, ref confusion) over the
+# workflows, the local actions and dependabot.yml. Needs the GitHub API (GH_TOKEN), so it is
+# outside `check`; security.yml runs it weekly (fnd §7.1).
+workflows-online:
+    bash scripts/workflows-check.sh online
 
 # No name whose salted hash is in .private-names.sha256 in the lines this change adds, the
 # untracked files or the commit messages since `git merge-base HEAD origin/main` (FND-04, fnd

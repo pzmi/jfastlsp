@@ -2,7 +2,8 @@
 //! workspace (`cargo metadata` JSON, the policy and the files in memory), each a small change to a
 //! clean baseline that must produce its rule's id at its path; the clean baseline itself and a
 //! few look-alikes must produce nothing. The meta-test fails when a rule fnd §3.3 assigns to
-//! FND-07 has no negative case here or in `tests/fixture_workspaces.rs`.
+//! FND-07 or FND-05 has no negative case here, in `tests/fixture_workspaces.rs` or in
+//! `tests/ci_lockstep.rs`.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
@@ -1008,9 +1009,9 @@ fn should_report_arch_metadata_when_cargo_metadata_fails() -> TestResult {
 }
 
 /// The negative cases that live outside the table: (rule, test function) in
-/// `tests/fixture_workspaces.rs` and this file. The meta-test checks only that each function
+/// `tests/fixture_workspaces.rs`, `tests/ci_lockstep.rs` and this file. The meta-test checks only that each function
 /// exists; that it asserts its rule is the function's own business (and review's).
-const OTHER_CASES: [(&str, &str); 7] = [
+const OTHER_CASES: [(&str, &str); 8] = [
     (
         "ARCH-forbidden-edge",
         "should_fail_forbidden_edge_when_the_domain_depends_on_the_application",
@@ -1039,9 +1040,14 @@ const OTHER_CASES: [(&str, &str); 7] = [
         "ARCH-metadata",
         "should_report_arch_metadata_when_cargo_metadata_fails",
     ),
+    (
+        "ARCH-ci-lockstep",
+        "should_fail_lockstep_when_a_stage_runs_in_two_jobs",
+    ),
 ];
 
-/// The rule ids of fnd §3.3's rows whose Task column names FND-07.
+/// The rule ids of fnd §3.3's rows whose Task column names FND-07 or FND-05 (the tasks that put
+/// rules in this crate).
 fn fnd_rules() -> Result<BTreeSet<String>, Box<dyn Error>> {
     let fnd = std::fs::read_to_string(
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../../doc/foundation.md"),
@@ -1061,7 +1067,7 @@ fn fnd_rules() -> Result<BTreeSet<String>, Box<dyn Error>> {
         let (Some(ids), Some(task)) = (cells.first(), cells.last()) else {
             continue;
         };
-        if !task.contains("FND-07") {
+        if !task.contains("FND-07") && !task.contains("FND-05") {
             continue;
         }
         for id in ids.split('`').filter(|part| part.starts_with("ARCH-")) {
@@ -1076,12 +1082,15 @@ fn should_cover_every_rule_of_fnd_3_3_when_the_negative_cases_are_counted() -> T
     // given
     let fnd = fnd_rules()?;
     let fixture_source = include_str!("fixture_workspaces.rs");
+    let ci_source = include_str!("ci_lockstep.rs");
     let this_source = include_str!("rules.rs");
     let mut covered: BTreeSet<String> = cases().iter().map(|c| c.rule.to_owned()).collect();
     for (rule, test) in OTHER_CASES {
         let declared = format!("fn {test}(");
         assert!(
-            fixture_source.contains(&declared) || this_source.contains(&declared),
+            fixture_source.contains(&declared)
+                || ci_source.contains(&declared)
+                || this_source.contains(&declared),
             "{test} is listed for {rule} but does not exist"
         );
         covered.insert(rule.to_owned());
@@ -1094,18 +1103,18 @@ fn should_cover_every_rule_of_fnd_3_3_when_the_negative_cases_are_counted() -> T
     let unreported: Vec<&String> = fnd.difference(&reported).collect();
 
     // then
-    assert!(!fnd.is_empty(), "fnd §3.3 names no FND-07 rule");
+    assert!(!fnd.is_empty(), "fnd §3.3 names no FND-07 or FND-05 rule");
     assert!(
         uncovered.is_empty(),
         "rules without a negative case: {uncovered:?}"
     );
     assert!(
         undocumented.is_empty(),
-        "rules the test reports but fnd §3.3 does not assign to FND-07: {undocumented:?}"
+        "rules the test reports but fnd §3.3 does not assign to FND-07 or FND-05: {undocumented:?}"
     );
     assert!(
         unreported.is_empty(),
-        "rules fnd §3.3 assigns to FND-07 that the test never reports: {unreported:?}"
+        "rules fnd §3.3 assigns to FND-07 or FND-05 that the test never reports: {unreported:?}"
     );
     Ok(())
 }

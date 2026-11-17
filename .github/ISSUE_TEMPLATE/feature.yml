@@ -1,0 +1,23 @@
+name: Feature request
+description: Something jfl should do that it does not.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What you or your agent is trying to do, and where jfl falls short today.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you propose
+      description: The behaviour you want; how it fits the answer envelope (exact, possible, complete) if it is a query.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives
+      description: Other tools or approaches you considered.

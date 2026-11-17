@@ -501,7 +501,9 @@ There is no event store (ADR 0008). What persists:
    failure-swallowing `run:` (`|| true`, `set +e`, `exit 0`) or a steering `env:`, and when
    `required-checks.md` and `ci.yml` disagree.
 4. Native jobs on `ubuntu-24.04`, `ubuntu-24.04-arm` and `macos-15` (arm64) run the platform
-   tests (ADR 0006).
+   tests (ADR 0006): on x86-64 the `tests` job's stages, on the other two `just platform-tests`
+   (the unit, integration and doctest stages), which is not a stage of `check`, so each stage
+   still runs in one job.
 5. Scheduled workflows are outside `required`; their failures are reported and fixed as tasks.
 6. A red job is fixed, never re-run to green. One re-run is allowed only when the runner died
    before a test body ran, and the reason is written down.
@@ -651,11 +653,14 @@ needs one becomes a recipe parameter (`just conformance seed=42`).
 | `just doctor` | `mise doctor` and `mise ls --missing` | FND-01 |
 | `adrs new "<title>"`, `just adr-index` (the `docs` stage) | create an ADR from `doc/adr/template.md` (`adrs.toml`); check the index against the files (`scripts/adr-index.sh`) | FND-03 |
 | `just dco [range]` | every commit of the range is signed off by its author (`scripts/dco-check.sh`) | FND-03 |
+| `just dco-event <event> <before> <base> <head>` | the same over the commits a GitHub event brought: a push's before..head, a pull request's base..head, else head~1..head (`ci.yml`'s `dco` job) | FND-05 |
 | `scripts/land.sh <sha>… [--no-push]` | cherry-pick onto a fresh `origin/main` worktree, check sign-offs and signatures, `just check`, push only on green | FND-03 |
 | `just coverage`, `just changed-lines` | llvm-cov vs `coverage-floor.toml`; diff-cover on the lines changed since `git merge-base HEAD origin/main` (plus the working tree) | FND-06 |
 | `just mutants-diff [base]` | cargo-mutants `--in-diff` over the same diff, with a time cap; outside `check` (below) | FND-06 |
 | `just secrets`, `just workflows`, `just private-names` | gitleaks over the history; actionlint, zizmor, pinact (offline) and shellcheck; the hashed private-name check of §7.4 (`scripts/private-names-check.sh [--all]`) | FND-04 |
 | `just workflows-verify` | pinact's version-comment check; needs the GitHub API, so outside `check` (§7.3) | FND-04 |
+| `just workflows-online` | zizmor with its online audits over the workflows and `dependabot.yml`; needs the GitHub API (`GH_TOKEN`), so outside `check`; `security.yml` runs it | FND-05 |
+| `just platform-tests` | the unit, integration and doctest stages; what `ci.yml`'s `linux-arm` and `macos` jobs run natively (§7.2 rule 4); not a stage of `check` | FND-05 |
 | `just bench-corpus` | fetch the pinned corpus of `doc/bench-corpus.md` into the cache directory | BENCH-01 |
 | `just bench [suite] [corpus=small]` | the benchmark suites with machine facts, JSON results; reports, never gates | BENCH-02 |
 | `just bench-gate` | compare a run with the history of the same runner class; `bench.yml` only | BENCH-04 |

@@ -1,0 +1,28 @@
+# Dependency updates (fnd §7.1, §7.4): weekly, minor and patch grouped into one pull request per
+# ecosystem, majors one by one, each release at least a week old (the cooldown) so a compromised
+# or yanked release has time to be caught first. Every update still passes `just check`, the
+# deny policy and the architecture test's external allowlist; a pinned action's SHA and version
+# comment change together.
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    open-pull-requests-limit: 5
+    groups:
+      cargo-minor-and-patch:
+        update-types: [minor, patch]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    open-pull-requests-limit: 5
+    groups:
+      actions-minor-and-patch:
+        update-types: [minor, patch]

@@ -1,55 +1,104 @@
 # Required checks
 
-> **Status: planned.** Nothing here runs yet: `.github/workflows/ci.yml` does not exist until
-> FND-05 lands. Until then CI is absent and the orchestrator runs the live gate locally on the
-> merged tree before every push ([`sdlc.md`](sdlc.md) §2). This page lists the jobs FND-05
-> creates; FND-05 rewrites it from the real workflow, and the architecture test's lockstep rule
-> (`ARCH-ci-lockstep`) keeps the two in step.
+The CI result that must be green on `main` is the `Required` job (id `required`) of
+[`.github/workflows/ci.yml`](../.github/workflows/ci.yml). It is an aggregate: it runs
+`if: always()`, needs every other job of the workflow, and fails unless every one of them ended in
+`success`, so a job cannot drop out of the gate by failing, being cancelled or being skipped
+(fnd §7.2). Each job installs the pinned tools (mise at the version `scripts/bootstrap-tools.sh`
+pins, checksum-verified, then `mise install --locked`; the toolchain of `rust-toolchain.toml`) and
+runs `just` recipes, so the same recipes run on a laptop with `just check`.
 
-The CI result that must be green on `main` will be the `required` job of
-`.github/workflows/ci.yml`. It is an aggregate: it needs every other job of the workflow and fails
-when any of them failed, was cancelled or was skipped, so a job cannot drop out of the gate by not
-running (fnd §7.2). Each job runs `mise install --locked`, then `just check-only <stage>…`, so the
-same recipes run on a laptop with `just check`.
+`ci.yml` runs on every push to `main`, on pull requests (outside contributors and Dependabot) and
+by hand (`workflow_dispatch`). Integration is direct on `main` (ADR 0002), so the run that matters
+is the push of the landed commit.
 
 ## Branch protection
 
-Integration is direct on `main` (ADR 0002), so "required" means "must be green, and red is fixed
-immediately on `main`", not "GitHub refuses the merge". No task creates a ruleset. **(owner,
-pending)** If the owner wants a branch ruleset on `main`, it requires the single check
-`Required` and nothing else: requiring the aggregate means a job added later is required without
-editing the ruleset.
+"Required" means "must be green, and red is fixed immediately on `main`", not "GitHub refuses the
+push". No task creates a ruleset. **(owner, pending)** If the owner wants a branch ruleset on
+`main`, it requires the single status check `Required` and nothing else: requiring the aggregate
+means a job added later is required without editing the ruleset. **But** a ruleset that requires a
+status check rejects a direct push of any commit that has no passing `Required` yet, which is every
+commit `scripts/land.sh` pushes (ADR 0002). Landing then works only if the identity that pushes is
+on the ruleset's bypass list, and for that identity the rule is advisory: it is what land.sh's own
+gate on the merged tree already guarantees. Without the bypass, direct integration stops.
 
-## The planned checks
+## The checks
 
-| Job id | Display name | Runs (`just ...`) | Arrives with |
+The table is read by the architecture test (`ARCH-ci-lockstep`, `tools/jfl-architecture/src/ci.rs`):
+each row is one job of `ci.yml`, with its id, display name and runner, and the `just` invocations
+it runs in order, each in backticks (a recipe's arguments are not part of the contract). A job
+without a row, a row without a job, or any difference fails the `architecture` stage.
+
+| Job id | Display name | Runner | Runs (`just ...`) |
 |:--|:--|:--|:--|
-| `architecture` | Architecture and policy | `check-only architecture deny` | FND-05 |
-| `static` | Static quality | `doctor`, then `check-only fmt-check clippy nostd docs` | FND-05 |
-| `tests` | Tests (Linux x86-64) | `check-only unit-tests integration-tests doctests script-tests` | FND-05 |
-| `linux-arm` | Linux (arm64) | `check-only platform-tests` on `ubuntu-24.04-arm` | FND-05 |
-| `macos` | macOS (arm64) | `check-only platform-tests` on `macos-15` | FND-05 |
-| `security` | Security | `check-only secrets workflows private-names` | FND-05 |
-| `dco` | DCO | every pushed commit signed off by its author | FND-05 |
+| `architecture` | Architecture and policy | `ubuntu-24.04` | `check-only architecture deny` |
+| `static` | Static quality | `ubuntu-24.04` | `doctor`, then `check-only fmt-check clippy nostd docs` |
+| `tests` | Tests (Linux x86-64) | `ubuntu-24.04` | `check-only unit-tests integration-tests doctests script-tests` |
+| `linux-arm` | Linux (arm64) | `ubuntu-24.04-arm` | `platform-tests` |
+| `macos` | macOS (arm64) | `macos-15` | `platform-tests` |
+| `security` | Security | `ubuntu-24.04` | `check-only secrets workflows private-names`, then `workflows-verify` |
+| `dco` | DCO | `ubuntu-24.04` | `dco-event` over the commits the event brought (a push's before..after; a pull request's base..head; the commit itself on a manual run; a push from the all-zero commit or a force-push fails) |
+| `required` | Required | `ubuntu-24.04` | the aggregate of every other job's result |
+
+Every stage of `just check` is in exactly one job. `platform-tests` is not a stage of `check`: it
+runs the unit, integration and doctest stages natively on Linux arm64 and macOS arm64 (ADR 0006,
+fnd §7.2 rule 4), which the `tests` job already runs on Linux x86-64. `workflows-verify` (pinact's
+version-comment check) and `dco-event` need the GitHub API or the pushed range, so they are
+recipes outside `check`; the lockstep test also requires `platform-tests` to depend on exactly
+`unit-tests`, `integration-tests` and `doctests`. It checks shapes it allows rather than bypasses
+it knows: every `run:` of a job is `rustup toolchain install` or exactly one line `just <recipe> [args]`, each argument a plain
+word or `"$VAR"` of the step's own `env:` (so no `||`, `&&`, `&`, `;`, `set`, redirection or write
+to `$GITHUB_ENV` or `$GITHUB_PATH` can appear), except `required`'s one step, which must equal the
+text in `ci.rs` byte for byte; every `uses:` is actions/checkout, jdx/mise-action or
+Swatinem/rust-cache with only the inputs `ci.rs` lists (mise-action with `env: false`, so mise's
+`[env]` never reaches the gate); and it fails on an `if:` anywhere but `required`, on
+`continue-on-error`, on a `working-directory`, on a shell other than `bash`, on a job with
+`container:` or `services:`, on a `just` command whose first word is not a recipe of the justfile
+(a variable override such as `cargo=true`, or a flag), on an allowed action that omits a required
+input (mise-action's `env`, checkout's `persist-credentials`), and on any `env:` entry outside
+`ALLOWED_ENV` in `ci.rs`, which fixes each name, its value and its level: `CARGO_TERM_COLOR=always`
+and `NEXTEST_PROFILE=ci` for the workflow, and the job token and event fields the `security`,
+`dco` and `required` steps pass on (so `BASH_ENV`, `PATH`, `CI`, `JUST_*` and the build's own
+variables are refused by construction).
+
+`private-names` diffs against `origin/main` on a pull request. On a push to `main` the checkout's
+HEAD is `origin/main`, so that diff is empty: under `CI=true` the script then scans every file and
+every commit message of the history instead (a superset of the pushed range).
+
+Runs on `main` are never cancelled or replaced by a newer push: each commit there has its own
+concurrency group. A pull request's older run is cancelled by its newer one. Caches (mise's and
+`Swatinem/rust-cache`'s, keyed by the toolchain, `Cargo.lock` and `mise.lock`) are saved only
+from `main`.
+
+## Planned checks
+
+Not in `ci.yml` yet; each arrives with its task, which adds the job, its row above and its name
+to `required`'s `needs` in one commit.
+
+| Job id | Display name | Runs | Arrives with |
+|:--|:--|:--|:--|
 | `coverage` | Coverage | `check-only coverage changed-lines`, then `just mutants-diff` (full history; diff base `git merge-base HEAD origin/main`, 20-minute cap) | FND-06 |
 | `formal` | Formal models (Quint) | `check-only formal-typecheck formal-test formal-freshness conformance-replay` | FORMAL-01, FORMAL-02 |
 | `fixtures` | Java fixtures | `check-only java-fixtures` (pinned JDK) | EVAL-07 |
 | `e2e` | End to end | `check-only e2e-tests lsp-conformance` | IDX-13, LSP-01 |
-| `required` | Required | the aggregate; needs all of the above | FND-05 |
-
-Every stage of `check` will be in exactly one job; a test fails when a stage is in none or in two,
-and when a gating step has `continue-on-error` or an `if:`. Runs on `main` are never cancelled or
-replaced by a newer push: each commit there has its own concurrency group.
 
 ## Other workflows
 
-Not in `required`: `security.yml` (weekly: new advisories can fail an unchanged tree; zizmor's
-online audits), `bench.yml` (the corpus suites on one fixed runner class, history upload, and its
+Not in `required`:
+
+| Workflow | Trigger | Runs |
+|:--|:--|:--|
+| `security.yml` | weekly, dispatch | `just check-only deny` (new advisories can fail an unchanged tree), `just check-only secrets` (gitleaks over the full history), `just workflows-online` (zizmor's online audits) |
+| `codeql.yml` | push to `main`, pull request, weekly, dispatch | CodeQL for Rust and Actions (`build-mode: none`), results in code scanning |
+| `scorecard.yml` | push to `main`, weekly, dispatch | OpenSSF Scorecard, SARIF to code scanning, results published |
+| `.github/dependabot.yml` | weekly | cargo and github-actions, minor and patch grouped, a 7-day cooldown |
+
+Planned: `bench.yml` (the corpus suites on one fixed runner class, history upload, and its
 `bench-gate` job, which blocks `main` from IDX-15: red there is fixed like red CI; it is kept out
-of `ci.yml` because wall times are comparable only on one runner class, fnd §9),
-`codeql.yml`, `scorecard.yml`, `formal.yml` (Apalache, weekly and by hand), `fuzz.yml` (nightly),
-`mutation.yml` (weekly), `release.yml` (tags). A red run of any of them is reported to the owner
-and fixed as a task (fnd §7.1).
+of `ci.yml` because wall times are comparable only on one runner class, fnd §9), `formal.yml`
+(Apalache, weekly and by hand), `fuzz.yml` (nightly), `mutation.yml` (weekly), `release.yml`
+(tags). A red run of any of them is reported to the owner and fixed as a task (fnd §7.1).
 
 ## When a check goes red
 

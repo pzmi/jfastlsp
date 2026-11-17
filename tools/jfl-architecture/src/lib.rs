@@ -8,12 +8,14 @@
 //!
 //! Pinned by: tests/rules.rs (each rule's negative case, the clean baseline, the meta-test),
 //! tests/fixture_workspaces.rs (end to end through `cargo metadata`) and tests/architecture.rs
-//! (the tree).
+//! (the tree). [`ci`] holds `ARCH-ci-lockstep` (fnd §7.2), which reads `ci.yml`, the justfile and
+//! `doc/required-checks.md` rather than the crate graph: tests/ci_lockstep.rs.
 //!
 //! Rejected: the ported `syn` checker (ADR 0030; a line-oriented scan and the compiler cover what
 //! it did, and the rest binds by review), and running `scripts/clippy-lists.sh` as the
 //! `ARCH-clippy-lists` check (a generator bug would then agree with itself).
 
+pub mod ci;
 pub mod clippy_lists;
 pub mod graph;
 pub mod lexer;
@@ -29,8 +31,8 @@ use std::path::Path;
 use cargo_metadata::{Metadata, MetadataCommand};
 
 /// Every rule id this crate can report, in fnd §3.3's order. The meta-test in `tests/rules.rs`
-/// compares it with the rows fnd §3.3 assigns to FND-07 and with the negative cases.
-pub const RULES: [&str; 25] = [
+/// compares it with the rows fnd §3.3 assigns to FND-07 and FND-05 and with the negative cases.
+pub const RULES: [&str; 26] = [
     "ARCH-policy-schema",
     "ARCH-metadata",
     "ARCH-missing-member",
@@ -56,6 +58,7 @@ pub const RULES: [&str; 25] = [
     "ARCH-test-structure",
     "ARCH-platform-branch",
     "ARCH-hidden-source",
+    "ARCH-ci-lockstep",
 ];
 
 /// The targets of ADR 0006: every edge is evaluated through `cargo metadata --filter-platform`

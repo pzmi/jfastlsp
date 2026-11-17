@@ -1,0 +1,48 @@
+name: Bug report
+description: Something jfl does wrong, or an answer that is wrong.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Security problems go to private vulnerability reporting, not here (SECURITY.md).
+        Never paste source code, paths or names from a private repository: describe the shape
+        of the code instead, or reproduce it in a small synthetic project.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: The command or LSP request, what jfl answered, and what you expected.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: How to reproduce
+      description: Steps on a synthetic Java project, the smaller the better.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: The output of `jfl --version`, or the commit.
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options:
+        - Linux x86-64
+        - Linux arm64
+        - macOS arm64
+        - Other (unsupported, ADR 0006)
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Relevant log lines, with any source text, paths or names removed.
+      render: text

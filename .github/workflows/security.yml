@@ -1,0 +1,94 @@
+# Weekly checks that can fail an unchanged tree (fnd §7.1, §7.4): new advisories and licences
+# (cargo-deny), the secret scan over the full history (gitleaks), and zizmor's online audits,
+# which ask the GitHub API about the pinned actions. Outside `Required`; a red run is reported to
+# the owner and fixed as a task.
+name: Security
+
+on:
+  schedule:
+    - cron: "17 5 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: security-${{ github.ref }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  deny:
+    name: Advisories and licences
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: mise and the tools of mise.lock
+        uses: jdx/mise-action@236a21c3b91f5db6d4e174b348674a0f0caac06d # v5.2.9
+        with:
+          version: 2026.10.10
+          sha256: 7d79972e15549b286dcf9e25ef8c4fcef3d9fd7c0332d11cdfbc7d2842c418be # linux-x64
+          install_args: --locked
+          cache_save: ${{ github.ref == 'refs/heads/main' }}
+          # mise.toml's [env] stays out of the gate's environment (ARCH-ci-lockstep).
+          env: false
+      - name: Rust toolchain of rust-toolchain.toml
+        run: rustup toolchain install
+      - name: Cargo cache
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          key: mise-${{ hashFiles('mise.lock') }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - run: just check-only deny
+
+  secrets:
+    name: Secret scan (full history)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: mise and the tools of mise.lock
+        uses: jdx/mise-action@236a21c3b91f5db6d4e174b348674a0f0caac06d # v5.2.9
+        with:
+          version: 2026.10.10
+          sha256: 7d79972e15549b286dcf9e25ef8c4fcef3d9fd7c0332d11cdfbc7d2842c418be # linux-x64
+          install_args: --locked
+          cache_save: ${{ github.ref == 'refs/heads/main' }}
+          # mise.toml's [env] stays out of the gate's environment (ARCH-ci-lockstep).
+          env: false
+      - run: just check-only secrets
+
+  zizmor-online:
+    name: Workflow audits (online)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: mise and the tools of mise.lock
+        uses: jdx/mise-action@236a21c3b91f5db6d4e174b348674a0f0caac06d # v5.2.9
+        with:
+          version: 2026.10.10
+          sha256: 7d79972e15549b286dcf9e25ef8c4fcef3d9fd7c0332d11cdfbc7d2842c418be # linux-x64
+          install_args: --locked
+          cache_save: ${{ github.ref == 'refs/heads/main' }}
+          # mise.toml's [env] stays out of the gate's environment (ARCH-ci-lockstep).
+          env: false
+      # zizmor's online audits (impostor commits, known-vulnerable actions, ref confusion) read
+      # the GitHub API with the job's read-only token.
+      - run: just workflows-online
+        env:
+          GH_TOKEN: ${{ github.token }}

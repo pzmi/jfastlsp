@@ -70,6 +70,13 @@ fixture badsyntax "$checkout
       - runs: echo typo"
 expect_fail badsyntax 'badsyntax.yml'
 
+# dependabot.yml is audited too: no cooldown fails (FND-05)
+fixture dependabot "$checkout
+      - run: echo hello"
+printf 'version: 2\nupdates:\n  - package-ecosystem: cargo\n    directory: /\n    schedule:\n      interval: weekly\n' \
+  >"$tmp/dependabot/.github/dependabot.yml"
+expect_fail dependabot 'dependabot-cooldown'
+
 mkdir -p "$tmp/action/.github/actions/setup"
 cat >"$tmp/action/.github/actions/setup/action.yml" <<'YAML'
 name: setup

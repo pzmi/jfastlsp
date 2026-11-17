@@ -1,0 +1,12 @@
+# Every path is the maintainer's. The gate's own files are listed apart so that a later split of
+# ownership starts from them: CI, the policy files the architecture test and cargo-deny read, and
+# the tool pins.
+*                     @pzmi
+/.github/             @pzmi
+/justfile             @pzmi
+/architecture.toml    @pzmi
+/deny.toml            @pzmi
+/clippy.toml          @pzmi
+/mise.toml            @pzmi
+/mise.lock            @pzmi
+/rust-toolchain.toml  @pzmi

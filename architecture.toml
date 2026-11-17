@@ -59,8 +59,9 @@ jfl-bench = []
 # "default" for default features, "*" for any). Each entry says why.
 [external.normal]
 # The architecture test (FND-07): cargo_metadata reads the graph, toml and serde parse the policy
-# and the manifests strictly (`deny_unknown_fields`); ADR 0030.
-jfl-architecture = { cargo_metadata = ["default"], serde = ["default", "derive"], toml = ["default"] }
+# and the manifests strictly (`deny_unknown_fields`); ADR 0030. serde_norway reads ci.yml for
+# ARCH-ci-lockstep (FND-05): a maintained serde_yaml fork, MIT OR Apache-2.0, no build script.
+jfl-architecture = { cargo_metadata = ["default"], serde = ["default", "derive"], serde_norway = ["default"], toml = ["default"] }
 # jfl-jdtls (EVAL-11, ADR 0028): serde_json parses only the JSON-RPC envelope and forwards params,
 # result and error as raw values (raw_value); serde derives the envelope; sha1_smol keys jdtls's
 # -data on the full worktree path; rustix gives the effective uid, the socket peer's uid and the

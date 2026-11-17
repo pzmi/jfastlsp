@@ -95,6 +95,21 @@ if run; then fail "$what: expected the old name in history to be found"; fi
 grep -q 'scanning every file' "$tmp/err" || fail "$what: no fallback notice"
 git -C "$repo" update-ref refs/remotes/origin/main "$base_sha"
 
+what="a push to main under CI=true (base is HEAD) scans everything"
+git -C "$repo" update-ref refs/remotes/origin/main HEAD
+expect_clean
+if (cd "$repo" && env CI=true bash "$check" --hashes "$hashes") 2>"$tmp/err"; then fail "$what: expected the old name to be found"; fi
+grep -q 'the diff base is HEAD under CI=true' "$tmp/err" || fail "$what: no fallback notice"
+grep -q 'old.txt:1' "$tmp/err" || fail "$what: old.txt:1 not reported"
+git -C "$repo" update-ref refs/remotes/origin/main "$base_sha"
+
+what="an all-zero --base under CI=true scans everything; outside CI it is refused"
+zero=0000000000000000000000000000000000000000
+if (cd "$repo" && env CI=true bash "$check" --hashes "$hashes" --base "$zero") 2>"$tmp/err"; then fail "$what: expected the old name to be found"; fi
+grep -q 'all-zero commit' "$tmp/err" || fail "$what: no fallback notice"
+if run --base "$zero"; then fail "$what: accepted outside CI"; fi
+grep -q 'is not a commit' "$tmp/err" || fail "$what: wrong reason outside CI"
+
 what="a removed line is not a finding"
 git -C "$repo" rm -q old.txt
 commit "remove the old name"
