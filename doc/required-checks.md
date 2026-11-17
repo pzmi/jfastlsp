@@ -101,7 +101,7 @@ Not in `required`:
 | `.github/dependabot.yml` | weekly | cargo and github-actions, minor and patch grouped, a 7-day cooldown |
 
 Planned: `bench.yml` (the corpus suites on one fixed runner class, history upload, and its
-`bench-gate` job, which blocks `main` from IDX-15: red there is fixed like red CI; it is kept out
+`bench-gate` job, which blocks `main` from LSP-06, the M1 gate (ADR 0034): red there is fixed like red CI; it is kept out
 of `ci.yml` because wall times are comparable only on one runner class, fnd §9), `formal.yml`
 (Apalache, weekly and by hand), `fuzz.yml` (nightly), `mutation.yml` (weekly), `release.yml`
 (tags). A red run of any of them is reported to the owner and fixed as a task (fnd §7.1).

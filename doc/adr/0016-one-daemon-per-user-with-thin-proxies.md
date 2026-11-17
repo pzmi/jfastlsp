@@ -4,7 +4,7 @@ Date: 2026-11-16
 
 ## Status
 
-Proposed.
+Accepted (owner, 2026-11-17).
 
 ## Context
 

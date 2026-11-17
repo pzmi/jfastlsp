@@ -4,7 +4,7 @@ Date: 2026-11-16
 
 ## Status
 
-Proposed; amended 2026-11-16 (twice).
+Accepted (owner, 2026-11-17); amended 2026-11-16 (twice) and 2026-11-17 (owner).
 
 ## Context
 
@@ -56,3 +56,13 @@ With ADR 0030 the allow list names `just`, `mise`, `adrs` and `scripts/land.sh` 
   session started in, which for the orchestrator is the main checkout; lane worktrees are guarded
   by the work skill's ship station (the gate on the exact tree, its exit code recorded) and by the
   gate on the merged tree when landing.
+
+## Amended 2026-11-17 (owner): agents never push
+
+`.claude/settings.json` denies the common forms of `git push` an agent types directly (`git push`,
+`git push …`, `git -C <dir> push …`, `git -c <k=v> push …`, `git --no-pager push …`,
+`git --git-dir=… push …`, `git --work-tree=… push …`), and no longer allows
+`git push origin …`. `scripts/land.sh` is the only pusher: the orchestrator runs it as a script,
+which the rules do not match, and its own `git push` runs inside the script. A deny rule matches
+the command an agent writes, so it is a guard against a mistake, not a sandbox; the rule that
+only `land.sh` pushes still binds by review (`CLAUDE.md`, Commits).

@@ -17,4 +17,4 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   suite (hyperfine, queries picked by seed) and the `e1` parse suite (the archived spike, in process)
   on a fetched corpus checkout and writes JSON with the machine's facts, in the format
   github-action-benchmark reads; `compare` states the noise between two runs. `doc/bench/README.md`.
-- Agent instructions (`CLAUDE.md`, `.claude/`), dual licences and repository hygiene files.
+- Agent instructions (`CLAUDE.md`, `.claude/`), the MIT licence (ADR 0033) and repository hygiene files.

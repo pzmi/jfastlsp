@@ -4,7 +4,7 @@ Date: 2026-11-16
 
 ## Status
 
-Proposed (orchestrator default; owner confirms at the FND checkpoint, DEC-07); amended 2026-11-16.
+Accepted (owner, 2026-11-17); amended 2026-11-16.
 
 ## Context
 

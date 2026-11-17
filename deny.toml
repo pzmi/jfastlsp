@@ -15,7 +15,7 @@ all-features = true
 yanked = "deny"
 
 [licenses]
-# Permissive allowlist of plan §16.2; a per-crate exception needs an ADR (fnd §7.4).
+# Permissive allowlist of plan §16.2; a per-crate exception needs a recorded reason (fnd §7.4).
 allow = [
   "MIT",
   "Apache-2.0",

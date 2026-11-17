@@ -14,7 +14,7 @@ Slicing: one subagent for a small diff; for a LARGE task one per crate (`crates/
 
 Triage the combined findings:
 
-- HIGH and MEDIUM that are local (a test, a doc comment, a guard, a missing ADR) go to a fix pass: dispatch `implement` with `findingsToFix`, no re-planning.
+- HIGH and MEDIUM that are local (a test, a doc comment, a guard, a reason missing from the commit message, an ADR missing for an important decision or not amended where a decision was reversed) go to a fix pass: dispatch `implement` with `findingsToFix`, no re-planning.
 - A finding that needs a structural change (a moved responsibility, a new port, a crate boundary, a protocol, `--json` schema or model change) is a gate decision, below.
 - LOW findings: fix if trivial, otherwise list.
 - A finding you disagree with goes in `findingsSkipped` with the reason; never silently dropped.

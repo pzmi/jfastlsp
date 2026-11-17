@@ -21,7 +21,7 @@ intake.{taskId, criteria, ownerCriteria, cites, affectedCrates, authority, invar
    - **the test levels** touched (ver §2): unit, property, golden, component, contract, LSP conformance, integration, e2e, architecture, conformance, differential; one test per `Accept:` clause at least, and each contract suite in `contractSuites` run against every implementation the task names, with a deliberately broken one
    - **performance**: a claim about latency, memory or throughput names the benchmark that measures it (ver §10); no budget is set from a guess
    - **new dependencies**: `cargo add`, why this crate, its licence, and whether `deny.toml` accepts it
-   - **ADRs**: a step that adds or reverses an architectural decision (a dependency of consequence, a crate boundary, a protocol, a security or lifecycle policy, a lint or rule exception) runs `adrs new "<title>"` (or copies the template to the reserved number) or marks an existing one `Superseded by NNNN`, and `just adr-index`
+   - **ADRs** (ADR 0001, amended): only an important decision whose context is worth recalling later gets a step that runs `adrs new "<title>"` (or copies the template to the reserved number) and `just adr-index`; a step that reverses a recorded decision amends its ADR or marks it `Superseded by NNNN`. Any other decision is explained in the commit message and, where the constraint is not obvious, a code comment; list it so ship writes it
    - **`(owner)` criteria**: what is delivered up to them (runbook, harness, gated test, docs) and left pending
 4. **Owner question.** LARGE with a genuine design fork: one short question with a recommended default, then continue on the answer. No fork: no question.
 5. Write `plan.json`.

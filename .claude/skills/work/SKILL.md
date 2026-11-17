@@ -45,6 +45,9 @@ CI red, or the reverse: `just doctor` first. Keep the gate's exit code: no `| ta
 
 Detect `gh` with `command -v gh`. An implementing agent handed a worktree and told "do not push"
 stops after the commit and reports; landing, pushing and CI belong to the orchestrator (ADR 0002).
+Agents never push, by any means: `.claude/settings.json` denies the common forms of `git push`
+(ADR 0018, amended), and a form it does not catch is still forbidden. `scripts/land.sh` is the only
+pusher.
 
 ## Constraints
 
@@ -72,8 +75,8 @@ Always:
 - Commit with the subject `<ID>: <summary>`, a body with why and an `Impact:` line, `--author "Patryk Żmigrodzki <pzmi@users.noreply.github.com>"`, and a trailer block last, in the order `Signed-off-by`, `Co-Authored-By`, `Claude-Session` (ADR 0003). `git commit -s` appends `Signed-off-by` after an existing trailer block, so write every line by hand and drop `-s`
 - Use the `Co-Authored-By` and `Claude-Session` lines the caller's (or session's) attribution instructions give; add none of your own
 - Stage only files you changed (never `git add -A` or `git add .`)
-- Record an architectural decision as an ADR: a change that adds or reverses one adds a new record with `adrs new "<title>"` (a number the caller reserved: copy `doc/adr/template.md` to `NNNN-title.md`; Nygard format: Status, Context, Decision, Consequences; add the row to `doc/adr/README.md` and run `just adr-index`) or supersedes an existing one, in the same commit
-- Reuse before building (ADR 0019): before adding a subsystem, read the card's `Reuse considered:` line and plan §16; a hand-built subsystem with a maintained alternative needs an ADR
+- Record decisions where they belong (ADR 0001, amended): an ADR only for an important decision whose context is worth recalling later, with `adrs new "<title>"` (a number the caller reserved: copy `doc/adr/template.md` to `NNNN-title.md`; Nygard format: Status, Context, Decision, Consequences; add the row to `doc/adr/README.md` and run `just adr-index`); everything else in the commit message (why) and code comments (non-obvious constraints). ADRs are records, not rules: a change that reverses a recorded decision amends or supersedes its ADR in the same commit
+- Reuse before building (ADR 0019): before adding a subsystem, read the card's `Reuse considered:` line and plan §16; a hand-built subsystem with a maintained alternative says why in the card and the commit message
 - Measure speed (ADR 0031): a product task runs its benchmarks on the bench corpus (small at least, `just bench`) and reports the metrics it changes; never loosen a budget in plan §1.7
 - Stop at every checkpoint task (⛳ in `doc/tasks.md`: FND-05, FORMAL-05, DEC-02, IDX-15, LSP-06, SEM-07, REL-06) after the commit: report that a `/review` range is due, and do not start the next task
 - Deliver everything up to an `(owner)` criterion and report it as pending
@@ -82,8 +85,9 @@ Always:
 
 `$ARGUMENTS`: a task id, or a GitHub issue number or URL, plus optional
 `--small`/`--medium`/`--large`. Absent: take the first task in `doc/tasks.md` whose dependencies
-all have a commit (`git log --oneline | grep " <dep>:"`; a `DEC-` dependency only once its ADR
-reads `Accepted (owner, …)`), which has none of its own yet and is neither an `(owner)` task nor
+all have a commit (`git log --oneline | grep " <dep>:"`; a `DEC-` dependency only once it is
+recorded as decided: its ADR reads `Accepted (owner, …)`, or its card is ticked and marked
+`Decided:` with the date when no ADR was needed), which has none of its own yet and is neither an `(owner)` task nor
 a `DEC-` task waiting on the owner.
 
 ## Startup
@@ -130,7 +134,7 @@ Prompt section. A subagent crash counts as a failed sensor. Subagents work in th
 | The task needs the target Java repository, a Claude Code run or the owner's machine | Build and test everything against the synthetic fixtures; leave the owner-run step documented and runnable; report the `(owner)` part as pending. |
 | CI red 3 times | Stop at babysit. Report the failing job and step. |
 | Force-push needed | Stop at ship. Ask the owner. |
-| Plan or task text is wrong or contradictory | Fix it minimally in `doc/plan.md` or `doc/tasks.md` in the same commit and say so (an ADR if it is a decision). |
+| Plan or task text is wrong or contradictory | Fix it minimally in `doc/plan.md` or `doc/tasks.md` in the same commit and say so (an ADR only if it is an important decision; otherwise the commit message says why). |
 
 ## Files
 

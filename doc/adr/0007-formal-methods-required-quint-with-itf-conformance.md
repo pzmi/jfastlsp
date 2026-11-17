@@ -4,7 +4,7 @@ Date: 2026-11-16
 
 ## Status
 
-Proposed (orchestrator default; owner confirms at the FND checkpoint, DEC-07); amended 2026-11-16.
+Accepted (owner, 2026-11-17); amended 2026-11-16 and 2026-11-17 (owner).
 
 ## Context
 
@@ -37,3 +37,28 @@ is HIGH. The `formal-*` and `conformance-replay` stages gate every push.
 The drivers implement `quint-connect`'s `Driver` trait and decode traces with `itf`; only the
 replay of committed regression traces is our own code (about 200 lines in `jfl-conformance`).
 Quint 0.33.1 and Apalache 0.62.1 are pinned through mise (ADR 0030).
+
+## Amended 2026-11-17 (owner): Quint models and property-based state-machine tests, both
+
+The owner answered "both": the Quint models stay, and property-based state-machine tests on
+[`proptest-state-machine`](https://crates.io/crates/proptest-state-machine) are required beside
+them. Each covers what the other cannot:
+
+- **Quint models** (FORMAL lane, ver §6) state the design: views and generations, the daemon
+  lifecycle and diagnostics publication as protocols with invariants, explored over interleavings
+  of several actors (a checkout during a reconcile, two proxies spawning at once, results arriving
+  in reverse order) by simulation and Apalache's bounded verification, and replayed against the
+  real code through ITF conformance drivers. They catch a wrong design and a real component that
+  drifts from it.
+- **`proptest-state-machine` tests** (ver §6.4) state the implementation: a reference state
+  machine in Rust drives the real component with random command sequences, checks its
+  postconditions after every command and shrinks a failure to a minimal sequence. They run in the
+  ordinary test stages of every gate with no Node or JVM, reach the component's own data
+  (generation bookkeeping, overlays, the diagnostics coordinator's versions, the lock and socket
+  states, a pool's cap and LRU, caches) with far more steps than a trace budget allows, and
+  cover stateful components no model describes.
+
+Every component with a Quint driver (IDX-09, IDX-12, LSP-04) also gets a state-machine test, and
+any other stateful component (the javac worker pool, the summary and library stores, the frame
+decoder) gets one where its state outlives a call. Neither replaces the other: a model change
+still comes first (model first), and a state-machine test never stands in for a missing driver.

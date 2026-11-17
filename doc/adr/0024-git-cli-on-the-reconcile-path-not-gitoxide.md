@@ -4,7 +4,7 @@ Date: 2026-11-16
 
 ## Status
 
-Proposed (orchestrator default; owner confirms at the FND checkpoint, DEC-07). Settles the open
+Accepted (owner, 2026-11-17). Settles the open
 question plan §14 gave to IDX-05; IDX-05 may amend it with measurements.
 
 ## Context

@@ -4,7 +4,7 @@ Date: 2026-11-16
 
 ## Status
 
-Proposed (orchestrator default; owner confirms at the FND checkpoint, DEC-07). The storage
+Accepted (owner, 2026-11-17). The storage
 *tier* stays DEC-03's decision (plan §5.5); this record chooses the crates every tier uses.
 
 ## Context

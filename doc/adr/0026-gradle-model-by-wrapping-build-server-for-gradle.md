@@ -4,7 +4,7 @@ Date: 2026-11-16
 
 ## Status
 
-Proposed (orchestrator default; owner confirms at the FND checkpoint, DEC-07). Replaces the
+Accepted (owner, 2026-11-17). Replaces the
 mechanism ADR plan §5.7 left to PROJ-01; PROJ-01 may amend it with the fixture results.
 
 ## Context

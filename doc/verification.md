@@ -193,6 +193,21 @@ verification of each model's `allInvariants` plus a long multi-seed simulation. 
 and by hand (`formal.yml`, one job per model), not in `check`. A counterexample becomes a
 regression trace.
 
+### 6.4 Property-based state-machine tests
+
+Required beside the models (ADR 0007, amended 2026-11-17). Each component with a conformance
+driver (the view registry, IDX-09; the daemon host, lock and socket, IDX-12; the diagnostics
+coordinator, LSP-04) also has a
+[`proptest-state-machine`](https://crates.io/crates/proptest-state-machine) test: a reference state
+machine in Rust generates command sequences, the real component executes them, postconditions and
+invariants are checked after every command, and a failure shrinks to a minimal sequence. Other
+components whose state outlives a call (the javac worker pool, the summary and library stores, the
+frame decoder) get one too, in the task that builds them. The tests run in the ordinary test
+stages (no Node or JVM), with case counts set in the test and a fixed seed printed on failure.
+They do not replace the model or its driver: the model states the protocol over interleavings of
+several actors; the state-machine test states the implementation's own bookkeeping with many more
+steps.
+
 ---
 
 ## 7. Oracles
@@ -294,7 +309,7 @@ at the end (ADR 0031, BENCH lane).
    runs per task per arm, on the target's tasks and on 10 to 20 Multi-SWE-bench Java (Gradle)
    instances as an external control (EVAL-12). The harness produces an aggregated report; if the
    target repository is private, only the report enters this repository (plan §9.1).
-3. **Regression use:** a fixed task subset reruns at each milestone gate (IDX-15, LSP-06,
+3. **Regression use:** a fixed task subset reruns at each milestone gate (LSP-06, IDX-15,
    SEM-07, REL-06); results are stored with the `jfl` version and the Claude Code version.
 
 ---

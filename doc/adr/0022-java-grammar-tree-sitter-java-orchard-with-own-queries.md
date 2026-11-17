@@ -4,7 +4,7 @@ Date: 2026-11-16
 
 ## Status
 
-Proposed (orchestrator default; owner confirms at the FND checkpoint, DEC-07).
+Accepted (owner, 2026-11-17); amended 2026-11-17 (owner).
 
 ## Context
 
@@ -47,3 +47,34 @@ with a re-run of the corpus goldens. IDX-07 implements this; EVAL-05 measures it
 - Upstream `tree-sitter-java` 0.23.5: larger user base, but dormant and missing Java 25 syntax;
   the runner-up.
 - `java-lang` 0.6 (a typed Java AST): 1.4k downloads, weekly churn, no incremental reparse.
+
+## Amended 2026-11-17 (owner): pinned exactly, with the switch-back boundary built from the start
+
+The owner kept tree-sitter-java-orchard, pinned to an exact version (`=0.5.x` in the manifest,
+the version IDX-07 finds current), and asked for the way back to upstream to be built in from the
+first commit rather than left to "a grammar-version change" (Consequences above):
+
+- **Maintainers.** The fork has about three maintainers, not one; the stall risk is smaller than
+  stated above, but still a risk.
+- **One crate knows node names.** Only `jfl-adapter-java` names grammar nodes and fields; every
+  other crate sees our own summary types.
+- **Per-grammar queries.** `tags.scm` and `locals.scm` exist per grammar (orchard and upstream),
+  so a switch changes which set is loaded, not the queries in place.
+- **Names resolved at start-up.** Every node kind and field name the adapter uses is resolved
+  against the loaded grammar into a table when the indexer starts (`Language::id_for_node_kind`,
+  `field_id_for_name`); a missing name fails loudly, naming it, before any file is parsed, never
+  a silent empty match.
+- **Both grammars in tests and CI.** A synthetic per-feature Java corpus (one small file per
+  language feature: records, sealed types, switch patterns, text blocks, `import module`,
+  flexible constructor bodies, annotations in every position) is parsed by both grammars, and
+  each grammar's summaries are compared with its golden summaries. Where upstream cannot parse a
+  feature, the gap is listed in a committed known-gaps file, and a gap that closes or opens fails
+  the test until the list changes.
+- **The grammar in the cache key.** The grammar crate's name and exact version stay part of
+  `SyntaxKey` (plan §5.4), so a switch re-parses everything.
+- **Switch triggers.** Move to upstream `tree-sitter-java` when it releases 0.24 or later with
+  `import module` and flexible constructor bodies and no more false errors than orchard on the
+  bench corpus; or when orchard has no release for 6 months while a Java feature we need goes
+  final.
+
+IDX-07 builds this (about 1–2 days on top of its card); EVAL-05 keeps measuring both grammars.

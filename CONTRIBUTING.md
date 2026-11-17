@@ -44,8 +44,9 @@ Read [doc/plan.md](doc/plan.md) (crates and the dependency law are §6). Crate b
 purity of the domain crates and which crates may spawn processes or open sockets are enforced by
 the compiler (`#![no_std]` domain crates), `cargo-deny`, clippy and an architecture test
 (`just check-only architecture`); fix the structure instead of loosening a lint or a test. A change
-that adds or reverses an architectural decision adds an ADR or amends or supersedes one, in the
-same change, together with the tests that pin it.
+that reverses a recorded decision amends or supersedes its ADR in the same change, together with
+the tests that pin it; any other decision needs a recorded reason (commit message or ADR when the
+context is worth keeping).
 
 ## Pull requests
 
@@ -63,7 +64,7 @@ Security issues must be reported privately; see [SECURITY.md](SECURITY.md).
 ## Licensing
 
 Unless you explicitly state otherwise, any contribution intentionally submitted for inclusion in
-the work by you, as defined in the Apache-2.0 license, shall be dual licensed as
-`MIT OR Apache-2.0`, without any additional terms or conditions.
+the work by you shall be licensed under the MIT licence ([`LICENSE-MIT`](LICENSE-MIT)), without
+any additional terms or conditions.
 
 By participating you agree to follow the [Code of Conduct](CODE_OF_CONDUCT.md).

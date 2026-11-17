@@ -1,10 +1,11 @@
-# 0028. jdtls behind our multiplexing proxy: the baseline and the fallback product
+# 0028. jdtls behind our multiplexing proxy: the baseline, for testing and comparison only
 
 Date: 2026-11-16
 
 ## Status
 
-Proposed (orchestrator default; owner confirms at the FND checkpoint, DEC-07).
+Accepted (owner, 2026-11-17); amended 2026-11-17 (as built) and 2026-11-17 (owner: testing and
+comparison only).
 
 ## Context
 
@@ -80,3 +81,14 @@ FND-08; its last two items are FND-08's.
 - The daemon's idle exit and the hand-shake and reply deadlines are timed waits
   (`recv_timeout`, socket read timeouts), which fnd §2.4 now puts under the `sleep` grant
   (FND-08, the FND-05 checkpoint's N7): `jfl-jdtls` holds it.
+
+## Amended 2026-11-17 (owner): for testing and comparison only, never a shipped fallback
+
+The owner decided at the FND checkpoint that `jfl-jdtls` is for testing and comparison only: the
+kill-criterion baseline (plan §1.3), an E0 and E4 arm and a bench arm. It is **never a shipped
+fallback product**: the Decision's sentence "If DEC-02 stops the project, it is the deliverable,
+promoted from tool to product by that decision" is withdrawn, and so is "fallback product" in the
+title (the file keeps its name so links stay valid). The kill criterion becomes: if phase 0
+measurements show jfastlsp cannot beat this baseline on speed with honest envelopes, the project
+stops or is rescoped (plan §1.3, DEC-02); it does not become "ship jdtls". `jfl-jdtls` stays a
+tool-only crate that imports no production crate.

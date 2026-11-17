@@ -4,7 +4,7 @@ Date: 2026-11-16
 
 ## Status
 
-Proposed; amended 2026-11-16 (twice).
+Accepted (owner, 2026-11-17); amended 2026-11-16 (twice).
 
 ## Context
 

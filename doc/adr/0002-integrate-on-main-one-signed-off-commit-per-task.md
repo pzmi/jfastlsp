@@ -4,7 +4,7 @@ Date: 2026-11-16
 
 ## Status
 
-Accepted (owner, 2026-11-16); amendment proposed 2026-11-16 (ADR 0030).
+Accepted (owner, 2026-11-16); amended 2026-11-16 (accepted by the owner on 2026-11-17).
 
 ## Context
 
@@ -38,7 +38,7 @@ from FND-03, `land`'s refusals of a dirty or stale `main`.
 - Pull request per task, owner squash-merges: an owner action per task; slower; no stronger gate.
 - Agents push directly: no review before landing, and interleaved pushes hide which commit broke CI.
 
-## Amended 2026-11-16 (planner, amendment proposed): `land` is a script
+## Amended 2026-11-16 (planner; accepted by the owner on 2026-11-17): `land` is a script
 
 Only the tool names change; the decision stands, and `scripts/land.sh` may be used from FND-03
 on whether or not this amendment has been accepted. The decision is unchanged: one signed-off

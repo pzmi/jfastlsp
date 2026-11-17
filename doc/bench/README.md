@@ -181,8 +181,8 @@ owns it. The convention, for the first product task with a hot path (IDX-07 onwa
   not added early: BENCH-02 writes the convention only).
 
 What needs a product arrives with it: freshness lag after an edit and `initialize` against a warm
-daemon with IDX-15 for `jfl`; the marginal cost of 1, 3 and 10 worktrees (the corpus helper
-`scripts/bench-corpus.sh worktrees` creates them) with IDX-15 for `jfl` and with E4 (EVAL-06) for
+daemon with LSP-06 (the M1 gate) for `jfl`; the marginal cost of 1, 3 and 10 worktrees (the
+corpus helper `scripts/bench-corpus.sh worktrees` creates them) with LSP-06 for `jfl` and with E4 (EVAL-06) for
 jdtls; BENCH-03 adds the comparison arms beside `rg`.
 
 ## Adding a suite

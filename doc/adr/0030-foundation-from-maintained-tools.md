@@ -4,10 +4,9 @@ Date: 2026-11-16
 
 ## Status
 
-Proposed (orchestrator default; owner confirms at the FND checkpoint, DEC-07); amended
-2026-11-16 and 2026-11-17. Supersedes
-[0011](0011-pinned-toolchains-rust-1-97-0-and-tools-versions-toml.md) and
-[0012](0012-port-xtask-from-mayfly.md).
+Superseded by [0035](0035-port-mayfly-xtask-piece-by-piece.md) (2026-11-17, the owner's decision at the FND checkpoint); never
+accepted. It superseded [0011](0011-pinned-toolchains-rust-1-97-0-and-tools-versions-toml.md) and [0012](0012-port-xtask-from-mayfly.md); the foundation it describes stays
+the gate until lane XT replaces each piece.
 
 ## Context
 

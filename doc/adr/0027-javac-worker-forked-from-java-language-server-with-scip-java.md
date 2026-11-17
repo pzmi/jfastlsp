@@ -4,8 +4,8 @@ Date: 2026-11-16
 
 ## Status
 
-Proposed (orchestrator default; owner confirms at the FND checkpoint, DEC-07). How the worker is
-built and launched stays SEM-04's ADR.
+Superseded by [0036](0036-javac-worker-our-own-warm-context-with-scip-java.md) (2026-11-17, the owner's decision at the FND checkpoint). How the worker is built and launched
+stays SEM-04's ADR.
 
 ## Context
 

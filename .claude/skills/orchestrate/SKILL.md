@@ -30,8 +30,9 @@ GitHub Actions run or job URL (a failure to fix), or nothing (the next ready tas
    scope with their dependencies, model, size, ⛳ mark and "Parallel with" column.
 2. A task is **ready** when every dependency has a commit and the task has none yet. Subjects
    are `<ID>: summary`, so: `git log --oneline main | grep " <dep>:"`. A `DEC-` dependency counts
-   only when its ADR's status reads `Accepted (owner, …)` (`grep -A2 '^## Status'` on the
-   record): an agent's draft, committed as `Proposed` under the `DEC-` subject, does not make
+   only when it is recorded as decided: its ADR's status reads `Accepted (owner, …)`
+   (`grep -A2 '^## Status'` on the record), or, where no ADR was needed (ADR 0001, amended), its
+   card is ticked and marked `Decided:` with the date: an agent's draft, committed as `Proposed` under the `DEC-` subject, does not make
    the dependants ready. A `DEC-` task is the owner's: prepare what its card says an agent prepares, then put the decision to the owner;
    never decide it. An acceptance item marked `(owner)` is never run by an agent; a task whose
    remaining items are all `(owner)` is reported, not dispatched.
@@ -151,7 +152,10 @@ resetting the worktree"; never discard its uncommitted change without reading it
    cap; fnd §9). Then: `scripts/land.sh <sha>` (`--no-push` for a dry run). It refuses a dirty
    checkout, fetches, works in a temporary worktree at `origin/main`, cherry-picks, resolves only
    `Cargo.lock` and the ADR index, aborts on any other conflict, runs `just check` (with
-   `private-names` failing closed) on the merged tree and pushes only when it is green.
+   `private-names` failing closed) on the merged tree and pushes only when it is green. It is the
+   only way anything reaches `origin`: `.claude/settings.json` denies the common forms of
+   `git push` (ADR 0018, amended), and no agent or orchestrator pushes by any other means, even
+   after a failed land.
    Integration is direct on `main` (ADR 0002); there is no PR phase. Never land on red CI.
    `bench-gate` is not part of landing: it runs only in `bench.yml` on its runner class. A
    commit that moves a line of `.config/gate.sha256` changes the gate itself (fnd §3.6): review
@@ -206,6 +210,9 @@ resetting the worktree"; never discard its uncommitted change without reading it
   provenance, resource limits and crash recovery at
   REL-06. Hand the surviving findings to a work agent as a fix task, land it, then create the
   local annotated tag `checkpoint-<ID>` (never pushed), report to the owner and wait for a go.
+  At every ⛳ also **check pinned git dependencies for a release** (the git sources `deny.toml`
+  admits; today `cafebabe`, DEP-01): when a crates.io release contains the pinned commit, put
+  its switch card in the next dispatch and say so in the checkpoint report.
 - At each ⛳, batch the open owner decisions (Proposed ADRs to accept or override, `(owner)`
   acceptance criteria in `doc/tasks.md`, `DEC-` tasks waiting, owner-only settings such as a
   branch ruleset) into that report, rather than saving them for the end of the plan. Show the
@@ -232,8 +239,8 @@ resetting the worktree"; never discard its uncommitted change without reading it
 
 ## Never
 
-Implement a task in the orchestrator's own context; merge a pull request; force-push; push
-tags; delete a remote branch; land on red CI, without a review of the commit, or more than one
+Implement a task in the orchestrator's own context; merge a pull request; run `git push`
+directly (only `scripts/land.sh` pushes); force-push; push tags; delete a remote branch; land on red CI, without a review of the commit, or more than one
 commit per CI run; run more than two lanes; kill a process by name pattern; run Gradle or a
 build of a target Java repository; end a turn with the gate running in the background;
 `git reset --hard` outside a scratchpad worktree; hand-merge `Cargo.lock`; loosen

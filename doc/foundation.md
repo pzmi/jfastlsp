@@ -27,13 +27,16 @@ check. Until that task lands, the rule binds by review.
 4. **Precedence.** Accepted ADRs override this document; this document overrides earlier plan
    text on engineering matters. A conflict found while working is reported, not resolved by
    choosing the convenient side.
-5. **Tools before code** (ADR 0030, superseding ADR 0011 and ADR 0012). The foundation is
-   assembled from maintained tools: mise pins them, just composes the gate, the compiler and
-   cargo-deny enforce most of the dependency law, adrs keeps the decisions. What stays custom is
-   small and named: the architecture test (about 200 lines), `scripts/land.sh` (about 150),
-   per-crate coverage floors (about 100) and the replay of committed Quint traces (about 200).
-   Nothing is ported from mayfly's `xtask`; its designs (fail closed, one gate locally and in CI,
-   negative fixtures) are kept.
+5. **One `cargo xtask` surface, reached piece by piece** (ADR 0035, superseding ADR 0030, which
+   had superseded ADR 0011 and ADR 0012). FND-01..FND-08 assembled the foundation from maintained
+   tools: mise pins them, just composes the gate, the compiler and cargo-deny enforce most of the
+   dependency law, adrs keeps the decisions, and a few named scripts and the architecture test
+   stay custom. That foundation is the gate this document describes **today**. The owner decided
+   on 2026-11-17 to port mayfly's `tools/xtask` after all: lane XT (`doc/tasks.md`) replaces the
+   justfile, mise and the shell scripts one piece per card, external tools (cargo-deny, gitleaks,
+   zizmor, actionlint, shellcheck, hyperfine, nextest, Quint) stay and xtask runs them, tool
+   versions move to `tools/versions.toml` with `cargo xtask doctor`, and every check the gate runs
+   keeps running. Each XT card updates the sections here that name what it replaces.
 
 ---
 
@@ -181,7 +184,8 @@ workspace path crates before relying on it.
 - `jfl-conformance` holds the `quint-connect` drivers and the committed-trace replay (ver §6).
 - `jfl-architecture` holds the architecture test (§3). It reads `cargo metadata` and the
   repository's files; it is never a dependency.
-- There is no `xtask`: the command surface is the `justfile` (§9).
+- The command surface is the `justfile` (§9) today; the gate is moving to `cargo xtask` (ADR 0035,
+  lane XT).
 - `jfl-fuzz` is its own workspace on the pinned nightly (REL-03); `ARCH-fuzz-crate` checks its
   policy rows.
 
@@ -620,7 +624,7 @@ There is no event store (ADR 0008). What persists:
 ### 7.4 Supply chain
 
 - `cargo-deny`: advisories (yanked denied), licences (permissive allowlist; each exception per
-  crate with an ADR; `notify` is CC0-1.0 and tree-sitter grammars MIT, to confirm at the task
+  crate with a recorded reason, in the commit message or an ADR when the context is worth keeping; `notify` is CC0-1.0 and tree-sitter grammars MIT, to confirm at the task
   that adds them), bans (no wildcards), sources (crates.io only); `[graph] targets` set to the
   three targets of ADR 0006.
 - `gitleaks` (the binary, pinned by mise) over the full history (`secrets` stage,
@@ -870,9 +874,11 @@ Nygard format in `doc/adr/NNNN-kebab-title.md`: `# NNNN. Title`, `Date:`, `## St
 (`Proposed`, `Accepted (owner, YYYY-MM-DD)`, `Rejected (owner, YYYY-MM-DD)`,
 `Superseded by NNNN`, with annotations such as `amended by NNNN`), `## Context`, `## Decision`,
 `## Consequences`, optional `## Alternatives considered`. Records are created with `adrs new`
-(ADR 0030); the index `doc/adr/README.md` is checked against the files by the `docs` stage
+(ADR 0030; `cargo xtask adr new` from XT-04, ADR 0035); the index `doc/adr/README.md` is checked against the files by the `docs` stage
 (`just adr-index`, FND-03). ADR 0001 records the practice; the ADR number is
-the decision id. Only the owner moves a decision to Accepted or decides a `DEC-` task.
+the decision id. Only the owner moves a decision to Accepted or decides a `DEC-` task. An ADR is
+written only for an important decision whose context is worth recalling later; everything else is
+recorded in the commit message and code comments (ADR 0001, amended 2026-11-17).
 
 ---
 
@@ -890,7 +896,8 @@ impact (if any) are stated ([`sdlc.md`](sdlc.md) has the full list).
    it changes.
 2. Works in **its own git worktree** on a branch from current `origin/main`, with **its own
    `CARGO_TARGET_DIR`** (deleted when done); temporary files go in the session scratchpad.
-3. Updates policy and ADRs first when a new dependency, edge or authority is needed.
+3. Updates policy first when a new dependency, edge or authority is needed, with a recorded reason
+   (commit message or ADR when the context is worth keeping).
 4. **Model first** (ADR 0007): a change to views and generations, the daemon lifecycle or
    diagnostics publication changes the Quint model, its invariants, named scenarios and the
    conformance driver before the Rust code.

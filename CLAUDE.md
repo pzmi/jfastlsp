@@ -3,14 +3,15 @@
 ## Project
 
 jfastlsp is **agent-centric Java code intelligence in Rust**: one binary, `jfl`, whose `jfl lsp`
-is a stdio language server and whose other subcommands are a JSON CLI. Both are thin proxies over
+is a stdio language server (built first, M1) and whose other subcommands are a JSON CLI (second,
+M2; ADR 0034). Both are thin proxies over
 one daemon per user (Unix socket, single owner by lock) that indexes the Java sources of many Git
 worktrees of a large Gradle repository at once. Every navigation answer is an envelope with
 `exact`, `possible` and `complete`, and **`complete=true` is never wrong** (ADR 0014). No JVM and no
 build on the request path (ADR 0015). **Speed is the primary value**: every change is measured on
 a pinned real-repository corpus (plan §1.7, ADR 0031). Reuse before building (ADR 0019). Status:
 **pre-alpha, planning**; phase 0 measurements decide go/no-go (DEC-02). Public, open source
-(`MIT OR Apache-2.0`, ADR 0005 Proposed).
+(`MIT`, ADR 0033).
 
 ## Docs
 
@@ -27,9 +28,10 @@ a pinned real-repository corpus (plan §1.7, ADR 0031). Reuse before building (A
 | `spikes/e1-parse/` | The archived E1 parse spike: evidence for plan §1.7 and §5.5, the seed of BENCH-02; outside the workspace |
 
 Citations read "plan §4.3", "fnd §3", "ver §6"; read the sections a task cites, not whole
-documents. Decisions in `doc/tasks.md` and Accepted ADRs override earlier plan text. Only ADRs
-0001–0004 and 0032 are the owner's; the rest are defaults the owner confirms at the FND
-checkpoint (DEC-07).
+documents. Decisions in `doc/tasks.md` and Accepted ADRs override earlier plan text. The owner
+decided every record at the FND checkpoint (DEC-07, 2026-11-17): all are Accepted (owner) except
+0005, 0011–0013, 0027 and 0030, which are superseded; a new record is Proposed until the owner's
+next checkpoint.
 
 ## Workflow
 
@@ -44,7 +46,8 @@ checkpoint (DEC-07).
 
 ## The gate
 
-The gate is `just check` (fnd §9, ADR 0030); CI runs the same stages (`doc/required-checks.md`):
+The gate is `just check` (fnd §9; ADR 0035 moves it to `cargo xtask` piece by piece, lane XT);
+CI runs the same stages (`doc/required-checks.md`):
 
 ```bash
 bash scripts/bootstrap-tools.sh      # pinned mise and just, checksum-verified, then `mise install --locked`
@@ -117,9 +120,11 @@ allowlist or a pinned shape, never a list of bad patterns (fnd §3).
 - **Speed** (ADR 0031): a product task runs on the bench corpus (small at least) and reports the
   metrics it changes; from M1 a >10 % regression fails `bench.yml`'s `bench-gate` on its fixed
   runner class (local runs report, never gate). Never loosen a budget.
-- **Decisions** (`doc/adr/README.md`): a change that adds or reverses an architectural decision
-  adds or supersedes an ADR in the same commit, with the rules and tests that pin it. Only the
-  owner flips Proposed to Accepted or decides a `DEC-` task.
+- **Decisions** (`doc/adr/README.md`, ADR 0001 as amended): an ADR only for an important
+  decision whose context is worth recalling later; otherwise the commit message says why and a
+  code comment explains a non-obvious constraint. An ADR is a record, not a rule: a change that
+  reverses one amends or supersedes it in the same commit, with the rules and tests that pin it.
+  Only the owner flips Proposed to Accepted or decides a `DEC-` task.
 
 ## Commits
 
@@ -135,6 +140,10 @@ allowlist or a pinned shape, never a list of bad patterns (fnd §3).
   with other trailers.
 - Stage only your own files (never `git add -A` or `git add .`). Never `--no-verify`, never
   force-push, never push tags; `checkpoint-*` tags are local.
+- **Agents never push, by any means.** `.claude/settings.json` denies the common forms of
+  `git push` (`git push …`, `git -C <dir> push …`, `git -c <k=v> push …`, `git --no-pager push …`,
+  `git --git-dir=… push …`, `git --work-tree=… push …`; ADR 0018, amended);
+  `scripts/land.sh`, run as a script by the orchestrator, is the only pusher.
 
 ## Sandbox
 

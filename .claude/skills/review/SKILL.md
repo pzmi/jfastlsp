@@ -42,7 +42,8 @@ adapters or composition; `jfl-process` reaches no adapter; production crates nev
 `jfl-testkit` or `jfl-conformance`; tool crates (`jfl-oracle`, `jfl-eval`, `jfl-jdtls`, `jfl-bench`) import no production
 crate; a new crate has its `members` entry, `architecture.toml` entry and external allowlist in
 the same commit, and each new rule has a negative fixture. A change that loosens
-`architecture.toml`, `[workspace.lints]`, `deny.toml` or a test without an ADR is HIGH.
+`architecture.toml`, `[workspace.lints]`, `deny.toml` or a test without a stated reason (the task
+asked for it, the commit says why, or an ADR exception where the policy requires one) is HIGH.
 
 **Authority** (plan §6.5): pure crates use no `std::{fs,net,process,env}`, clock, randomness,
 threads or Tokio; a child process is started only through `jfl-process` (argv only, never
@@ -141,9 +142,12 @@ exception citing an ADR; `#[cfg]` not `cfg!`; no `unwrap`/`expect` on input-deri
 production paths; no unbounded channel; no lock held across `.await`.
 
 **Plan fidelity and ADRs**: behaviour matches the cited sections and every `Accept:` item; a
-deviation is recorded in `doc/plan.md`/`doc/tasks.md` in the same commit or is a finding. A
-decision without an ADR (crate boundary, dependency of consequence, protocol, security or
-lifecycle policy, rule exception) is MEDIUM; code contradicting an Accepted ADR is MEDIUM, HIGH
+deviation is recorded in `doc/plan.md`/`doc/tasks.md` in the same commit or is a finding. ADRs
+are records, not rules (ADR 0001, amended): only an important decision whose context is worth
+recalling later needs one, and everything else needs its reason in the commit message (and a code
+comment for a non-obvious constraint). An important decision with no ADR, or any decision whose
+reason is recorded nowhere, is MEDIUM; do not flag a missing ADR for a decision the commit message
+explains. Code contradicting an Accepted ADR without amending or superseding it is MEDIUM, HIGH
 if it loosens a security or architecture rule. A Proposed decision flipped to Accepted by an
 agent is MEDIUM. A `DEC-` outcome written by anyone but the owner is HIGH.
 
@@ -157,11 +161,11 @@ Missing tests for a new branch is MEDIUM.
 
 **Supply chain** (fnd §7): a new dependency added with `cargo add`, justified in the commit
 message, in the crate's external allowlist, licence accepted by `deny.toml`, no git or foreign
-registry source without an ADR; a dependency with C code (tree-sitter grammars) named as such;
+registry source without its recorded reason and per-crate exception; a dependency with C code (tree-sitter grammars) named as such;
 `Cargo.lock` consistent (`--locked` passes); Actions pinned by full commit SHA with minimal
 `permissions`; no `pull_request_target` with checkout of untrusted code. **Reuse** (ADR 0019,
-plan §16): a new subsystem built by hand where a maintained crate or tool fits, without an ADR
-saying why, is MEDIUM; GPL code linked into the binary, EPL code outside a separate process, or
+plan §16): a new subsystem built by hand where a maintained crate or tool fits, without the card's
+`Reuse considered:` line or the commit saying why, is MEDIUM; GPL code linked into the binary, EPL code outside a separate process, or
 code, fixtures or positions taken from a non-permissive corpus repository (elasticsearch) is
 HIGH; a tool not pinned in `mise.toml` is MEDIUM.
 

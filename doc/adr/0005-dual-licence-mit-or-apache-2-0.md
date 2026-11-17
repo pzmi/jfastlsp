@@ -4,7 +4,7 @@ Date: 2026-11-16
 
 ## Status
 
-Proposed (orchestrator default; owner confirms at the FND checkpoint, DEC-07).
+Superseded by [0033](0033-licence-mit-only.md) (2026-11-17, the owner's decision at the FND checkpoint).
 
 ## Context
 

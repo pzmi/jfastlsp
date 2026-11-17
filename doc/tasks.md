@@ -18,7 +18,8 @@ adversarial second review over the range since the previous `checkpoint-*` tag, 
 tags `checkpoint-<ID>` locally and reports to the owner with the open owner decisions.
 Checkpoints: **FND-05** (gate, dependency law and CI; the owner confirms the Proposed defaults,
 DEC-07), **FORMAL-05** (models and harness), **DEC-02** (phase 0 go/no-go and the speed
-targets), **IDX-15** (M1 and the blocking bench gate), **LSP-06** (M2), **SEM-07** (M4),
+targets), **LSP-06** (M1, the LSP carrier, and the blocking bench gate), **IDX-15** (M2, the
+CLI carrier), **SEM-07** (M4),
 **REL-06** (release preview).
 
 ## Overview
@@ -36,6 +37,15 @@ targets), **IDX-15** (M1 and the blocking bench gate), **LSP-06** (M2), **SEM-07
 | FND-06 | Coverage, changed lines, mutation in the diff | FND-05 | standard | M |  | EVAL-03, EVAL-10, BENCH-03 |
 | DEC-07 | (owner) Confirm the Proposed defaults | FND-05 | light | S |  | DEC-08 |
 | DEC-08 | (owner) Shared skills plugin or repo-local skills | FND-05 | light | S |  | DEC-07 |
+| FND-10 | Toolchain 1.99.1 | FND-08 | standard | S |  | XT-01 |
+| XT-01 | Scaffold `tools/xtask` and port the gate composition | FND-08, FND-09 | deep | M |  | FND-10, EVAL lane |
+| XT-02 | Tool pins: `tools/versions.toml`, `cargo xtask doctor`, `install-tools` | XT-01 | standard | M |  | EVAL lane |
+| XT-03 | Security and workflow stages into xtask | XT-02 | standard | M |  | EVAL lane |
+| XT-04 | Clippy lists, ADR index and DCO into xtask | XT-03 | standard | S |  | EVAL lane |
+| XT-05 | `cargo xtask land` replaces `scripts/land.sh` | XT-04 | deep | M |  | EVAL lane |
+| XT-06 | The architecture checks move into `cargo xtask architecture` | XT-05 | deep | M |  | EVAL lane |
+| XT-07 | Bench and fetch scripts into xtask | XT-06 | standard | S |  | EVAL lane |
+| XT-08 | Remove just and mise | XT-07 | standard | M |  | EVAL lane |
 | BENCH-01 | Benchmark corpus: pinned real repositories and the fetch script | FND-01 | standard | S |  | FND-02 |
 | BENCH-02 | Bench harness: `jfl-bench`, hyperfine, divan, the `rg` floor | BENCH-01, FND-02 | standard | M |  | FND-03 |
 | BENCH-03 | Comparison arms and the first baseline | BENCH-02, EVAL-11 | standard | M |  | FND-06 |
@@ -59,7 +69,7 @@ targets), **IDX-15** (M1 and the blocking bench gate), **LSP-06** (M2), **SEM-07
 | EVAL-07 | Golden resolution corpus and `java-fixtures` stage | FORMAL-01 | deep | L |  | FORMAL-02 |
 | EVAL-08 | SCIP oracle (`jfl-oracle`) | EVAL-07 | deep | M |  | EVAL-06 |
 | EVAL-09 | E2 resolver bake-off | EVAL-07, EVAL-08, EVAL-10, BENCH-05 | deep | L |  | DEC-03 |
-| EVAL-10 | E3 `javac` worker spike from the forked compiler core | EVAL-01 | standard | M |  | FND-06, BENCH-05 |
+| EVAL-10 | E3 `javac` worker spike: our own worker with a warm javac context | EVAL-01 | standard | M |  | FND-06, BENCH-05 |
 | DEC-03 | Storage tier (from E1) | EVAL-05 | deep | S |  | DEC-04, DEC-05, DEC-06, EVAL-09 |
 | DEC-04 | Resolver and the SCIP baseline (from E2) | EVAL-09 | deep | S |  | DEC-03, DEC-05, DEC-06 |
 | DEC-05 | Semantic diagnostics in v1 (from E3) | EVAL-10 | deep | S |  | DEC-03, DEC-04, DEC-06 |
@@ -77,24 +87,25 @@ targets), **IDX-15** (M1 and the blocking bench gate), **LSP-06** (M2), **SEM-07
 | IDX-10 | Queries: `sym`, `def`, `hover` | IDX-09 | deep | L |  | LSP-01 |
 | IDX-11 | Queries: `refs`, the `possible` superset, completeness | IDX-10 | deep | L |  | IDX-12 |
 | IDX-12 | Daemon and IPC: lock, socket, spawn, reconnect (daemon driver) | IDX-03, IDX-09, FORMAL-04 | deep | L |  | IDX-11 |
-| IDX-13 | `jfl` CLI: subcommands, output, `--json`, exit codes | IDX-11, IDX-12 | standard | M |  | LSP-02 |
-| IDX-14 | Plugin, skill, `AGENTS.md` and cloud setup | IDX-13 | standard | M |  | LSP-02 |
-| IDX-15 | M1 gate suite and the blocking bench gate | IDX-14 | deep | M | ⛳ | — |
 | LSP-01 | LSP adapter on `lsp-server` and the LSP conformance harness | IDX-03 | deep | L |  | IDX-09, IDX-10 |
-| LSP-02 | `jfl lsp`: lifecycle, encodings, document sync, deadlines | LSP-01, IDX-12 | deep | L |  | IDX-13, IDX-14 |
-| LSP-03 | Navigation methods and `jfl impls` | LSP-02, IDX-15, DEC-06 | standard | L |  | LSP-04 |
+| LSP-02 | `jfl lsp`: lifecycle, encodings, document sync, deadlines | LSP-01, IDX-12 | deep | L |  | IDX-11 |
+| LSP-03 | Navigation methods | LSP-02, IDX-11, DEC-06 | standard | L |  | LSP-04 |
 | LSP-04 | Syntax diagnostics and the coordinator (diagnostics driver) | LSP-02, FORMAL-05 | deep | L |  | LSP-03, LSP-05 |
-| LSP-05 | Plugin variants and `.lsp.json` | LSP-03 | standard | M |  | LSP-04 |
-| LSP-06 | M2 gate | LSP-03, LSP-04, LSP-05 | standard | M | ⛳ | — |
-| PROJ-01 | Gradle model: wrap build-server-for-gradle, opt-in, fingerprint cache | LSP-06 | deep | L |  | PROJ-03 |
+| LSP-05 | LSP plugin and `.lsp.json` | LSP-03 | standard | M |  | LSP-04 |
+| LSP-06 | M1 gate suite and the blocking bench gate | LSP-03, LSP-04, LSP-05 | deep | M | ⛳ | — |
+| IDX-13 | `jfl` CLI: subcommands, output, `--json`, exit codes, `jfl impls` | LSP-06 | standard | M |  | — |
+| IDX-14 | CLI plugin, skill, `AGENTS.md` and cloud setup | IDX-13 | standard | M |  | — |
+| IDX-15 | M2 gate: the CLI carrier | IDX-14 | standard | M | ⛳ | — |
+| PROJ-01 | Gradle model: wrap build-server-for-gradle, opt-in, fingerprint cache | IDX-15 | deep | L |  | PROJ-03 |
 | PROJ-02 | Modules, visibility and `EnvironmentKey` in the envelope | PROJ-01 | deep | M |  | PROJ-04 |
-| PROJ-03 | Class-file and JAR reader on cafebabe | LSP-06 | deep | L |  | PROJ-01 |
-| PROJ-04 | JDK API index from `ct.sym` and the shared library index | PROJ-03 | standard | M |  | PROJ-02 |
+| PROJ-03 | Class-file, JAR and `lib/modules` reader on cafebabe and ristretto_jimage | IDX-15, FND-10 | deep | L |  | PROJ-01 |
+| PROJ-04 | JDK API index from `lib/modules` and `ct.sym`, the shared library index | PROJ-03 | standard | M |  | PROJ-02 |
 | PROJ-05 | Library types in hover and definition; M3 gate | PROJ-02, PROJ-04 | standard | M |  | — |
+| DEP-01 | Switch cafebabe from the git pin to the first release with the 2026-11-13 hostile-input fix | PROJ-03 and a cafebabe release with the fix | light | S |  | any |
 | SEM-01 | Resolver core per DEC-04 | PROJ-05, DEC-04 | deep | L |  | SEM-04 |
 | SEM-02 | Resolver: inferred receivers and generated members | SEM-01 | deep | L |  | SEM-05 |
 | SEM-03 | Exact answers in the envelope; envelope-honesty mutants | SEM-02 | deep | M |  | SEM-05 |
-| SEM-04 | `javac` worker (forked core, scip-java plugin) and pool | PROJ-02, DEC-05 | deep | L |  | SEM-01 |
+| SEM-04 | `javac` worker (our own, scip-java plugin) and pool | PROJ-02, DEC-05 | deep | L |  | SEM-01 |
 | SEM-05 | Semantic diagnostics, processors and `jfl diag` | SEM-04, LSP-04 | deep | L |  | SEM-02, SEM-03, SEM-08 |
 | SEM-06 | SCIP differential gates | SEM-03, EVAL-08 | deep | M |  | — |
 | SEM-08 | SCIP baseline import (M6 folded in) | SEM-06 | deep | M |  | SEM-05 |
@@ -113,16 +124,19 @@ targets), **IDX-15** (M1 and the blocking bench gate), **LSP-06** (M2), **SEM-07
 Seven small tasks assemble the foundation from maintained tools (ADR 0030): mise pins, a `just`
 gate, the compiler, clippy and cargo-deny for the dependency law (FND-02), one architecture test
 (FND-07), adrs and a land script, the security scanners, CI, coverage and mutation in the diff. The FND checkpoint (FND-05)
-puts the Proposed defaults and the skills question to the owner (DEC-07, DEC-08); FND-08 lands
-the checkpoint reviews' fixes and FND-09 the gaps its re-verification found.
+puts the Proposed defaults and the skills question to the owner (DEC-07, DEC-08, both decided on
+2026-11-17); FND-08 lands the checkpoint reviews' fixes and FND-09 the gaps its re-verification
+found; FND-10 moves the toolchain to 1.99.1. Lane XT then ports mayfly's `xtask` over this
+foundation piece by piece (ADR 0035).
 
 #### FND-01: Workspace, toolchain, crate stubs, mise
 - **Depends on:** none. **Model:** standard. **Size:** M. **Parallel with:** DEC-01.
-- **Cites:** plan §6.1, §6.3, §6.5, §1.6, §16; fnd §2.1, §2.3, §2.4, §4.1, §4.2, §8; ADR 0005, ADR 0006, ADR 0010, ADR 0030.
+- **Cites:** plan §6.1, §6.3, §6.5, §1.6, §16; fnd §2.1, §2.3, §2.4, §4.1, §4.2, §8; ADR 0006, ADR 0010, ADR 0030, ADR 0033.
 - Create the Cargo workspace with every production, test-only and tool-only crate of plan §6.1 as
   a stub: `Cargo.toml` (explicit `members`, `exclude = ["spikes"]` so the archived E1 spike stays
   outside, resolver 3, `[workspace.package]` with `version = "0.1.0"`, `edition = "2024"`,
-  `rust-version = "1.97"`, `license = "MIT OR Apache-2.0"`, repository, readme;
+  `rust-version = "1.97"`, `license = "MIT"` (ADR 0033; FND-01 wrote ADR 0005's dual licence),
+  repository, readme;
   `[workspace.lints]` exactly as fnd §4.2), each crate's `Cargo.toml` (`publish = false`,
   `[lints] workspace = true`, only the path dependencies plan §6.3 allows) and `src/lib.rs` with
   a `//!` naming its single responsibility and role; the pure crates `#![no_std]` with
@@ -391,8 +405,17 @@ the checkpoint reviews' fixes and FND-09 the gaps its re-verification found.
   `adrs` tool, and optionally MADR 4; ADR 0002: `scripts/land.sh`). The owner accepts, overrides
   or rejects each.
 - **Accept:**
-  - [ ] the list is in the checkpoint report
-  - [ ] (owner) each record decided; statuses read `Accepted (owner, date)` or `Rejected (owner, date)`; the ADR index and the Decisions table updated
+  - [x] the list is in the checkpoint report
+  - [x] (owner) each record decided; statuses read `Accepted (owner, date)` or `Rejected (owner, date)`; the ADR index and the Decisions table updated
+- **Decided:** 2026-11-17, recorded by BOOT-02. Accepted as written: 0006, 0008–0010, 0014–0021,
+  0024–0026, 0029, 0031, and the amendments of 0001 and 0002. Accepted with the owner's
+  amendment: 0007 (Quint models and `proptest-state-machine` tests, both), 0022 (orchard
+  pinned exactly, the switch-back boundary built from the start), 0023 (`ristretto_jimage`, Rust
+  1.99.1: FND-10), 0028 (jdtls for testing and comparison only). Superseded: 0005 by 0033 (MIT
+  only), 0013 by 0034 (LSP first, CLI second), 0027 by 0036 (our own javac worker), 0030 by 0035
+  (mayfly's `xtask`, lane XT). ADR 0001 is amended with what deserves an ADR at all; 0010 and 0018
+  were more than needed and no more of that kind are written. Agents are denied `git push`
+  (ADR 0018, amended).
 - **Impact:** none (decision).
 
 #### DEC-08: (owner) Shared skills plugin or repo-local skills
@@ -408,9 +431,171 @@ the checkpoint reviews' fixes and FND-09 the gaps its re-verification found.
   plugins (generic; they encode none of this repository's rules: DCO, `land`, ⛳, the dependency
   law, Quint conformance).
 - **Accept:**
-  - [ ] `doc/skills-plugin.md` committed
-  - [ ] (owner) decided; an ADR records it; if "shared", a follow-up task is added here
+  - [ ] `doc/skills-plugin.md` committed (not needed: the owner decided without it)
+  - [x] (owner) decided; if "shared", a follow-up task is added here (repo-local: none)
+- **Decided:** 2026-11-17: the skills stay repo-local in `.claude/skills/` for now; the shared
+  `pzmi/claude-plugins` plugin is deferred. No ADR (ADR 0001, amended): this line is the record.
 - **Impact:** none (decision).
+
+#### FND-10: Toolchain 1.99.1
+- **Depends on:** FND-08. **Model:** standard. **Size:** S. **Parallel with:** XT-01.
+- **Cites:** fnd §3.6, §4.1, §7.2, §8; ADR 0023 (amended 2026-11-17), ADR 0035.
+- Move Rust from 1.97.0 to 1.99.1, which `ristretto_jimage` 0.35.0 needs (ADR 0023, amended):
+  `rust-toolchain.toml`; `[workspace.package] rust-version = "1.99"`; the pin recorded in ADR 0035 (which carries ADR
+  0011's toolchain pin; 0011 itself is superseded and stays as written) by a dated amendment, and
+  `rust-toolchain.toml`'s comment citing ADR 0035 instead of 0030 and 0011; CI (`ci.yml`'s toolchain and the
+  `Swatinem/rust-cache` key); the gate's pins (`.config/gate.sha256` and `rust-toolchain.toml`'s
+  allowlisted shape); mise (any pinned tool built against the toolchain, and its lock entries);
+  fnd §4.1 and the docs that name 1.97 as current (landed cards stay as history). New warnings
+  from clippy 1.98 and 1.99 are fixed in the code, never allowed to get green. `ristretto_jimage`
+  itself arrives with PROJ-03, not here.
+- **Reuse considered:** none needed: a pin change.
+- **Accept:**
+  - [ ] `rustc --version` inside the repository reports 1.99.1; `just check` and `just ci-parity` are green
+  - [ ] every `ci.yml` job is green on the new toolchain, the native macOS and Linux arm64 jobs included
+  - [ ] `grep -rn '1\.97'` finds only history (landed cards, superseded ADRs, the E1 spike)
+- **Impact:** toolchain.
+
+### Lane XT: port mayfly's `xtask`, piece by piece
+
+ADR 0035 (the owner, 2026-11-17) supersedes ADR 0030: `tools/xtask` with a `cargo xtask` surface
+replaces the justfile, mise and the shell scripts **one piece per card**. External tools stay and
+xtask runs them: cargo-deny, gitleaks, zizmor, actionlint, shellcheck, hyperfine, cargo-nextest
+and Quint, and the others the gate uses today until a card decides. Tool versions go in
+`tools/versions.toml` with `cargo xtask doctor` (ADR 0011). Rules for every XT card:
+
+- **Nothing stops running.** Each card lists the stages, scripts and tests it moves; every
+  negative test, every `scripts/test-*.sh` case and FND-09's negative tests for what it moves
+  are its acceptance criteria, ported as Rust tests that fail before the fix they pin. A stage is
+  never dropped and re-added later.
+- **The gate stays pinned** (fnd §3.6): when a script's logic moves into xtask, its line in
+  `.config/gate.sha256` moves to the xtask source that replaces it, in the same commit.
+- **Cite the mayfly module** each piece starts from, and say what was adapted. Reuse considered:
+  mayfly's `tools/xtask` (itself ported from site-preview and hardened by review rounds).
+- `.claude/` (hooks, settings) belongs to the orchestrator: a card that changes what a hook or
+  the allow list must call reports the change rather than making it.
+- Later, not scheduled: the parts shared with mayfly and site-preview move into a separate
+  project that the three repositories depend on.
+
+#### XT-01: Scaffold `tools/xtask` and port the gate composition
+- **Depends on:** FND-08, FND-09. **Model:** deep. **Size:** M. **Parallel with:** FND-10, the EVAL lane.
+- **Cites:** fnd §2.4, §3.3, §3.6, §9; ADR 0035; mayfly `tools/xtask` (`cli`, `process`, `repo` preflight, `catalog`, `check`, `quick`).
+- `tools/xtask` as a tool-only crate (`members`, its `architecture.toml` row and grants, `deny.toml`
+  and `clippy.toml` entries in the same commit). One `.cargo/config.toml` holding exactly
+  `[alias] xtask = "run --locked -p xtask --"`, admitted by FND-08's N1 rule as a pinned shape (the
+  only cargo configuration file allowed; any other key or file still fails). `cargo xtask check`,
+  `quick`, `check-only <stage>…` and `list [--json]`: the stage catalog, its order and the
+  `_preflight` refusals in Rust, each stage still running the same tool command its `just` recipe
+  runs today. `just check`, `quick` and `check-only` become one-line delegations to `cargo xtask`,
+  so CI, `land.sh` and the Stop hook keep working unchanged. `ARCH-gate-config` pins the xtask
+  composition sources; `ARCH-ci-lockstep` reads the catalog from `cargo xtask list --json`. The
+  gate's shape checks move in with the composition, FND-09's `scripts/tool-config-check.sh` (and
+  its self-test `scripts/test-tool-config.sh`) among them.
+- **Accept:**
+  - [ ] `cargo xtask list --json` names exactly the stages `just check` ran before this card, in the same order (a test against the catalog frozen in this commit)
+  - [ ] every `_preflight` negative case (`RUSTC_WRAPPER`, `RUSTFLAGS` beyond `-D warnings`, `CLIPPY_CONF_DIR`, `RUSTC_BOOTSTRAP`, `CARGO_UNSTABLE_*`, a cargo configuration file other than the alias, N1's unicode-escaped forms) and FND-09's negative tests pass against `cargo xtask`
+  - [ ] an edited xtask composition source without its `.config/gate.sha256` line fails `ARCH-gate-config`
+  - [ ] FND-09's tool-configuration shape check (`scripts/tool-config-check.sh`) runs as an xtask stage; every negative case of `scripts/test-tool-config.sh` is a Rust test that fails before the check and passes after, and both scripts are removed with their pins moved
+  - [ ] `cargo xtask check` and `just check` are green; `ci.yml` is unchanged and green
+- **Impact:** none (tooling); dependency graph (a new tool crate).
+
+#### XT-02: Tool pins: `tools/versions.toml`, `cargo xtask doctor`, `install-tools`
+- **Depends on:** XT-01. **Model:** standard. **Size:** M. **Parallel with:** the EVAL lane.
+- **Cites:** fnd §8; ADR 0011, ADR 0035; mayfly `tools/xtask` (`tools`: doctor, install-tools, versions).
+- `tools/versions.toml`: every tool `mise.toml` pins today, with its version and, per platform,
+  the release URL and SHA-256 (the values `mise.lock` holds); `cargo xtask install-tools` downloads
+  into a cache directory outside the repository and refuses a checksum mismatch; `cargo xtask
+  doctor` fails closed on a missing or wrong tool, naming it and the fix; the stages run tools from
+  that directory. mise stays installed and in CI until XT-08; a test fails when `versions.toml`
+  and `mise.lock` disagree.
+- **Accept:**
+  - [ ] `doctor` names a missing tool and a wrong version (fixtures); `install-tools` refuses a tampered archive
+  - [ ] FND-08's N6 cases (no other mise configuration, tools run from their install directories) hold for both paths
+  - [ ] the network facts of fnd §8 hold: every download is a GitHub release asset or a crates.io file, never `api.github.com`
+- **Impact:** none (tooling).
+
+#### XT-03: Security and workflow stages into xtask
+- **Depends on:** XT-02. **Model:** standard. **Size:** M. **Parallel with:** the EVAL lane.
+- **Cites:** fnd §7.3, §7.4; ADR 0004, ADR 0035; mayfly `tools/xtask` (`security`, `action_pins`).
+- `secrets`, the generated `.gitleaks.toml` check, `workflows` and `private-names` (with
+  `private-name-add` and the fold) become xtask stages and subcommands that run gitleaks,
+  actionlint, shellcheck, zizmor and pinact; `scripts/secrets-check.sh`,
+  `scripts/gitleaks-config.sh`, `scripts/workflows-check.sh`, `scripts/private-names-check.sh`,
+  `scripts/private-names-fold.pl` and `scripts/private-name-add.sh` are removed with their pins
+  moved. `SECURITY.md` names the new command.
+- **Accept:**
+  - [ ] every case of `scripts/test-secrets.sh`, `scripts/test-workflows.sh` and `scripts/test-private-names.sh` is a Rust test and passes; FND-04's fixtures and FND-08's N5 and N8 cases still fail their stages
+  - [ ] FND-09's negative tests for these stages pass against xtask
+  - [ ] the planted private name is found in a changed line and a commit message without being printed
+  - [ ] the LOWs of FND-09's adversarial review, carried into the port:
+    - **M1:** the suppression allowlist has one source: one data file that both the workflows stage and `ARCH-workflow-yaml` read, or a single `allowed_suppressions` definition whose opener is enforced to occur exactly once; a decoy list fails (test)
+    - **L1:** the gitleaks policy generator's regex-rewrite structural check has committed tests (the implementer's probes plus a rewrite inside `\Q…\E`, inside `(?…)` and inside `\p`/`\x` escape arguments), and the `\Q…\E` refusal is kept
+    - **L2:** the binary-skip detection reads gitleaks' structured output, or compares the files scanned with the files written, never console text; a planted skip fails (test)
+    - **L3:** a heredoc or string line containing `# shellcheck ` is still refused (it fails closed today), and the message tells the author to reword it; a test pins both
+    - composite actions (`.github/actions/*/action.yml`), whose `run:` scripts actionlint does not shellcheck, have their decoded `run:` scripts shellchecked by xtask; a planted SC2086 in one fails
+    - **H3:** the docs and the stage's output say that secrets in encodings other than the listed archive and compression formats (zlib, lz4, brotli and the like) are out of scope
+- **Impact:** none (tooling).
+
+#### XT-04: Clippy lists, ADR index and DCO into xtask
+- **Depends on:** XT-03. **Model:** standard. **Size:** S. **Parallel with:** the EVAL lane.
+- **Cites:** fnd §2.4, §10.3; ADR 0001, ADR 0035; mayfly `tools/xtask` (`adr`).
+- `cargo xtask clippy-lists`, `adr new <title>`, `adr index [sort]` and `dco <range>` replace
+  `scripts/clippy-lists.sh`, `adrs`, `scripts/adr-index.sh` and `scripts/dco-check.sh`; the `docs`
+  stage and `ci.yml`'s `dco` job call them.
+- **Accept:**
+  - [ ] every case of `scripts/test-clippy-lists.sh` and the `adr_index` and DCO cases of `land_scripts.rs` pass against xtask
+  - [ ] `cargo xtask adr new "Test"` in a scratch copy writes the next Nygard record with the index row
+- **Impact:** none (tooling).
+
+#### XT-05: `cargo xtask land` replaces `scripts/land.sh`
+- **Depends on:** XT-04. **Model:** deep. **Size:** M. **Parallel with:** the EVAL lane.
+- **Cites:** fnd §10.2; ADR 0002, ADR 0018 (amended 2026-11-17), ADR 0035; mayfly `tools/xtask` (`land`).
+- `cargo xtask land <sha>… [--no-push]` does what `land.sh` does today: refuse a dirty checkout,
+  fetch, a worktree at `origin/main`, cherry-pick, sign-off and signature checks, resolve only
+  `Cargo.lock` and the ADR index, the gate on the merged tree, push only on green, one retry after
+  a non-fast-forward. It stays the only pusher: the report asks the orchestrator to allow
+  `cargo xtask land` in `.claude/settings.json`, where the `git push` deny stays.
+- **Accept:**
+  - [ ] every `land_scripts.rs` case (clean land, dirty checkout, non-lockfile conflict naming the files, a red gate moves nothing, the retry, the signature and sign-off refusals) passes against `cargo xtask land`
+  - [ ] `scripts/land.sh` removed; `sdlc.md` and fnd §10.2 name the new command
+- **Impact:** none (tooling).
+
+#### XT-06: The architecture checks move into `cargo xtask architecture`
+- **Depends on:** XT-05. **Model:** deep. **Size:** M. **Parallel with:** the EVAL lane.
+- **Cites:** fnd §3.1–§3.6; ADR 0010, ADR 0035; mayfly `tools/xtask` (the architecture checker's policy, inventory, graph and external layers).
+- `jfl-architecture`'s rules, its negative fixture workspaces, its meta-test (every rule of fnd
+  §3.3 has a negative case), the clippy-list model, the source scan and lexer, the lockstep and
+  `ARCH-gate-config` move into xtask as `cargo xtask architecture`; `tools/jfl-architecture` is
+  removed; fnd §3 names the new home.
+- **Accept:**
+  - [ ] every rule id keeps its negative case and fails it with its id and path; the meta-test passes
+  - [ ] the `architecture` stage runs `cargo xtask architecture`; the tree is green
+- **Impact:** none (tooling).
+
+#### XT-07: Bench and fetch scripts into xtask
+- **Depends on:** XT-06. **Model:** standard. **Size:** S. **Parallel with:** the EVAL lane.
+- **Cites:** fnd §9; ADR 0031, ADR 0035.
+- `scripts/bench-corpus.sh` and `scripts/jdtls-fetch.sh` become `cargo xtask bench-corpus` and
+  `cargo xtask jdtls-fetch`; hyperfine stays the timing tool `jfl-bench` drives.
+- **Accept:**
+  - [ ] every case of `scripts/test-bench-corpus.sh` and `scripts/test-jdtls-fetch.sh` passes against xtask
+  - [ ] `doc/bench/README.md` and `doc/bench-corpus.md` name the new commands
+- **Impact:** none (tooling).
+
+#### XT-08: Remove just and mise
+- **Depends on:** XT-07. **Model:** standard. **Size:** M. **Parallel with:** the EVAL lane.
+- **Cites:** fnd §7.2, §8, §9; ADR 0018, ADR 0035; [`required-checks.md`](required-checks.md).
+- Every `ci.yml` job calls `cargo xtask check-only <stage>…` and installs tools with
+  `cargo xtask install-tools` (cached), not `jdx/mise-action`; the `justfile`, `mise.toml`,
+  `mise.lock` and `scripts/bootstrap-tools.sh` are removed; `ARCH-ci-lockstep` and
+  `ARCH-gate-config` read only xtask. `CLAUDE.md`, `README.md`, `CONTRIBUTING.md`, fnd §8 and §9,
+  `sdlc.md` and `required-checks.md` name `cargo xtask`; the report lists the hook and allow-list
+  changes the orchestrator makes in `.claude/` (SessionStart, Stop, `Bash(just *)`, `Bash(mise *)`).
+- **Accept:**
+  - [ ] every stage of the catalog frozen in XT-01 still runs in `cargo xtask check` and in CI (the catalog test passes)
+  - [ ] no workflow, script or doc command table names `just` or `mise`
+  - [ ] `cargo xtask check` and every CI job green; `Required` green
+- **Impact:** CI topology; tooling.
 
 ### Lane BENCH: benchmarks from the start
 
@@ -459,7 +644,7 @@ dispatch jobs or `(owner)` items.
   which reports and never gates; the in-process convention for product crates
   (`crates/*/benches/` with divan, criterion where a statistical comparison matters) written in
   `doc/bench/README.md`. Freshness lag and the 1/3/10-worktree marginal cost need a product:
-  they arrive with IDX-15 for `jfl` and with E4 (EVAL-06) for jdtls.
+  they arrive with LSP-06 (M1) for `jfl` and with E4 (EVAL-06) for jdtls.
 - **Reuse considered:** hyperfine, divan, criterion, github-action-benchmark's JSON; a bespoke
   timer was rejected.
 - **Accept:**
@@ -481,10 +666,24 @@ dispatch jobs or `(owner)` items.
   The jdtls arm on the corpus is a `bench.yml` dispatch job (BENCH-04 adds it) or an `(owner)`
   run. `doc/bench/baseline.md`: the numbers with machine facts and, per §1.7 target, a
   recommendation to confirm or correct it.
+- **The incremental suite** (the owner asked whether incremental indexing is feasible; speed is
+  the point of the project), on medium (spring-framework) and lombok (fineract):
+  - the time from one disk edit until a published generation answers;
+  - a branch switch and a rebase between pinned commits;
+  - a change to a widely used type: how many files re-resolve (the fan-out) and the time;
+  - the cost of updating the references postings;
+  - a warm reopen.
+
+  Until IDX exists the suite measures the syntax-tier proxies (re-hash, `git diff` between the
+  pinned commits, re-parse of the changed set) and the report says so per row; each full metric
+  turns on with the task that makes it measurable (IDX-09 freshness and generations, IDX-11
+  postings, SEM-01/SEM-02 re-resolution fan-out) and those tasks run it. The results feed DEC-02,
+  against the incremental rows of plan §1.7 (*proposed*).
 - **Reuse considered:** kmp-lsp as shipped; jdtls's own sharing options (`sharedIndexLocation`,
   the syntax server).
 - **Accept:**
   - [ ] the baseline report committed; an arm that cannot run is recorded with the reason, never dropped
+  - [ ] the incremental suite runs on medium and lombok, each row marked "proxy" or "full", with the pinned commit pairs (branch switch, rebase) and the widely used types chosen named in `doc/bench/baseline.md`; its proxy numbers go into DEC-02's inputs
   - [ ] (owner) the jdtls arm on the medium corpus (or BENCH-04's dispatch job) and the large corpus run on the reference machine, named in the report
 - **Impact:** none.
 
@@ -500,7 +699,7 @@ dispatch jobs or `(owner)` items.
   reruns the suite once and fails only if the regression reproduces; in-process suites gate on
   instruction counts (`gungraun` or cachegrind, pinned) where available, with wall time
   reported. `bench-gate` is never a stage of `check` and never runs in `land.sh` (fnd §9); it
-  reports here and becomes blocking at IDX-15. Dispatch jobs for corpus work the sandbox must not
+  reports here and becomes blocking at LSP-06 (the M1 gate). Dispatch jobs for corpus work the sandbox must not
   do: the jdtls arm of BENCH-03 on the medium corpus (with its Gradle import), and a hook for
   BENCH-05's `scip-java` indexes. A short guide to reading the history in `doc/bench/README.md`.
 - **Reuse considered:** github-action-benchmark (no account or token) over bencher.dev (the
@@ -721,7 +920,7 @@ target repository is private, only aggregated reports under `doc/eval/` are comm
   - [x] two worktrees with the same basename get different `-data` directories
   - [x] a client that exits mid-request leaves the backend serving the others
   - [ ] (owner) with Claude Code and three subagents in one worktree, one jdtls process runs for it
-- **Impact:** none (tooling; the fallback product if DEC-02 says stop).
+- **Impact:** none (tooling; for testing and comparison only, never a shipped product: ADR 0028, amended 2026-11-17).
 
 #### EVAL-02: E0 task set from the target repository's history
 - **Depends on:** DEC-01, EVAL-01. **Model:** standard. **Size:** M. **Parallel with:** FND-05.
@@ -857,7 +1056,7 @@ target repository is private, only aggregated reports under `doc/eval/` are comm
 
 #### EVAL-09: E2 resolver bake-off
 - **Depends on:** EVAL-07, EVAL-08, EVAL-10, BENCH-05. **Model:** deep. **Size:** L. **Parallel with:** DEC-03.
-- **Cites:** plan §5.6, §9.2 (E2), §9.3; ver §7.1; ADR 0027.
+- **Cites:** plan §5.6, §9.2 (E2), §9.3; ver §7.1; ADR 0036.
 - Run each candidate resolver of plan §5.6 on the resolution corpus through thin wrappers in
   `jfl-eval` (a minimal tree-sitter resolver prototype of our own written as a spike; `ktcore`, which
   is not a crates.io crate, so the card's agent first records its repository URL, pinned commit
@@ -875,14 +1074,18 @@ target repository is private, only aggregated reports under `doc/eval/` are comm
   - [ ] (owner) a SCIP index of the target repository produced with `scip-java` and the bake-off run against it; aggregates added
 - **Impact:** none.
 
-#### EVAL-10: E3 `javac` worker spike from the forked compiler core
+#### EVAL-10: E3 `javac` worker spike: our own worker with a warm javac context
 - **Depends on:** EVAL-01. **Model:** standard. **Size:** M. **Parallel with:** FND-06, BENCH-05.
-- **Cites:** plan §3, §9.2 (E3); ver §10; ADR 0027, ADR 0032 (amended 2026-11-17).
-- Fork the compiler core of georgewfraser/java-language-server (MIT; pinned base commit,
-  licence and notices kept) into `java/javac-worker/` as the spike: one warm JVM compiling single
-  files through its long-lived `JavacTask` with body erasure, `-proc:none -implicit:none` and a
-  given `-sourcepath` and classpath, with scip-java's plugin optionally loaded; an ECJ batch arm
-  (`-proceedOnError`). `jfl-eval e3` drives both over a list of files and reports p50, p95, RSS,
+- **Cites:** plan §3, §9.2 (E3); ver §10; ADR 0036, ADR 0032 (amended 2026-11-17).
+- Write our own small worker in `java/javac-worker/` as the spike (ADR 0036; java-language-server
+  and the JDK as reference only, no copied code, since its `ReusableCompiler.java` is GPL-2.0
+  with the Classpath Exception): one warm JVM keeping one javac context warm across single-file
+  compiles, falling back to a fresh compiler when reuse fails, `-proc:none -implicit:none` and a
+  given `-sourcepath` and classpath, class folders from earlier builds read when present, with
+  scip-java's plugin 0.14.2 optionally loaded; an ECJ batch arm (`-proceedOnError`). Two questions
+  answered first: does javac check method bodies of dependency sources under `-implicit:none` (if
+  so, body blanking of those sources goes in; if not, it is dropped), and what does the scip-java
+  plugin emit for a file with errors, at what latency. `jfl-eval e3` drives both over a list of files and reports p50, p95, RSS,
   false errors, the plugin's attribution cost and, given several worktrees' classpaths, the number
   of distinct `EnvironmentKey`s (plan §5.4). Measured on the multi-module fixture project with a
   classpath the fixture declares (no Gradle run in the sandbox); a module of the small bench
@@ -890,10 +1093,12 @@ target repository is private, only aggregated reports under `doc/eval/` are comm
   Fineract is the real Lombok and MapStruct target: whether `-proc:none` leaves false errors on
   its generated members, and what loading the processors costs, are measured there on the same
   kind of run (criterion S2 of `doc/eval/target-criteria.md`; spring-framework runs no such processor).
-- **Reuse considered:** the forked compiler core (ADR 0027) instead of a blank spike; ECJ as a
-  comparison arm; jdtls's javac backend (incubating) and NetBeans' nb-javac for ideas only.
+- **Reuse considered:** forking java-language-server's core (ADR 0027) rejected for its GPL file
+  and its autocomplete-only body erasure (ADR 0036); ECJ as a comparison arm; jdtls's javac
+  backend (incubating) and NetBeans' nb-javac for ideas only.
 - **Accept:**
-  - [ ] fixture results committed in `doc/eval/e3-results.md` with machine facts, for javac and ECJ
+  - [ ] fixture results committed in `doc/eval/e3-results.md` with machine facts, for javac and ECJ, on JDK 17, 21 and 25, warm reuse and the fresh-compiler fallback
+  - [ ] the `-implicit:none` body-checking answer and the scip-java plugin's output and latency on files with errors recorded there, each with the fixture that shows it
   - [ ] (owner) one module of the small corpus measured the same way; aggregates added
   - [ ] (owner) run on two modules of the target repository and over 10 worktrees' classpaths; aggregates added
   - [ ] (owner) run on two fineract modules that use Lombok and MapStruct, with and without the processors loaded; false errors and cost added to `doc/eval/e3-results.md`
@@ -936,7 +1141,7 @@ target repository is private, only aggregated reports under `doc/eval/` are comm
 
 #### DEC-06: `referencesMode` default and operation priority (from E0)
 - **Depends on:** EVAL-04. **Model:** deep. **Size:** S. **Parallel with:** DEC-03, DEC-04, DEC-05.
-- **Cites:** plan §2.5, §9.2; ADR 0013.
+- **Cites:** plan §2.5, §9.2; ADR 0034.
 - A draft ADR (Proposed): the `referencesMode` default, the order in which LSP operations and CLI
   subcommands are built, and changes to the skill text, from `doc/eval/e0-results.md`.
 - **Accept:**
@@ -954,16 +1159,20 @@ target repository is private, only aggregated reports under `doc/eval/` are comm
   kill criterion of plan §1.3 against E0 and E4 (jdtls behind our proxy as the baseline), the §1.7
   speed targets against BENCH-03's baseline, the recommended decision and what changes in the
   plan if it is "go with changes" (a list of task-card edits). A draft ADR (Proposed) recording
-  the decision. If the decision is to stop and ship `jfl-jdtls` instead, the memo lists the
-  tasks that promote it from tool to product and replace the IDX lane.
+  the decision. The kill criterion (plan §1.3): if jfastlsp cannot beat jdtls behind our proxy on
+  speed with honest envelopes, the memo recommends stopping or a rescope (and lists the
+  task-card edits a rescope needs); it never recommends shipping `jfl-jdtls`, which stays a
+  testing and comparison tool (ADR 0028, amended).
 - **Accept:**
   - [ ] memo and draft ADR committed; every number traces to a committed report
-  - [ ] (owner) go, go with changes, or stop, and the §1.7 targets confirmed; the ADR's status says so and `doc/tasks.md` reflects it
+  - [ ] (owner) go, go with changes (a rescope), or stop, and the §1.7 targets confirmed; the ADR's status says so and `doc/tasks.md` reflects it
 - **Impact:** none (decision).
 
-### Lane IDX: M1, the CLI vertical slice
+### Lane IDX: M1, the shared engine
 
-M1 (plan §10.1): syntax index, envelope, daemon, CLI and plugin. Starts after the go decision.
+M1 (plan §10.1): syntax index, envelope, views, queries and daemon (IDX-01..IDX-12), carried to
+agents first by the LSP lane (ADR 0034, LSP first). The CLI cards IDX-13..IDX-15 keep their ids
+but follow in lane CLI (M2). Starts after the go decision.
 
 #### IDX-01: Domain: paths, positions and encodings
 - **Depends on:** DEC-02. **Model:** standard. **Size:** M. **Parallel with:** IDX-04, FORMAL-03.
@@ -1089,12 +1298,23 @@ M1 (plan §10.1): syntax index, envelope, daemon, CLI and plugin. Starts after t
   by name only; bounded input size and depth, no panic on any bytes. `fixtures/java/summaries/`
   goldens for every corpus file (golden first), `fixtures.lock` and the `ARCH-fixtures-lock` rule
   (fnd §3.3). The `syntax_indexer` contract suite (canned fake vs adapter).
+- **The switch-back boundary** (ADR 0022, amended 2026-11-17; about 1–2 days more):
+  `tree-sitter-java-orchard` pinned exactly (`=`), and upstream `tree-sitter-java` as a
+  dev-dependency; only `jfl-adapter-java` names grammar nodes and fields; `tags.scm` and
+  `locals.scm` per grammar; every node kind and field name the adapter uses resolved into a table
+  at indexer start-up, failing loudly with the missing name; a synthetic per-feature Java corpus
+  (`fixtures/java/grammar/`, one file per feature: records, sealed types, switch patterns, text
+  blocks, `import module`, flexible constructor bodies, annotations in every position) parsed by
+  both grammars against per-grammar golden summaries, with the known upstream gaps in a committed
+  list; the grammar's crate name and exact version in `SyntaxKey`.
 - **Reuse considered:** `tree-sitter` + `tree-sitter-java-orchard` (ADR 0022); `tree-sitter-tags`
   rejected (hides ranges and scopes); `java-lang` too new.
 - **Accept:**
   - [ ] summary goldens match for every file of `fixtures/java/projects/` and `fixtures/java/resolution/`
   - [ ] property test: arbitrary bytes and mutated corpus files never panic and finish within a bound
   - [ ] `ARCH-fixtures-lock` fails on an edited golden with a stale lock (negative fixture)
+  - [ ] both grammars parse the per-feature corpus to their goldens in the test stages and CI; a gap that opens or closes without the known-gaps list changing fails the test
+  - [ ] a node or field name missing from the loaded grammar fails start-up naming it (test with a renamed name)
   - [ ] the tree-sitter dependencies (C code) named in the external allowlist, `deny.toml`'s build-script allowlist and the commit, with their licences
   - [ ] runs on the bench corpus (small at least, `just bench`) and reports the metrics it affects; its correctness tests also run against the real-corpus cases that apply (BENCH-05)
 - **Impact:** dependency graph; fixture corpus.
@@ -1133,6 +1353,7 @@ M1 (plan §10.1): syntax index, envelope, daemon, CLI and plugin. Starts after t
   - [ ] `conformance-replay` replays the `views` regression and generated traces green
   - [ ] the negative control fails at the expected step
   - [ ] component tests: a request pinned to N while N+1 publishes answers wholly from N; a `sed -i`-style write seen by the stat is in the answer without `sync`
+  - [ ] a `proptest-state-machine` test of the registry (open, reconcile, publish, pin, `sync`) against a reference machine (ADR 0007, amended; ver §6.4)
   - [ ] runs on the bench corpus (small at least, `just bench`) and reports the metrics it affects; its correctness tests also run against the real-corpus cases that apply (BENCH-05)
 - **Impact:** none (internal); model conformance.
 
@@ -1148,7 +1369,7 @@ M1 (plan §10.1): syntax index, envelope, daemon, CLI and plugin. Starts after t
 - **Accept:**
   - [ ] component tests over the fixture projects for each operation, including bounded ambiguity never returning another type's member
   - [ ] a deadline hit returns `complete=false` with `deadline` in `incomplete_because` (fake clock)
-  - [ ] envelope goldens for the cases chosen for M1's 50-case gate (started here, completed in IDX-15)
+  - [ ] envelope goldens for the cases chosen for M1's 50-case gate (started here, completed in LSP-06)
   - [ ] runs on the bench corpus (small at least, `just bench`) and reports the metrics it affects; its correctness tests also run against the real-corpus cases that apply (BENCH-05)
 - **Impact:** none (internal).
 
@@ -1193,66 +1414,14 @@ M1 (plan §10.1): syntax index, envelope, daemon, CLI and plugin. Starts after t
   - [ ] `conformance-replay` green for `daemon`; the negative control fails at its step
   - [ ] integration tests: a second daemon on the same state dir exits with a clear error; modes are `0700`/`0600` (also under a non-root uid via `setpriv`, since the sandbox runs as root); an existing state dir with mode `0755` or another owner is refused; a peer with another uid is refused; two clients racing start one daemon
   - [ ] after a daemon crash a client reconnects and the new daemon holds no overlay of a dead connection
+  - [ ] a `proptest-state-machine` test of the host's lock, socket and connection states against a reference machine (ADR 0007, amended; ver §6.4)
   - [ ] runs on the bench corpus (small at least, `just bench`) and reports the metrics it affects; its correctness tests also run against the real-corpus cases that apply (BENCH-05)
 - **Impact:** protocol (endpoint); new authority (sockets).
 
-#### IDX-13: `jfl` CLI: subcommands, output, `--json`, exit codes
-- **Depends on:** IDX-11, IDX-12. **Model:** standard. **Size:** M. **Parallel with:** LSP-02.
-- **Cites:** plan §2.3, §2.4; ver §2, §4; ADR 0013.
-- `jfl-cli`: `def`, `refs`, `hover`, `sym`, `status`, `sync`, `daemon` with `--json`,
-  `--exact-only`, `--state-dir`; `file:line:col` parsing (1-based, byte columns); compact output
-  grouped by file, `exact` first, capped with a count; exit codes of plan §2.4. `--json` goldens
-  first (`insta` JSON snapshots with redactions; the JSON Schema generated by `schemars`, committed
-  and checked). The `e2e-tests` stage and its CI job (shared with LSP-01's `lsp-conformance`).
-- **Reuse considered:** `clap`, `schemars`, `insta`, `assert_cmd`, `trycmd`; LSAP's compact "Showing
-  2 of 12" output as an idea.
-- **Accept:**
-  - [ ] e2e tests with `assert_cmd` over copies of the fixture projects for each subcommand and exit code
-  - [ ] `--json` goldens for every subcommand; compact output goldens for `refs` with more hits than the cap
-  - [ ] the first command against a stopped daemon spawns it and answers (e2e)
-  - [ ] runs on the bench corpus (small at least, `just bench`) and reports the metrics it affects; its correctness tests also run against the real-corpus cases that apply (BENCH-05)
-- **Impact:** CLI (v1); `--json` schema (v1).
+### Lane LSP: M1, the LSP carrier
 
-#### IDX-14: Plugin, skill, `AGENTS.md` and cloud setup
-- **Depends on:** IDX-13. **Model:** standard. **Size:** M. **Parallel with:** LSP-02.
-- **Cites:** plan §2.4, §2.6; ADR 0013.
-- `plugin/cli/` (the CLI plugin: manifest, `bin/jfl` launcher, `skills/jfl/SKILL.md` telling an
-  agent when to prefer `jfl refs --json` over grep and how to read `complete`), `AGENTS.md` at the
-  root (for agents that use `jfl`: commands, the envelope, completeness, freshness and `sync`),
-  and `doc/cloud-setup.md` with a setup-script snippet that installs a release binary for cloud
-  sessions. Every behavioural claim in the skill and `AGENTS.md` names the test that pins it.
-- **Reuse considered:** the documented Claude Code plugin schema and `claude plugin validate`;
-  LSAP's agent-shaped output and Code-Index-MCP's `index_unavailable` honesty pattern as ideas.
-- **Accept:**
-  - [ ] the plugin directory validates with the Claude Code plugin schema (a test of the manifest's keys against the documented list)
-  - [ ] every command in `AGENTS.md` and the skill runs in an e2e test
-  - [ ] (owner) the CLI plugin installed in a local Claude Code session and `jfl refs` used by an agent; the skill installed in a cloud session through the setup script
-  - [ ] runs on the bench corpus (small at least, `just bench`) and reports the metrics it affects; its correctness tests also run against the real-corpus cases that apply (BENCH-05)
-- **Impact:** distribution.
-
-#### IDX-15: ⛳ M1 gate suite and the blocking bench gate
-- **Depends on:** IDX-14. **Model:** deep. **Size:** M. **Parallel with:** none.
-- **Cites:** plan §1.7, §10.1; ver §7.2, §10, §11; ADR 0014, ADR 0017, ADR 0031.
-- The M1 gate as tests: the envelope on 50 golden cases; the completeness mutation test adding a
-  caller in each module of each multi-module fixture; 10 concurrent worktrees (linked, under
-  `.claude/worktrees/`) queried in parallel with no cross-view result and no duplicate workspace
-  symbol; freshness under shell edits (`git checkout`, `git stash`, `sed -i`, `rm`) answered
-  correctly without `sync`; the M1 rows of plan §1.7 measured on the corpus, with the
-  `jfl-bench` runners that need a product: freshness lag (edit a file, time until the next
-  request sees it) and the marginal cost of 1, 3 and 10 linked worktrees. `bench.yml`'s
-  `bench-gate` becomes blocking: from here a tracked metric that regresses by more than 10 % on
-  its fixed runner class fails the run on `main`, and a red `bench-gate` is fixed like red CI. It
-  stays out of `ci.yml`, `check` and `land.sh` (fnd §9). `doc/eval/m1.md` lists the gate items and
-  their tests.
-- **Accept:**
-  - [ ] every gate item has a passing test named in `doc/eval/m1.md`
-  - [ ] `bench-gate` blocks on `main` and fails a planted 20 % regression that reproduces; the M1 rows of plan §1.7 measured, with the reference-machine run (owner) where the sandbox differs
-  - [ ] (owner) the E0 task subset rerun with the CLI plugin; aggregates in `doc/eval/m1.md`
-  - [ ] (owner) the cloud-session check of IDX-14 done
-  - [ ] runs on the bench corpus (small at least, `just bench`) and reports the metrics it affects; its correctness tests also run against the real-corpus cases that apply (BENCH-05)
-- **Impact:** none.
-
-### Lane LSP: M2, the LSP carrier
+The first carrier (ADR 0034): the engine of lane IDX reaches agents through `jfl lsp` and the LSP
+plugin; LSP-06 is M1's gate and makes the bench gate blocking.
 
 #### LSP-01: LSP adapter on `lsp-server` and the LSP conformance harness
 - **Depends on:** IDX-03. **Model:** deep. **Size:** L. **Parallel with:** IDX-09, IDX-10.
@@ -1276,7 +1445,7 @@ M1 (plan §10.1): syntax index, envelope, daemon, CLI and plugin. Starts after t
 - **Impact:** new adapter.
 
 #### LSP-02: `jfl lsp`: lifecycle, encodings, document sync, deadlines
-- **Depends on:** LSP-01, IDX-12. **Model:** deep. **Size:** L. **Parallel with:** IDX-13, IDX-14.
+- **Depends on:** LSP-01, IDX-12. **Model:** deep. **Size:** L. **Parallel with:** IDX-11.
 - **Cites:** plan §2.3, §2.5, §2.7, §4.4, §5.2; fnd §3.3.
 - The `jfl lsp` proxy: `initialize` (capabilities only for what exists; `positionEncoding`
   negotiation; answered without waiting for indexing), `initialized`, `shutdown`, `exit` (0 after
@@ -1291,19 +1460,18 @@ M1 (plan §10.1): syntax index, envelope, daemon, CLI and plugin. Starts after t
   - [ ] runs on the bench corpus (small at least, `just bench`) and reports the metrics it affects; its correctness tests also run against the real-corpus cases that apply (BENCH-05)
 - **Impact:** LSP capabilities (lifecycle).
 
-#### LSP-03: Navigation methods and `jfl impls`
-- **Depends on:** LSP-02, IDX-15, DEC-06. **Model:** standard. **Size:** L. **Parallel with:** LSP-04.
-- **Cites:** plan §2.2, §2.5; ADR 0013, ADR 0014.
+#### LSP-03: Navigation methods
+- **Depends on:** LSP-02, IDX-11, DEC-06. **Model:** standard. **Size:** L. **Parallel with:** LSP-04.
+- **Cites:** plan §2.2, §2.5; ADR 0014, ADR 0034.
 - `textDocument/definition`, `references` (`referencesMode` with DEC-06's default; `exact` first),
   `hover` (status line), `documentSymbol`, `workspace/symbol`, `implementation`; the
   implementation query in the application (proved subtype edges `exact`, unresolved supertypes
-  `possible`) and `jfl impls`. Transcripts and `--json` goldens.
+  `possible`). Transcripts. (`jfl impls` moved to IDX-13 with the CLI, ADR 0034.)
 - **Accept:**
   - [ ] a transcript per method over the fixture projects; `references` in both modes
-  - [ ] hover's status line matches the CLI envelope for the same position (a test comparing carriers)
-  - [ ] `jfl impls` e2e and golden
+  - [ ] hover's status line matches the protocol envelope the daemon returns for the same position (a test comparing the LSP mapping with the protocol answer)
   - [ ] runs on the bench corpus (small at least, `just bench`) and reports the metrics it affects; its correctness tests also run against the real-corpus cases that apply (BENCH-05)
-- **Impact:** LSP capabilities; CLI.
+- **Impact:** LSP capabilities.
 
 #### LSP-04: Syntax diagnostics and the coordinator (diagnostics driver)
 - **Depends on:** LSP-02, FORMAL-05. **Model:** deep. **Size:** L. **Parallel with:** LSP-03, LSP-05.
@@ -1318,41 +1486,109 @@ M1 (plan §10.1): syntax index, envelope, daemon, CLI and plugin. Starts after t
 - **Accept:**
   - [ ] `conformance-replay` green for `diagnostics`; the negative control fails at its step
   - [ ] a transcript with two quick edits whose results arrive in reverse order publishes only the newer
+  - [ ] a `proptest-state-machine` test of the coordinator (open, edit, result, close in any order) against a reference machine (ADR 0007, amended; ver §6.4)
   - [ ] syntax errors in the corpus's `broken/` files are published with correct UTF-16 ranges
   - [ ] runs on the bench corpus (small at least, `just bench`) and reports the metrics it affects; its correctness tests also run against the real-corpus cases that apply (BENCH-05)
 - **Impact:** LSP capabilities (diagnostics).
 
-#### LSP-05: Plugin variants and `.lsp.json`
+#### LSP-05: LSP plugin and `.lsp.json`
 - **Depends on:** LSP-03. **Model:** standard. **Size:** M. **Parallel with:** LSP-04.
-- **Cites:** plan §2.6; ADR 0013.
-- `plugin/lsp/` (the LSP-only plugin with `.lsp.json` using only the documented keys of plan §2.6)
-  and the LSP server entry added to the CLI plugin; a test that checks `.lsp.json` against the
+- **Cites:** plan §2.6; ADR 0034.
+- `plugin/lsp/` (the LSP-only plugin with `.lsp.json` using only the documented keys of plan §2.6;
+  the CLI plugin of IDX-14 later carries the same entry); a test that checks `.lsp.json` against the
   documented key list; coexistence with `jdtls-lsp` and with `jfl-jdtls`'s plugin investigated and
   written down in `doc/plugins.md` (which wins for `.java`, or that they cannot coexist).
 - **Accept:**
   - [ ] the key-list test passes and fails on a fixture with an unknown key
   - [ ] `doc/plugins.md` and the plugin README state the minimum Claude Code version the keys need (`requestTimeout` needs v2.1.288 or later, re-checked against the current plugins reference)
-  - [ ] (owner) `claude plugin validate --strict` passes for both variants
+  - [ ] (owner) `claude plugin validate --strict` passes for the LSP plugin
   - [ ] `doc/plugins.md` states the coexistence result and how it was checked
   - [ ] runs on the bench corpus (small at least, `just bench`) and reports the metrics it affects; its correctness tests also run against the real-corpus cases that apply (BENCH-05)
 - **Impact:** distribution.
 
-#### LSP-06: ⛳ M2 gate
-- **Depends on:** LSP-03, LSP-04, LSP-05. **Model:** standard. **Size:** M. **Parallel with:** none.
-- **Cites:** plan §10.2; ver §11.
-- The M2 gate written down in `doc/eval/m2.md` with each item's test: the LSP conformance suite;
-  `initialize` latency from the benchmark; shell edits across 3 worktrees through `jfl lsp`.
+#### LSP-06: ⛳ M1 gate suite and the blocking bench gate
+- **Depends on:** LSP-03, LSP-04, LSP-05. **Model:** deep. **Size:** M. **Parallel with:** none.
+- **Cites:** plan §1.7, §10.1; ver §7.2, §10, §11; ADR 0014, ADR 0017, ADR 0031, ADR 0034.
+- The M1 gate as tests, through `jfl lsp` (ADR 0034): the envelope on 50 golden cases (protocol
+  goldens, and their LSP mapping); the completeness mutation test adding a caller in each module
+  of each multi-module fixture; 10 concurrent worktrees (linked, under `.claude/worktrees/`)
+  queried in parallel with no cross-view result and no duplicate workspace symbol; freshness under
+  shell edits (`git checkout`, `git stash`, `sed -i`, `rm`) answered correctly without `sync`; the
+  LSP conformance suite; `initialize` latency from the benchmark; the M1 rows of plan §1.7
+  measured on the corpus through `jfl lsp`, with the `jfl-bench` runners that need a product:
+  freshness lag (edit a file, time until the next request sees it) and the marginal cost of 1, 3
+  and 10 linked worktrees. `bench.yml`'s `bench-gate` becomes blocking: from here a tracked metric
+  that regresses by more than 10 % on its fixed runner class fails the run on `main`, and a red
+  `bench-gate` is fixed like red CI. It stays out of `ci.yml`, `check` and `land.sh` (fnd §9).
+  `doc/eval/m1.md` lists the gate items and their tests.
+- **Accept:**
+  - [ ] every automatable gate item has a passing test named in `doc/eval/m1.md`
+  - [ ] `bench-gate` blocks on `main` and fails a planted 20 % regression that reproduces; the M1 rows of plan §1.7 measured, with the reference-machine run (owner) where the sandbox differs
+  - [ ] (owner) a real Claude Code smoke test with shell edits across 3 worktrees using the LSP plugin
+  - [ ] (owner) the E0 task subset rerun with the LSP plugin; aggregates in `doc/eval/m1.md`
+  - [ ] runs on the bench corpus (small at least, `just bench`) and reports the metrics it affects; its correctness tests also run against the real-corpus cases that apply (BENCH-05)
+- **Impact:** none.
+
+### Lane CLI: M2, the JSON CLI carrier
+
+The second carrier (ADR 0034): the `jfl` subcommands with the full envelope, the CLI plugin with
+`bin/` and the skill, `AGENTS.md` and cloud sessions. The cards keep their IDX ids from plan v3.1
+so citations stay valid; IDX-15 is M2's gate.
+
+#### IDX-13: `jfl` CLI: subcommands, output, `--json`, exit codes, `jfl impls`
+- **Depends on:** LSP-06. **Model:** standard. **Size:** M. **Parallel with:** none.
+- **Cites:** plan §2.3, §2.4; ver §2, §4; ADR 0034.
+- `jfl-cli`: `def`, `refs`, `hover`, `sym`, `impls` (over LSP-03's implementation query), `status`, `sync`, `daemon` with `--json`,
+  `--exact-only`, `--state-dir`; `file:line:col` parsing (1-based, byte columns); compact output
+  grouped by file, `exact` first, capped with a count; exit codes of plan §2.4. `--json` goldens
+  first (`insta` JSON snapshots with redactions; the JSON Schema generated by `schemars`, committed
+  and checked). The `e2e-tests` stage joins the CI job LSP-01's `lsp-conformance` started.
+- **Reuse considered:** `clap`, `schemars`, `insta`, `assert_cmd`, `trycmd`; LSAP's compact "Showing
+  2 of 12" output as an idea.
+- **Accept:**
+  - [ ] e2e tests with `assert_cmd` over copies of the fixture projects for each subcommand and exit code
+  - [ ] `--json` goldens for every subcommand; compact output goldens for `refs` with more hits than the cap
+  - [ ] the first command against a stopped daemon spawns it and answers (e2e)
+  - [ ] `jfl impls` e2e and golden; for the same position the `--json` envelope and the LSP carrier's answer agree (a test comparing carriers)
+  - [ ] runs on the bench corpus (small at least, `just bench`) and reports the metrics it affects; its correctness tests also run against the real-corpus cases that apply (BENCH-05)
+- **Impact:** CLI (v1); `--json` schema (v1).
+
+#### IDX-14: CLI plugin, skill, `AGENTS.md` and cloud setup
+- **Depends on:** IDX-13. **Model:** standard. **Size:** M. **Parallel with:** none.
+- **Cites:** plan §2.4, §2.6; ADR 0034.
+- `plugin/cli/` (the CLI plugin: manifest, `bin/jfl` launcher, LSP-05's `.lsp.json` entry, `skills/jfl/SKILL.md` telling an
+  agent when to prefer `jfl refs --json` over grep and how to read `complete`), `AGENTS.md` at the
+  root (for agents that use `jfl`: commands, the envelope, completeness, freshness and `sync`),
+  and `doc/cloud-setup.md` with a setup-script snippet that installs a release binary for cloud
+  sessions. Every behavioural claim in the skill and `AGENTS.md` names the test that pins it.
+- **Reuse considered:** the documented Claude Code plugin schema and `claude plugin validate`;
+  LSAP's agent-shaped output and Code-Index-MCP's `index_unavailable` honesty pattern as ideas.
+- **Accept:**
+  - [ ] the plugin directory validates with the Claude Code plugin schema (a test of the manifest's keys against the documented list)
+  - [ ] every command in `AGENTS.md` and the skill runs in an e2e test
+  - [ ] (owner) the CLI plugin installed in a local Claude Code session and `jfl refs` used by an agent; the skill installed in a cloud session through the setup script
+  - [ ] runs on the bench corpus (small at least, `just bench`) and reports the metrics it affects; its correctness tests also run against the real-corpus cases that apply (BENCH-05)
+- **Impact:** distribution.
+
+#### IDX-15: ⛳ M2 gate: the CLI carrier
+- **Depends on:** IDX-14. **Model:** standard. **Size:** M. **Parallel with:** none.
+- **Cites:** plan §1.7, §10.2; ver §10, §11; ADR 0014, ADR 0031, ADR 0034.
+- The M2 gate as tests, written down in `doc/eval/m2.md`: the 50 golden envelope cases of LSP-06
+  through `jfl … --json`, agreeing with the LSP carrier; every subcommand and exit code e2e; the
+  CLI rows of plan §1.7 (`jfl def`, `hover`, `refs`, `sym` end to end) measured on the corpus and
+  tracked by `bench-gate`, which has blocked since LSP-06.
 - **Accept:**
   - [ ] every automatable gate item has a passing test named in `doc/eval/m2.md`
-  - [ ] (owner) a real Claude Code smoke test with shell edits across 3 worktrees using the LSP plugin
-  - [ ] (owner) the E0 task subset rerun with the LSP plugin; aggregates in `doc/eval/m2.md`
+  - [ ] the CLI rows of plan §1.7 measured, with the reference-machine run (owner) where the sandbox differs
+  - [ ] (owner) the E0 task subset rerun with the CLI plugin; aggregates in `doc/eval/m2.md`
+  - [ ] (owner) the cloud-session check of IDX-14 done
   - [ ] runs on the bench corpus (small at least, `just bench`) and reports the metrics it affects; its correctness tests also run against the real-corpus cases that apply (BENCH-05)
 - **Impact:** none.
 
 ### Lane PROJ: M3, project model and library APIs
 
 #### PROJ-01: Gradle model: wrap build-server-for-gradle, opt-in, fingerprint cache
-- **Depends on:** LSP-06. **Model:** deep. **Size:** L. **Parallel with:** PROJ-03.
+- **Depends on:** IDX-15. **Model:** deep. **Size:** L. **Parallel with:** PROJ-03.
 - **Cites:** plan §5.7, §11; fnd §2.4; ADR 0015, ADR 0026.
 - `ProjectModelSource` port; `java/gradle-model/`, a Tooling API client of about 200 lines that
   runs microsoft/build-server-for-gradle's `GetSourceSetsAction` (its plugin injected by an init
@@ -1388,36 +1624,43 @@ M1 (plan §10.1): syntax index, envelope, daemon, CLI and plugin. Starts after t
   - [ ] runs on the bench corpus (small at least, `just bench`) and reports the metrics it affects; its correctness tests also run against the real-corpus cases that apply (BENCH-05)
 - **Impact:** `--json` schema (additive: module fields).
 
-#### PROJ-03: Class-file and JAR reader on cafebabe
-- **Depends on:** LSP-06. **Model:** deep. **Size:** L. **Parallel with:** PROJ-01.
-- **Cites:** plan §5.8, §11; ver §4, §8; ADR 0023.
-- `LibraryIndexer` port; `jfl-adapter-classfile` on `cafebabe` 0.9 and `zip` 9: read JARs with caps
+#### PROJ-03: Class-file, JAR and `lib/modules` reader on cafebabe and ristretto_jimage
+- **Depends on:** IDX-15, FND-10. **Model:** deep. **Size:** L. **Parallel with:** PROJ-01.
+- **Cites:** plan §5.8, §11; ver §4, §8; ADR 0023 (amended 2026-11-17).
+- `LibraryIndexer` port; `jfl-adapter-classfile` on `cafebabe` (pinned to the git commit with its
+  2026-11-13 hostile-input panic fix until a release carries it, with the per-crate source
+  exception in `deny.toml` and FND-08's N4 source check, each with its reason and a comment that
+  says it is temporary and names DEP-01, which removes it; the pin is the owner's, 2026-11-17),
+  `ristretto_jimage` `=0.35.0` (`cargo add`, Rust 1.99.1 from FND-10) for the JDK
+  runtime image `lib/modules` from day one, and `zip` 9: read JARs with caps
   on entry count, sizes and compression ratio, never extracting by entry name; parse class files
   into API summaries (types, members, generic signatures with our own JVMS §4.7.9.1 parser,
   annotations, module info); our own multi-release selection by `--release`. Fixture JARs built from
   committed sources by a test; malformed inputs committed for refusal tests. The `library_indexer`
   contract suite.
-- **Reuse considered:** `cafebabe` (0BSD, forbid-unsafe) and `zip` (ADR 0023); `ristretto_classfile`
-  the runner-up; kmp-lsp's JAR indexer and ktlsp's `jar.rs` read for layout.
+- **Reuse considered:** `cafebabe` (0BSD, forbid-unsafe), `ristretto_jimage` and `zip` (ADR 0023,
+  amended); `ristretto_classfile` the runner-up; our own image reader (about 500 lines) a later
+  option; kmp-lsp's JAR indexer and ktlsp's `jar.rs` read for layout.
 - **Accept:**
   - [ ] API summaries of the fixture JARs match goldens; multi-release selection picks the right version
-  - [ ] property tests: arbitrary bytes as a class file or a zip never panic and stay within bounds; a zip bomb is refused
+  - [ ] the pinned JDK's own classes (`java.lang.Object`, `java.util.List`) read from `lib/modules` (integration test)
+  - [ ] property tests: arbitrary bytes as a class file, a zip or a jimage never panic and stay within bounds; a zip bomb is refused
   - [ ] contract suite green for fake and adapter
   - [ ] runs on the bench corpus (small at least, `just bench`) and reports the metrics it affects; its correctness tests also run against the real-corpus cases that apply (BENCH-05)
 - **Impact:** new adapter.
 
-#### PROJ-04: JDK API index from `ct.sym` and the shared library index
+#### PROJ-04: JDK API index from `lib/modules` and `ct.sym`, the shared library index
 - **Depends on:** PROJ-03. **Model:** standard. **Size:** M. **Parallel with:** PROJ-02.
-- **Cites:** plan §5.4, §5.8; fnd §6; ADR 0023.
-- JDK API summaries from `$JAVA_HOME/lib/ct.sym` for a `--release` (or `jmods`, after the 4-byte
-  header; `ristretto_jimage` for `lib/modules` only if a JDK has neither, after a toolchain bump,
-  ADR 0023), and a `LibraryStore` in
+- **Cites:** plan §5.4, §5.8; fnd §6; ADR 0023 (amended 2026-11-17).
+- JDK API summaries for the JDK's own release from `$JAVA_HOME/lib/modules` (PROJ-03's reader),
+  and for an older `--release` from `$JAVA_HOME/lib/ct.sym`, which stubs only earlier releases
+  (Temurin 24 and later ship no `jmods/`), and a `LibraryStore` in
   `jfl-adapter-store` keyed by content checksum, shared by every view, versioned like the summary
   cache.
-- **Reuse considered:** `ct.sym` read with `zip`; `ristretto_jimage` only if needed (MSRV above our
-  pin).
+- **Reuse considered:** `ct.sym` read with `zip`; `lib/modules` through `ristretto_jimage` (ADR 0023,
+  amended).
 - **Accept:**
-  - [ ] `java.util.List` and a `--release 8`-only API resolve from the JDK index of the pinned JDK (integration test)
+  - [ ] `java.util.List` from `lib/modules` and a `--release 8`-only API from `ct.sym` resolve from the JDK index of the pinned JDK (integration test)
   - [ ] two views using the same JAR share one stored summary (test)
   - [ ] runs on the bench corpus (small at least, `just bench`) and reports the metrics it affects; its correctness tests also run against the real-corpus cases that apply (BENCH-05)
 - **Impact:** cache format (library index v1).
@@ -1479,22 +1722,25 @@ M1 (plan §10.1): syntax index, envelope, daemon, CLI and plugin. Starts after t
   - [ ] runs on the bench corpus (small at least, `just bench`) and reports the metrics it affects; its correctness tests also run against the real-corpus cases that apply (BENCH-05)
 - **Impact:** none (internal).
 
-#### SEM-04: `javac` worker (forked core, scip-java plugin) and pool
+#### SEM-04: `javac` worker (our own, scip-java plugin) and pool
 - **Depends on:** PROJ-02, DEC-05. **Model:** deep. **Size:** L. **Parallel with:** SEM-01.
-- **Cites:** plan §3.1, §3.4, §5.4, §14; ver §5; ADR 0027.
-- `java/javac-worker/` hardened from EVAL-10's fork of java-language-server's compiler core (the
-  long-lived `JavacTask` with body erasure, `-proc:none -implicit:none`, `-sourcepath`, scip-java's
-  plugin for attribution, length-prefixed JSON over stdin and stdout, cancellation) and `Compiler`
+- **Cites:** plan §3.1, §3.3, §3.4, §5.4, §14; ver §5, §6.4; ADR 0036.
+- `java/javac-worker/` hardened from EVAL-10's spike, our own code (one javac context kept warm,
+  the fresh-compiler fallback, body blanking of dependency sources if EVAL-10 kept it, class
+  folders from earlier builds, `-proc:none -implicit:none` with processors opt-in per repository
+  and measured, `-sourcepath`, scip-java's plugin for attribution, length-prefixed JSON over stdin
+  and stdout, cancellation), tested on JDK 17, 21 and 25 in CI, and `Compiler`
   port; `jfl-adapter-javac`: a pool per `EnvironmentKey` through `jfl-process`'s long-lived mode,
   lazy spawn, idle eviction, a cap with LRU eviction, restart on crash with backoff, version-tagged
   jobs. An ADR (reserved number) decides how the worker is built and launched (source-file launch or
   a prebuilt jar). The `compiler` contract suite.
-- **Reuse considered:** the forked compiler core and scip-java's plugin (ADR 0027); ECJ kept only if
-  E3 favoured it.
+- **Reuse considered:** our own worker and scip-java's plugin (ADR 0036); ECJ kept only as E3's
+  comparison arm.
 - **Accept:**
   - [ ] contract suite green for the scripted fake and the real worker (pinned JDK); a broken fake fails it
   - [ ] killing a worker mid-compile restarts it and the next job succeeds (integration test)
-  - [ ] the pool never exceeds its cap (test on fake clock)
+  - [ ] the pool never exceeds its cap (test on fake clock); a `proptest-state-machine` test of the pool (spawn, evict, crash, restart) against a reference machine
+  - [ ] the worker's tests pass on JDK 17, 21 and 25, the forced reuse failure falling back to a fresh compiler
   - [ ] runs on the bench corpus (small at least, `just bench`) and reports the metrics it affects; its correctness tests also run against the real-corpus cases that apply (BENCH-05)
 - **Impact:** new adapter; Java source in the repository.
 
@@ -1506,8 +1752,8 @@ M1 (plan §10.1): syntax index, envelope, daemon, CLI and plugin. Starts after t
   processor-generated members suppressed and marked in hover, no semantic diagnostics without a
   classpath (and `status` says why), `jfl diag <file>` waiting for the current version with a
   deadline.
-- **Reuse considered:** scip-java's plugin and the forked worker; IntelliJ's processor discovery as
-  an idea.
+- **Reuse considered:** scip-java's plugin and our own worker (ADR 0036); IntelliJ's processor
+  discovery as an idea.
 - **Accept:**
   - [ ] the Lombok and MapStruct fixtures produce zero errors with generated sources missing; a real type error in the same files is reported
   - [ ] on the fineract corpus (BENCH-06), semantic diagnostics report no error on a Lombok-generated or MapStruct-generated member with generated sources missing (a `bench.yml` or `(owner)` run; counts only in the report)
@@ -1531,7 +1777,7 @@ M1 (plan §10.1): syntax index, envelope, daemon, CLI and plugin. Starts after t
 
 #### SEM-08: SCIP baseline import (M6 folded in)
 - **Depends on:** SEM-06. **Model:** deep. **Size:** M. **Parallel with:** SEM-05.
-- **Cites:** plan §10.4, §10.6; ver §7.1; ADR 0009, ADR 0027.
+- **Cites:** plan §10.4, §10.6; ver §7.1; ADR 0009, ADR 0036.
 - If DEC-04 keeps it: import a SCIP index produced by `scip-java` outside the request path as a
   per-commit baseline the resolver falls back on, with its staleness against the view tracked per
   file; `exact` evidence names the baseline; `status` shows its commit and coverage. If DEC-04
@@ -1646,3 +1892,26 @@ M1 (plan §10.1): syntax index, envelope, daemon, CLI and plugin. Starts after t
   - [ ] (owner) tag pushed and the draft release published
   - [ ] runs on the bench corpus (small at least, `just bench`) and reports the metrics it affects; its correctness tests also run against the real-corpus cases that apply (BENCH-05)
 - **Impact:** distribution.
+
+### Lane DEP: pinned-dependency follow-ups
+
+Cards that undo a temporary pin once upstream releases what we need. The orchestrator checks
+pinned git dependencies for a release at every ⛳ checkpoint ([`sdlc.md`](sdlc.md) §6) and
+dispatches the card when its trigger holds.
+
+#### DEP-01: Switch cafebabe from the git pin to the first release with the 2026-11-13 hostile-input fix
+- **Depends on:** PROJ-03. **Trigger:** a `cafebabe` release newer than 0.9.x on crates.io whose
+  source contains the commit PROJ-03 pinned (the 2026-11-13 hostile-input panic fix). **Model:**
+  light. **Size:** S. **Parallel with:** any.
+- **Cites:** fnd §3.3 (N4), §7.4; ADR 0023 (amended 2026-11-17).
+- The owner's direction (2026-11-17): leave the git pin as soon as a release carries the fix.
+  `cargo add cafebabe@<that release>` in `jfl-adapter-classfile`, replacing the git source;
+  remove the per-crate git-source exception (and its DEP-01 comment) from `deny.toml` and from
+  FND-08's N4 source check; the commit names the release and how it was checked to contain the
+  fix.
+- **Reuse considered:** none needed: a source change.
+- **Accept:**
+  - [ ] `jfl-adapter-classfile`'s `Cargo.toml` names a crates.io version of `cafebabe`, and `Cargo.lock` has no git source for it
+  - [ ] the `deny.toml` git-source exception for `cafebabe` and its N4 counterpart are removed; `cargo deny check sources` and the architecture stage pass without them
+  - [ ] the class-file fuzz target and the hostile-input property tests of PROJ-03 still pass, the input that triggered the 2026-11-13 panic among them
+- **Impact:** dependency graph.

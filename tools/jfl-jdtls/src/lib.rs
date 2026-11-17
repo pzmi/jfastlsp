@@ -1,5 +1,5 @@
-//! jdtls behind a multiplexing proxy: the kill-criterion baseline and the fallback product
-//! (ADR 0028); imports no production crate. Role: tool only, independent.
+//! jdtls behind a multiplexing proxy: the kill-criterion baseline, for testing and comparison
+//! only (ADR 0028); imports no production crate. Role: tool only, independent.
 //!
 //! `jfl-jdtls lsp` is a stdio proxy that every LSP client (Claude Code and each subagent)
 //! starts; it hands its stream to a per-user daemon that runs **one jdtls per worktree root**

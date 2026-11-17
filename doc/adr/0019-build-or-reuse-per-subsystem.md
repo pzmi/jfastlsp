@@ -4,7 +4,7 @@ Date: 2026-11-16
 
 ## Status
 
-Proposed (orchestrator default; owner confirms at the FND checkpoint, DEC-07).
+Accepted (owner, 2026-11-17); amended 2026-11-17.
 
 ## Context
 
@@ -41,7 +41,8 @@ versions and licences; the subsystems:
 | Engineering foundation | Reuse | just, mise, cargo-deny, `no_std`, adrs, zizmor, pinact, diff-cover, quint-connect | 0030 |
 
 Every task card that adds a subsystem carries a **`Reuse considered:`** line naming what was
-weighed. A hand-built subsystem that has a maintained alternative needs an ADR saying why.
+weighed. A hand-built subsystem that has a maintained alternative needs a recorded reason
+(commit message or ADR when the context is worth keeping).
 Licences stay permissive in the binary: GPL code (Serena's application) is never linked; EPL-2.0
 jdtls runs only as a separate process (ADR 0028).
 
@@ -60,3 +61,11 @@ and pinned exactly where an upstream breaks on minors.
 - Fork [kmp-lsp](https://github.com/Hessesian/kmp-lsp) (MIT, Rust) as the product: no worktree
   handling and Kotlin-first; kept as an E0 arm, an E2 candidate and the plan §13 fallback if it
   converges on this niche.
+
+## Amended 2026-11-17 (orchestrator, recording the owner's 0028 decision): the jdtls baseline is not a fallback
+
+The rows above name jdtls behind our proxy as the "baseline and fallback" (0028). The owner
+decided on 2026-11-17 that it is for testing and comparison only, never a shipped product (ADR
+0028, amended); the javac worker is now our own (ADR 0036, superseding 0027), and the
+foundation's tools move to a ported `cargo xtask` (ADR 0035, superseding 0030). The table is
+kept as the survey recorded it.

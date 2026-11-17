@@ -4,7 +4,7 @@ Date: 2026-11-16
 
 ## Status
 
-Proposed.
+Superseded by [0034](0034-two-carriers-lsp-first-cli-second.md) (2026-11-17, the owner's decision at the FND checkpoint).
 
 ## Context
 

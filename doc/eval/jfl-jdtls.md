@@ -2,8 +2,10 @@
 
 `tools/jfl-jdtls` (EVAL-11, ADR 0028) is the kill-criterion baseline of plan §1.3 and an arm of
 E0 and E4 (plan §9.2): Eclipse JDT LS run the way a careful user could run it, so the comparison
-with jfastlsp is like with like. It is a tool crate and imports no production crate (fnd §2.7). If
-DEC-02 stops the project, it is the deliverable.
+with jfastlsp is like with like. It is a tool crate and imports no production crate (fnd §2.7). It
+is for testing and comparison only, never a shipped product: if jfastlsp cannot beat it on speed
+with honest envelopes, the project stops or is rescoped (plan §1.3; ADR 0028, amended
+2026-11-17).
 
 The stock `jdtls-lsp` plugin is not that baseline: it starts a bare `jdtls` with no `-data`, so
 the launcher keys the workspace on the working directory's *basename* and worktrees named alike

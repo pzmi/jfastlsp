@@ -50,4 +50,4 @@ quick` the faster loop, and CI runs the same stages. See [CONTRIBUTING.md](CONTR
 
 ## Licence
 
-Dual licensed under [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE), at your option.
+Licensed under the [MIT licence](LICENSE-MIT) ([ADR 0033](doc/adr/0033-licence-mit-only.md)).

@@ -4,7 +4,8 @@ Date: 2026-11-16
 
 ## Status
 
-Superseded by [0030](0030-foundation-from-maintained-tools.md) (2026-11-16).
+Superseded by [0030](0030-foundation-from-maintained-tools.md) (2026-11-16); its direction restored by [0035](0035-port-mayfly-xtask-piece-by-piece.md)
+(2026-11-17).
 
 ## Context
 

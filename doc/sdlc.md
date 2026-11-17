@@ -12,17 +12,19 @@ at [`../CONTRIBUTING.md`](../CONTRIBUTING.md).
 A task in [`tasks.md`](tasks.md) is ready to start when:
 
 - every task it depends on has a commit on `main` (subjects are `<ID>: <summary>`, so
-  `git log --oneline main | grep " <dep>:"` finds it), a `DEC-` dependency has its ADR in the
-  tree **with the status `Accepted (owner, …)`** (an agent's draft ADR, committed as `Proposed`
-  under the `DEC-` subject, does not count: `grep -A2 '^## Status' doc/adr/NNNN-*.md`), and the
-  task has no commit of its own;
+  `git log --oneline main | grep " <dep>:"` finds it), a `DEC-` dependency counts when it is
+  **recorded as decided by the owner**: its ADR's status reads `Accepted (owner, …)`, or, where
+  no ADR was needed (ADR 0001, amended), its card is ticked and marked `Decided:` with the date
+  (an agent's draft ADR, committed as `Proposed` under the `DEC-` subject, does not count:
+  `grep -A2 '^## Status' doc/adr/NNNN-*.md`), and the task has no commit of its own;
 - its card states what is built, the sections to read (`Cites:`), the acceptance items and
   which of them are `(owner)`;
 - the observable behaviour, the invariants, the crates it touches, the threat model (when
   untrusted input, processes or files change), the test levels, the model impact, the protocol
   impact and any compatibility effect are stated or follow from the cited sections; a large task
   has an ADR or a design note first;
-- a new dependency, edge or authority has its architecture policy and ADR planned before code.
+- a new dependency, edge or authority has its architecture policy planned before code, and an
+  ADR only if it is an important decision whose context is worth recalling (ADR 0001, amended).
 
 A card whose text contradicts a decision in the Decisions table is not ready until the
 contradiction is fixed; the Decision wins.
@@ -122,12 +124,16 @@ tracked metric that regresses by more than 10 % (plan §1.7, fnd §9).
 - ⛳ tasks (listed in `tasks.md`) stop their lane once landed and green. The orchestrator runs
   `/review` over the range since the newest `checkpoint-*` tag, then an adversarial second review
   aimed at the checkpoint's named risks, has HIGH and MEDIUM findings fixed as a follow-up commit,
-  tags `checkpoint-<ID>` locally, reports to the owner and waits for a go.
+  tags `checkpoint-<ID>` locally, reports to the owner and waits for a go. At every checkpoint
+  the orchestrator also checks pinned git dependencies for a release (today: `cafebabe`, DEP-01)
+  and dispatches the switch card when one has the fix.
 - Owner decisions are batched into each checkpoint report: Proposed ADRs to accept or override,
-  `(owner)` acceptance items pending, `DEC-` tasks ready for a decision. Only ADRs 0001–0004 and 0032
-  are Accepted (owner); every other record, including the licence (0005), the platforms (0006), Quint (0007),
-  no event sourcing (0008), phase 0 (0009) and the reuse decisions (0019–0031), is an orchestrator
-  default the owner confirms at the FND checkpoint (DEC-07).
+  `(owner)` acceptance items pending, `DEC-` tasks ready for a decision. The owner decided every
+  record at the FND checkpoint on 2026-11-17 (DEC-07): all are Accepted (owner) except the
+  superseded 0005, 0011–0013, 0027 and 0030; a record written since is Proposed until the next
+  checkpoint.
+- **Skills stay repo-local** (owner, 2026-11-17, DEC-08): `/work`, `/orchestrate` and `/review`
+  live in this repository's `.claude/skills/`; a shared plugin is deferred.
 - **`DEC-` tasks** record an owner decision as an ADR. An agent may prepare the inputs (a
   criteria sheet, a memo with the numbers, a draft ADR marked Proposed); only the owner decides,
   and the ADR's status says so.
