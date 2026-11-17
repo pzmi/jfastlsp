@@ -66,3 +66,44 @@ reproduce in a second run before the job fails. In-process suites gate on instru
 (`gungraun` or cachegrind) where available, which do not depend on a noisy neighbour, and report
 wall time beside them. Local and sandbox runs report and never gate. BENCH-04 builds it; IDX-15
 makes it blocking.
+
+## Amended 2026-11-17 (BENCH-02): what the harness links, and what it is built with
+
+`tools/jfl-bench` landed with these consequences for the policy files; each is the smallest
+entry that lets it build, and each says here why (fnd §3.5).
+
+- **The E1 pipeline is in the harness, not borrowed from the product.** The `e1` suite runs the
+  archived spike's walk, read, blake3, tree-sitter parse and declaration walk in process, so
+  `jfl-bench` links `tree-sitter` and `tree-sitter-java-orchard`, and `deny.toml` names it among
+  their `wrappers`. The harness imports no production crate (fnd §2.1: a judge that shares code
+  with the judged cannot catch its mistakes); the product's own indexer (IDX-07) is measured
+  beside the spike's numbers, not through them.
+- **`foldhash` (Zlib) is admitted by a per-crate licence exception.** tree-sitter 0.27.2 declares
+  `serde_json` with `preserve_order` (indexmap, hashbrown, foldhash) in its own
+  `[build-dependencies]`, unconditionally; the crate is a host build dependency and is never
+  linked, but `cargo deny` walks it. Zlib is permissive; the exception names the one crate, not
+  the licence, so a second Zlib crate still fails `licenses` until someone reads it.
+- **Eight build scripts are admitted by checksum** (`[bans.build] bypass`), each read at the
+  pinned version: blake3, tree-sitter and tree-sitter-java-orchard compile their vendored C or
+  assembly with the `cc` crate and set cfgs; tree-sitter-language emits wasm header paths only
+  for a wasm target; crossbeam-deque, crossbeam-epoch and crossbeam-utils set sanitizer and
+  no-atomic cfgs; rayon-core only declares `links`. The task that adds `tree-sitter` to
+  `jfl-adapter-java` (IDX-07) reuses these reviews and says so.
+- **Tools:** hyperfine 2.0.0 (times a command end to end, and reports each run's peak RSS) and ripgrep 15.2.0 (the floor arm) are
+  pinned in `mise.toml` and `mise.lock`; a release that changes either changes the baseline, so
+  a bump is its own commit with a re-run.
+- **A build profile, `bench-tool`** (`inherits = "release"`, thin LTO, one codegen unit): the
+  spike's release settings, without which the 4-thread full index is 6–11 % slower
+  (doc/bench/README.md). Only `just bench` builds with it.
+- **Peak RSS comes from the tools, not a sampler on the measured path:** hyperfine 2.0.0 reports
+  each run's `memory_peak_resident` (the export is read as `schema_version` 2 and any other is
+  refused), and the in-process suite reads its own `VmHWM` at exit (Linux). `jfl-bench sample`,
+  a `/proc` spin loop, remains a debugging command only: it competes for a core. Cold runs use
+  hyperfine's `--prepare` (a page-cache drop) so warm and cold share one method.
+- **Series are keyed by query slot** (`q00`...): a history key never names a corpus identifier, and
+  a change of pin or seed does not rename series; the report carries only a digest per slot. The
+  walk and `rg` ignore every ignore file outside the checkout, so the file set is the pinned
+  corpus's on any machine.
+- **divan and criterion are not added yet.** The card asks for the in-process convention, not a
+  benchmark with no subject; `doc/bench/README.md` writes the convention and the first product
+  task with a hot path adds the dependency and the first `benches/` target.

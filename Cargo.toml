@@ -61,3 +61,11 @@ large_futures = "deny"
 disallowed_macros = "deny"
 disallowed_methods = "deny"
 disallowed_types = "deny"
+
+# The profile the benchmark harness is built with (`just bench`, BENCH-02): the settings of the
+# archived E1 spike (thin LTO, one codegen unit), which its reproduced numbers depend on
+# (doc/bench/README.md). `cargo build --profile bench-tool -p jfl-bench`; nothing else uses it.
+[profile.bench-tool]
+inherits = "release"
+lto = "thin"
+codegen-units = 1

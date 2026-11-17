@@ -1,0 +1,19 @@
+# The ripgrep floor (ADR 0031, plan §1.7): what answering a name query costs with no index at
+# all. Every product answer is compared to this; BENCH-03 adds jdtls and kmp-lsp beside it.
+name = "rg-floor"
+description = "ripgrep answering whole-word name queries over the corpus's Java files, end to end."
+kind = "rg-floor"
+
+[run]
+warmup = 3
+runs = 20
+cold_runs = 3
+seed = 1
+
+[queries]
+# The E1 spike's floor: `rg -c -t java '\bString\b'`.
+fixed = ["String"]
+# Type names picked from the corpus by seed: the same names on every machine for one pin.
+picked = 19
+# The spike's exact command, `rg -c -t java '\bString\b' .` in the checkout (series spike00).
+spike_form = ["\\bString\\b"]

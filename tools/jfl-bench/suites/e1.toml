@@ -1,0 +1,16 @@
+# The E1 parse spike (doc/bench-corpus.md), rewritten as a suite: a `.gitignore`-aware walk, then
+# per file read, blake3, tree-sitter parse and a declaration walk, on a rayon pool with one
+# parser per thread. Stages are cumulative, as in the spike.
+name = "e1"
+description = "The E1 parse pipeline in process: index time per stage, files per second, per-file latency and RSS."
+kind = "e1"
+
+[run]
+warmup = 1
+runs = 3
+cold_runs = 3
+
+[e1]
+threads = [1, 4]
+stages = ["read", "hash", "parse", "extract"]
+cold_stages = ["read", "extract"]

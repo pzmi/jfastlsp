@@ -68,6 +68,12 @@ jfl-architecture = { cargo_metadata = ["default"], serde = ["default", "derive"]
 # process-group kill that std lacks.
 jfl-jdtls = { rustix = ["net", "process", "std"], serde = ["default", "derive"], serde_json = ["default", "raw_value"], sha1_smol = ["default"] }
 
+# jfl-bench (BENCH-02, ADR 0031; ADR 0031 amended 2026-11-17): the harness. ignore (the
+# .gitignore-aware walk), rayon (the pool), blake3, tree-sitter and the orchard grammar (the E1
+# pipeline's stages) reproduce the archived spike; toml reads suites, serde and serde_json write
+# results. The tree-sitter crates are wrapped to jfl-bench in deny.toml for the same reason.
+jfl-bench = { blake3 = ["default"], ignore = ["default"], rayon = ["default"], serde = ["default", "derive"], serde_json = ["default"], toml = ["default"], tree-sitter = ["default"], tree-sitter-java-orchard = ["default"] }
+
 [external.dev]
 # The architecture test's synthetic `cargo metadata` JSON (tests/rules.rs).
 jfl-architecture = { serde_json = ["default"] }

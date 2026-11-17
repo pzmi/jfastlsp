@@ -29,6 +29,16 @@ allow = [
 # The allowlist is the plan's, not the graph's: most are not encountered yet.
 unused-allowed-license = "allow"
 
+# A per-crate exception, with its ADR (fnd §7.4). foldhash (Zlib, a permissive licence) is in the
+# graph only as a host build dependency: tree-sitter 0.27.2 declares `serde_json` with the
+# `preserve_order` feature (indexmap, hashbrown, foldhash) in its own [build-dependencies],
+# unconditionally, so no feature choice of ours avoids it; it is never linked into a binary
+# (`cargo tree -e normal -i foldhash` is empty). ADR 0031, amended 2026-11-17 (BENCH-02); IDX-07
+# meets the same crate through jfl-adapter-java.
+exceptions = [
+  { allow = ["Zlib"], crate = "foldhash" },
+]
+
 [bans]
 multiple-versions = "warn"
 wildcards = "deny"
@@ -45,8 +55,8 @@ deny = [
   { crate = "tokio", wrappers = ["jfl-composition", "jfl-adapter-ipc", "tokio-util"], reason = "the async runtime is daemon-side only: composition and the IPC adapter (plan §16.2)" },
   { crate = "tokio-util", wrappers = ["jfl-composition", "jfl-adapter-ipc"], reason = "daemon-side only (plan §16.2)" },
   { crate = "rusqlite", wrappers = ["jfl-adapter-store"], reason = "storage is the store adapter's (ADR 0025)" },
-  { crate = "tree-sitter", wrappers = ["jfl-adapter-java", "tree-sitter-java-orchard"], reason = "the Java grammar is the Java adapter's (ADR 0022)" },
-  { crate = "tree-sitter-java-orchard", wrappers = ["jfl-adapter-java"], reason = "the Java grammar is the Java adapter's (ADR 0022)" },
+  { crate = "tree-sitter", wrappers = ["jfl-adapter-java", "jfl-bench", "tree-sitter-java-orchard"], reason = "the Java grammar is the Java adapter's (ADR 0022); the bench harness runs the E1 parse pipeline on its own (ADR 0031, amended 2026-11-17)" },
+  { crate = "tree-sitter-java-orchard", wrappers = ["jfl-adapter-java", "jfl-bench"], reason = "the Java grammar is the Java adapter's (ADR 0022); the bench harness runs the E1 parse pipeline on its own (ADR 0031, amended 2026-11-17)" },
   { crate = "lsp-server", wrappers = ["jfl-adapter-lsp", "jfl-adapter-ipc"], reason = "LSP framing lives in the LSP and IPC adapters (ADR 0020, ADR 0021)" },
   { crate = "gen-lsp-types", wrappers = ["jfl-adapter-lsp"], reason = "LSP types are the LSP adapter's (ADR 0020)" },
   { crate = "anyhow", wrappers = ["jfl-cli", "jfl-architecture", "jfl-oracle", "jfl-eval", "jfl-jdtls", "jfl-bench"], reason = "anyhow only in binaries and tools (ARCH-anyhow-in-library)" },
@@ -102,6 +112,28 @@ bypass = [
   { crate = "rustix", build-script = "f7609b919173e7121493266d0f89db724a1e47bb105ebd05397f869639603eec" },
   # libc: rustc version probe and target cfgs, cfgs only; rustix's libc backend (macOS).
   { crate = "libc", build-script = "e70593206df4d2a3138eab463567e0ae8f91c1bea565da4ab5370ea8986840ac" },
+  # BENCH-02 (ADR 0031, amended 2026-11-17): jfl-bench reuses the serde and serde_json entries above
+  # and adds the E1 pipeline's crates. Each script below was read at the version pinned in Cargo.lock.
+  # blake3: compiles its own vendored C and assembly (SSE/AVX/NEON) with the `cc` crate and sets
+  # cfgs by target; no network, nothing outside the crate directory (it removes only its own stale
+  # Windows-gnu .asm copies); jfl-bench's closure.
+  { crate = "blake3", build-script = "9ec9b359db417071b525a459a191b810e3dd79b9708ae66be4085b2efd2ba7d9" },
+  # crossbeam-deque and crossbeam-epoch (the same file): a sanitizer cfg from TARGET; rayon's and
+  # ignore's closure.
+  { crate = "crossbeam-deque", build-script = "c8c35fc536a2e6481549bc13979293cb51244cd9c72d4ed9e35c22a1d70fa9ae" },
+  { crate = "crossbeam-epoch", build-script = "c8c35fc536a2e6481549bc13979293cb51244cd9c72d4ed9e35c22a1d70fa9ae" },
+  # crossbeam-utils: a no-atomic cfg from a fixed list of embedded-target names (it includes
+  # no_atomic.rs and build-common.rs, read too) and the sanitizer cfg; rayon's closure.
+  { crate = "crossbeam-utils", build-script = "79cc5363313f77ab76e2de4779e384c672a747fbcd4b96647a79286568714807" },
+  # rayon-core: `links = "rayon-core"` only, prints rerun-if-changed; rayon's closure.
+  { crate = "rayon-core", build-script = "fa31cb198b772600d100a7c403ddedccef637d2e6b2da431fa7f02ca41307fc6" },
+  # tree-sitter: compiles the vendored lib.c with `cc` (wasm and bindgen paths are off); jfl-bench's
+  # closure, and jfl-adapter-java's later (IDX-07 says so when it adds the crate).
+  { crate = "tree-sitter", build-script = "43ca3c9ae1aa23c926c598b62f317edd7d731282e32f071f3cea88d24f450469" },
+  # tree-sitter-java-orchard: compiles the vendored parser.c and scanner.c with `cc`, sets query cfgs.
+  { crate = "tree-sitter-java-orchard", build-script = "1c8e689d24768981ddd36565e57655216cbe63c9117fc53d03d80973b7f74006" },
+  # tree-sitter-language: emits wasm header paths only when TARGET is wasm32-unknown.
+  { crate = "tree-sitter-language", build-script = "6d00d018c0917c1561428210e5cf17e87425efd0c989c29fae2c190c0d9b8ad2" },
 ]
 
 [sources]

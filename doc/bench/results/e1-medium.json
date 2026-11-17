@@ -1,0 +1,651 @@
+{
+  "schema": 1,
+  "suite": "e1",
+  "corpus": {
+    "size": "medium",
+    "repo": "spring-framework",
+    "commit": "4cb62d893e09e23791d661e8d9b35aedee7006d0",
+    "java_files": 9294
+  },
+  "machine": {
+    "cpu_model": "Intel(R) Xeon(R) Processor @ 2.30GHz",
+    "logical_cpus": 4,
+    "ram_mib": 16087,
+    "os": "Ubuntu 24.04.5 LTS",
+    "kernel": "Linux 6.18.44-fc-v553",
+    "arch": "x86_64",
+    "disk": {
+      "filesystem": "/dev/vda",
+      "size_gib": 251
+    },
+    "tools": {
+      "git": "git version 2.43.0",
+      "hyperfine": "hyperfine 2.0.0",
+      "rg": "ripgrep 15.2.0 (rev e89fff89ac)"
+    },
+    "commit": "544e88f1250764de20d38cde6c07e4a7893a1157",
+    "dirty": false
+  },
+  "build": {
+    "profile": "bench-tool",
+    "debug_assertions": false,
+    "toolchain": "1.97.0"
+  },
+  "queries": [],
+  "config": {
+    "runs": 3,
+    "warmup": 1,
+    "seed": 1
+  },
+  "metrics": [
+    {
+      "name": "e1/medium/t1/read/work_ms",
+      "unit": "ms",
+      "better": "smaller",
+      "stat": "median of 3 runs",
+      "value": 59.827025,
+      "runs": [
+        70.46571899999999,
+        59.827025,
+        58.175299
+      ],
+      "spread_pct": 20.543257833729808
+    },
+    {
+      "name": "e1/medium/t1/read/total_ms",
+      "unit": "ms",
+      "better": "smaller",
+      "stat": "median of 3 runs",
+      "value": 114.76691,
+      "runs": [
+        128.482898,
+        102.064081,
+        114.76691
+      ],
+      "spread_pct": 23.019541956823623
+    },
+    {
+      "name": "e1/medium/t1/hash/work_ms",
+      "unit": "ms",
+      "better": "smaller",
+      "stat": "median of 3 runs",
+      "value": 75.44310999999999,
+      "runs": [
+        78.89275799999999,
+        72.837564,
+        75.44310999999999
+      ],
+      "spread_pct": 8.026172303872398
+    },
+    {
+      "name": "e1/medium/t1/hash/total_ms",
+      "unit": "ms",
+      "better": "smaller",
+      "stat": "median of 3 runs",
+      "value": 121.269174,
+      "runs": [
+        121.269174,
+        118.413145,
+        121.976839
+      ],
+      "spread_pct": 2.9386643632948286
+    },
+    {
+      "name": "e1/medium/t1/parse/work_ms",
+      "unit": "ms",
+      "better": "smaller",
+      "stat": "median of 3 runs",
+      "value": 3555.4508509999996,
+      "runs": [
+        3555.4508509999996,
+        3637.301863,
+        3433.46625
+      ],
+      "spread_pct": 5.733045443243007
+    },
+    {
+      "name": "e1/medium/t1/parse/total_ms",
+      "unit": "ms",
+      "better": "smaller",
+      "stat": "median of 3 runs",
+      "value": 3598.920527,
+      "runs": [
+        3598.920527,
+        3717.35269,
+        3476.58006
+      ],
+      "spread_pct": 6.690134672151387
+    },
+    {
+      "name": "e1/medium/t1/extract/work_ms",
+      "unit": "ms",
+      "better": "smaller",
+      "stat": "median of 3 runs",
+      "value": 4117.879935999999,
+      "runs": [
+        4086.241674,
+        4117.879935999999,
+        4140.315178
+      ],
+      "spread_pct": 1.3131394028094354
+    },
+    {
+      "name": "e1/medium/t1/extract/total_ms",
+      "unit": "ms",
+      "better": "smaller",
+      "stat": "median of 3 runs",
+      "value": 4157.924075000001,
+      "runs": [
+        4132.261848,
+        4157.924075000001,
+        4181.436213
+      ],
+      "spread_pct": 1.1826662563577437
+    },
+    {
+      "name": "e1/medium/t1/extract/list_ms",
+      "unit": "ms",
+      "better": "smaller",
+      "stat": "median of 3 runs",
+      "value": 41.120718,
+      "runs": [
+        46.019777999999995,
+        40.043264,
+        41.120718
+      ],
+      "spread_pct": 14.534070149261485
+    },
+    {
+      "name": "e1/medium/t1/extract/files_per_s",
+      "unit": "files/s",
+      "better": "larger",
+      "stat": "median of 3 runs",
+      "value": 2256.986639835825,
+      "runs": [
+        2274.461654859037,
+        2256.986639835825,
+        2244.7566430170937
+      ],
+      "spread_pct": 1.3161359184697756
+    },
+    {
+      "name": "e1/medium/t1/extract/mb_per_s",
+      "unit": "MB/s",
+      "better": "larger",
+      "stat": "median of 3 runs",
+      "value": 13.047692219067168,
+      "runs": [
+        13.148715687049696,
+        13.047692219067168,
+        12.976990323223166
+      ],
+      "spread_pct": 1.3161359184697834
+    },
+    {
+      "name": "e1/medium/t1/extract/file_p50_ms",
+      "unit": "ms",
+      "better": "smaller",
+      "stat": "median of 3 runs",
+      "value": 0.201968,
+      "runs": [
+        0.200895,
+        0.202443,
+        0.201968
+      ],
+      "spread_pct": 0.766458052760844
+    },
+    {
+      "name": "e1/medium/t1/extract/file_p95_ms",
+      "unit": "ms",
+      "better": "smaller",
+      "stat": "median of 3 runs",
+      "value": 1.564299,
+      "runs": [
+        1.570432,
+        1.553065,
+        1.564299
+      ],
+      "spread_pct": 1.110209748903511
+    },
+    {
+      "name": "e1/medium/t1/extract/file_max_ms",
+      "unit": "ms",
+      "better": "smaller",
+      "stat": "median of 3 runs",
+      "value": 44.611549,
+      "runs": [
+        44.762191,
+        44.611549,
+        42.73554
+      ],
+      "spread_pct": 4.542884175575256
+    },
+    {
+      "name": "e1/medium/t1/extract/rss_peak_mib",
+      "unit": "MiB",
+      "better": "smaller",
+      "stat": "median of 3 runs",
+      "value": 35.08203125,
+      "runs": [
+        35.02734375,
+        35.1015625,
+        35.08203125
+      ],
+      "spread_pct": 0.21155773299187172
+    },
+    {
+      "name": "e1/medium/t1/extract/rss_steady_mib",
+      "unit": "MiB",
+      "better": "smaller",
+      "stat": "median of 3 runs",
+      "value": 35.08203125,
+      "runs": [
+        35.02734375,
+        35.1015625,
+        35.08203125
+      ],
+      "spread_pct": 0.21155773299187172
+    },
+    {
+      "name": "e1/medium/t1/extract/files",
+      "unit": "count",
+      "better": "info",
+      "stat": "count",
+      "value": 9294.0,
+      "runs": [
+        9294.0
+      ],
+      "spread_pct": null
+    },
+    {
+      "name": "e1/medium/t1/extract/err_files",
+      "unit": "count",
+      "better": "info",
+      "stat": "count",
+      "value": 0.0,
+      "runs": [
+        0.0
+      ],
+      "spread_pct": null
+    },
+    {
+      "name": "e1/medium/t1/extract/failed_files",
+      "unit": "count",
+      "better": "info",
+      "stat": "count",
+      "value": 0.0,
+      "runs": [
+        0.0
+      ],
+      "spread_pct": null
+    },
+    {
+      "name": "e1/medium/t1/extract/decls",
+      "unit": "count",
+      "better": "info",
+      "stat": "count",
+      "value": 237869.0,
+      "runs": [
+        237869.0
+      ],
+      "spread_pct": null
+    },
+    {
+      "name": "e1/medium/t4/read/work_ms",
+      "unit": "ms",
+      "better": "smaller",
+      "stat": "median of 3 runs",
+      "value": 17.501149,
+      "runs": [
+        16.572738,
+        17.501149,
+        22.36949
+      ],
+      "spread_pct": 33.12212243893242
+    },
+    {
+      "name": "e1/medium/t4/read/total_ms",
+      "unit": "ms",
+      "better": "smaller",
+      "stat": "median of 3 runs",
+      "value": 62.959665,
+      "runs": [
+        57.582042,
+        65.199604,
+        62.959665
+      ],
+      "spread_pct": 12.099114568033347
+    },
+    {
+      "name": "e1/medium/t4/hash/work_ms",
+      "unit": "ms",
+      "better": "smaller",
+      "stat": "median of 3 runs",
+      "value": 25.628693,
+      "runs": [
+        27.876022,
+        25.628693,
+        23.842112
+      ],
+      "spread_pct": 15.73981942816982
+    },
+    {
+      "name": "e1/medium/t4/hash/total_ms",
+      "unit": "ms",
+      "better": "smaller",
+      "stat": "median of 3 runs",
+      "value": 71.658999,
+      "runs": [
+        70.285609,
+        86.09508000000001,
+        71.658999
+      ],
+      "spread_pct": 22.06208741486888
+    },
+    {
+      "name": "e1/medium/t4/parse/work_ms",
+      "unit": "ms",
+      "better": "smaller",
+      "stat": "median of 3 runs",
+      "value": 924.092208,
+      "runs": [
+        976.417266,
+        924.092208,
+        920.942855
+      ],
+      "spread_pct": 6.00312506909484
+    },
+    {
+      "name": "e1/medium/t4/parse/total_ms",
+      "unit": "ms",
+      "better": "smaller",
+      "stat": "median of 3 runs",
+      "value": 1010.954888,
+      "runs": [
+        1017.079836,
+        981.722526,
+        1010.954888
+      ],
+      "spread_pct": 3.4974171864333456
+    },
+    {
+      "name": "e1/medium/t4/extract/work_ms",
+      "unit": "ms",
+      "better": "smaller",
+      "stat": "median of 3 runs",
+      "value": 1115.4757470000002,
+      "runs": [
+        1036.135863,
+        1115.4757470000002,
+        1169.465249
+      ],
+      "spread_pct": 11.95269250439383
+    },
+    {
+      "name": "e1/medium/t4/extract/total_ms",
+      "unit": "ms",
+      "better": "smaller",
+      "stat": "median of 3 runs",
+      "value": 1154.250728,
+      "runs": [
+        1075.225133,
+        1154.250728,
+        1230.577738
+      ],
+      "spread_pct": 13.459173230861504
+    },
+    {
+      "name": "e1/medium/t4/extract/list_ms",
+      "unit": "ms",
+      "better": "smaller",
+      "stat": "median of 3 runs",
+      "value": 39.089054999999995,
+      "runs": [
+        39.089054999999995,
+        38.774754,
+        61.112075
+      ],
+      "spread_pct": 57.14469433963036
+    },
+    {
+      "name": "e1/medium/t4/extract/files_per_s",
+      "unit": "files/s",
+      "better": "larger",
+      "stat": "median of 3 runs",
+      "value": 8331.870975227936,
+      "runs": [
+        8969.86614582609,
+        8331.870975227936,
+        7947.22203840364
+      ],
+      "spread_pct": 12.273883146569895
+    },
+    {
+      "name": "e1/medium/t4/extract/mb_per_s",
+      "unit": "MB/s",
+      "better": "larger",
+      "stat": "median of 3 runs",
+      "value": 48.16673974714396,
+      "runs": [
+        51.85500465589039,
+        48.16673974714396,
+        45.9430753038135
+      ],
+      "spread_pct": 12.273883146569904
+    },
+    {
+      "name": "e1/medium/t4/extract/file_p50_ms",
+      "unit": "ms",
+      "better": "smaller",
+      "stat": "median of 3 runs",
+      "value": 0.20817,
+      "runs": [
+        0.206435,
+        0.20817,
+        0.213772
+      ],
+      "spread_pct": 3.5245232262093396
+    },
+    {
+      "name": "e1/medium/t4/extract/file_p95_ms",
+      "unit": "ms",
+      "better": "smaller",
+      "stat": "median of 3 runs",
+      "value": 1.632725,
+      "runs": [
+        1.57715,
+        1.632725,
+        1.734515
+      ],
+      "spread_pct": 9.638181567624676
+    },
+    {
+      "name": "e1/medium/t4/extract/file_max_ms",
+      "unit": "ms",
+      "better": "smaller",
+      "stat": "median of 3 runs",
+      "value": 42.483613,
+      "runs": [
+        42.483613,
+        48.682038,
+        40.543102
+      ],
+      "spread_pct": 19.157824453395715
+    },
+    {
+      "name": "e1/medium/t4/extract/rss_peak_mib",
+      "unit": "MiB",
+      "better": "smaller",
+      "stat": "median of 3 runs",
+      "value": 46.3203125,
+      "runs": [
+        41.4453125,
+        46.3203125,
+        46.78125
+      ],
+      "spread_pct": 11.519649181986845
+    },
+    {
+      "name": "e1/medium/t4/extract/rss_steady_mib",
+      "unit": "MiB",
+      "better": "smaller",
+      "stat": "median of 3 runs",
+      "value": 46.3203125,
+      "runs": [
+        41.4453125,
+        46.3203125,
+        46.78125
+      ],
+      "spread_pct": 11.519649181986845
+    },
+    {
+      "name": "e1/medium/t4/extract/files",
+      "unit": "count",
+      "better": "info",
+      "stat": "count",
+      "value": 9294.0,
+      "runs": [
+        9294.0
+      ],
+      "spread_pct": null
+    },
+    {
+      "name": "e1/medium/t4/extract/err_files",
+      "unit": "count",
+      "better": "info",
+      "stat": "count",
+      "value": 0.0,
+      "runs": [
+        0.0
+      ],
+      "spread_pct": null
+    },
+    {
+      "name": "e1/medium/t4/extract/failed_files",
+      "unit": "count",
+      "better": "info",
+      "stat": "count",
+      "value": 0.0,
+      "runs": [
+        0.0
+      ],
+      "spread_pct": null
+    },
+    {
+      "name": "e1/medium/t4/extract/decls",
+      "unit": "count",
+      "better": "info",
+      "stat": "count",
+      "value": 237869.0,
+      "runs": [
+        237869.0
+      ],
+      "spread_pct": null
+    },
+    {
+      "name": "e1/medium/t1/cold/read/work_ms",
+      "unit": "ms",
+      "better": "smaller",
+      "stat": "median of 3 runs",
+      "value": 479.359417,
+      "runs": [
+        479.359417,
+        433.444749,
+        579.4405700000001
+      ],
+      "spread_pct": 30.45644162238292
+    },
+    {
+      "name": "e1/medium/t1/cold/read/total_ms",
+      "unit": "ms",
+      "better": "smaller",
+      "stat": "median of 3 runs",
+      "value": 680.626572,
+      "runs": [
+        680.626572,
+        638.1343579999999,
+        760.2328120000001
+      ],
+      "spread_pct": 17.939125362269895
+    },
+    {
+      "name": "e1/medium/t1/cold/extract/work_ms",
+      "unit": "ms",
+      "better": "smaller",
+      "stat": "median of 3 runs",
+      "value": 5042.508769,
+      "runs": [
+        5209.621693,
+        4743.983370999999,
+        5042.508769
+      ],
+      "spread_pct": 9.234259043090237
+    },
+    {
+      "name": "e1/medium/t1/cold/extract/total_ms",
+      "unit": "ms",
+      "better": "smaller",
+      "stat": "median of 3 runs",
+      "value": 5240.044489,
+      "runs": [
+        5403.156943,
+        4918.75062,
+        5240.044489
+      ],
+      "spread_pct": 9.244316990378136
+    },
+    {
+      "name": "e1/medium/t4/cold/read/work_ms",
+      "unit": "ms",
+      "better": "smaller",
+      "stat": "median of 3 runs",
+      "value": 199.958589,
+      "runs": [
+        199.958589,
+        204.052975,
+        193.76856
+      ],
+      "spread_pct": 5.143272440275119
+    },
+    {
+      "name": "e1/medium/t4/cold/read/total_ms",
+      "unit": "ms",
+      "better": "smaller",
+      "stat": "median of 3 runs",
+      "value": 398.543525,
+      "runs": [
+        398.543525,
+        385.201613,
+        400.479328
+      ],
+      "spread_pct": 3.8333868302088216
+    },
+    {
+      "name": "e1/medium/t4/cold/extract/work_ms",
+      "unit": "ms",
+      "better": "smaller",
+      "stat": "median of 3 runs",
+      "value": 1308.245476,
+      "runs": [
+        1310.745956,
+        1296.995732,
+        1308.245476
+      ],
+      "spread_pct": 1.0510431147861954
+    },
+    {
+      "name": "e1/medium/t4/cold/extract/total_ms",
+      "unit": "ms",
+      "better": "smaller",
+      "stat": "median of 3 runs",
+      "value": 1496.523626,
+      "runs": [
+        1496.523626,
+        1497.058346,
+        1480.151109
+      ],
+      "spread_pct": 1.1297674628225431
+    }
+  ],
+  "notes": []
+}

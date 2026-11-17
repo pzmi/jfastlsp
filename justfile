@@ -235,6 +235,16 @@ private-names: _preflight
 bench-corpus size="small" cache="":
     bash scripts/bench-corpus.sh fetch {{quote(size)}} {{ if cache != "" { "--cache " + quote(cache) } else { "" } }}
 
+# The benchmark suites over the pinned corpus (BENCH-02, ADR 0031): JSON results with the machine's
+# facts in `out`. Reports, never gates: `check` and `land.sh` do not run it (fnd §9).
+# `just bench rg-floor small`, `just bench e1 medium`, `just bench path/to/suite.toml small`.
+bench suite="rg-floor" corpus="small" out="target/bench": _preflight (_require "hyperfine") (_require "rg") (bench-corpus corpus)
+    {{cargo}} build --locked --profile bench-tool -p jfl-bench
+    # The real binaries first on PATH: a mise shim in front of rg or hyperfine adds its own launcher's
+    # start-up time and memory to every timed run.
+    PATH="$(dirname "$(mise which hyperfine)"):$(dirname "$(mise which rg)"):$PATH" \
+      "${CARGO_TARGET_DIR:-target}/bench-tool/jfl-bench" run {{quote(suite)}} {{quote(corpus)}} --out {{quote(out)}}
+
 # The pinned jdtls behind jfl-jdtls on the synthetic fixture (EVAL-11); needs Java 21+ and the download.
 jdtls-it:
     bash scripts/jdtls-fetch.sh

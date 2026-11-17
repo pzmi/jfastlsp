@@ -1,0 +1,651 @@
+{
+  "schema": 1,
+  "suite": "e1",
+  "corpus": {
+    "size": "small",
+    "repo": "junit-framework",
+    "commit": "e5198f9b098c550e66d378650f78bac8883e2a72",
+    "java_files": 1813
+  },
+  "machine": {
+    "cpu_model": "Intel(R) Xeon(R) Processor @ 2.30GHz",
+    "logical_cpus": 4,
+    "ram_mib": 16087,
+    "os": "Ubuntu 24.04.5 LTS",
+    "kernel": "Linux 6.18.44-fc-v553",
+    "arch": "x86_64",
+    "disk": {
+      "filesystem": "/dev/vda",
+      "size_gib": 251
+    },
+    "tools": {
+      "git": "git version 2.43.0",
+      "hyperfine": "hyperfine 2.0.0",
+      "rg": "ripgrep 15.2.0 (rev e89fff89ac)"
+    },
+    "commit": "544e88f1250764de20d38cde6c07e4a7893a1157",
+    "dirty": false
+  },
+  "build": {
+    "profile": "bench-tool",
+    "debug_assertions": false,
+    "toolchain": "1.97.0"
+  },
+  "queries": [],
+  "config": {
+    "runs": 3,
+    "warmup": 1,
+    "seed": 1
+  },
+  "metrics": [
+    {
+      "name": "e1/small/t1/read/work_ms",
+      "unit": "ms",
+      "better": "smaller",
+      "stat": "median of 3 runs",
+      "value": 11.62897,
+      "runs": [
+        10.925911,
+        11.62897,
+        12.033143
+      ],
+      "spread_pct": 9.521324760490408
+    },
+    {
+      "name": "e1/small/t1/read/total_ms",
+      "unit": "ms",
+      "better": "smaller",
+      "stat": "median of 3 runs",
+      "value": 22.242408,
+      "runs": [
+        22.149068,
+        22.242408,
+        23.837407
+      ],
+      "spread_pct": 7.590630474901813
+    },
+    {
+      "name": "e1/small/t1/hash/work_ms",
+      "unit": "ms",
+      "better": "smaller",
+      "stat": "median of 3 runs",
+      "value": 14.177167,
+      "runs": [
+        14.161493,
+        14.177167,
+        14.397259
+      ],
+      "spread_pct": 1.6629979741368632
+    },
+    {
+      "name": "e1/small/t1/hash/total_ms",
+      "unit": "ms",
+      "better": "smaller",
+      "stat": "median of 3 runs",
+      "value": 24.960525,
+      "runs": [
+        24.837408,
+        25.373353,
+        24.960525
+      ],
+      "spread_pct": 2.147170382033237
+    },
+    {
+      "name": "e1/small/t1/parse/work_ms",
+      "unit": "ms",
+      "better": "smaller",
+      "stat": "median of 3 runs",
+      "value": 550.539299,
+      "runs": [
+        597.5477999999999,
+        513.670211,
+        550.539299
+      ],
+      "spread_pct": 15.235531623692488
+    },
+    {
+      "name": "e1/small/t1/parse/total_ms",
+      "unit": "ms",
+      "better": "smaller",
+      "stat": "median of 3 runs",
+      "value": 561.0042090000001,
+      "runs": [
+        608.3879290000001,
+        525.135904,
+        561.0042090000001
+      ],
+      "spread_pct": 14.839821816737938
+    },
+    {
+      "name": "e1/small/t1/extract/work_ms",
+      "unit": "ms",
+      "better": "smaller",
+      "stat": "median of 3 runs",
+      "value": 635.591931,
+      "runs": [
+        635.591931,
+        689.0850360000001,
+        615.041162
+      ],
+      "spread_pct": 11.649593141232007
+    },
+    {
+      "name": "e1/small/t1/extract/total_ms",
+      "unit": "ms",
+      "better": "smaller",
+      "stat": "median of 3 runs",
+      "value": 646.605681,
+      "runs": [
+        646.605681,
+        699.5157720000001,
+        632.551237
+      ],
+      "spread_pct": 10.356317144698899
+    },
+    {
+      "name": "e1/small/t1/extract/list_ms",
+      "unit": "ms",
+      "better": "smaller",
+      "stat": "median of 3 runs",
+      "value": 11.013227,
+      "runs": [
+        11.013227,
+        10.430456,
+        17.509853999999997
+      ],
+      "spread_pct": 64.28086881347308
+    },
+    {
+      "name": "e1/small/t1/extract/files_per_s",
+      "unit": "files/s",
+      "better": "larger",
+      "stat": "median of 3 runs",
+      "value": 2852.459119717805,
+      "runs": [
+        2852.459119717805,
+        2631.0250626310217,
+        2947.7701851766465
+      ],
+      "spread_pct": 11.104282629542487
+    },
+    {
+      "name": "e1/small/t1/extract/mb_per_s",
+      "unit": "MB/s",
+      "better": "larger",
+      "stat": "median of 3 runs",
+      "value": 12.444470444354964,
+      "runs": [
+        12.444470444354964,
+        11.478416431611496,
+        12.860285601502554
+      ],
+      "spread_pct": 11.104282629542492
+    },
+    {
+      "name": "e1/small/t1/extract/file_p50_ms",
+      "unit": "ms",
+      "better": "smaller",
+      "stat": "median of 3 runs",
+      "value": 0.148512,
+      "runs": [
+        0.148512,
+        0.162899,
+        0.143143
+      ],
+      "spread_pct": 13.302628743805212
+    },
+    {
+      "name": "e1/small/t1/extract/file_p95_ms",
+      "unit": "ms",
+      "better": "smaller",
+      "stat": "median of 3 runs",
+      "value": 1.300774,
+      "runs": [
+        1.300774,
+        1.332417,
+        1.183954
+      ],
+      "spread_pct": 11.413435385393619
+    },
+    {
+      "name": "e1/small/t1/extract/file_max_ms",
+      "unit": "ms",
+      "better": "smaller",
+      "stat": "median of 3 runs",
+      "value": 10.211934,
+      "runs": [
+        10.211934,
+        11.12872,
+        10.031223
+      ],
+      "spread_pct": 10.747200285469912
+    },
+    {
+      "name": "e1/small/t1/extract/rss_peak_mib",
+      "unit": "MiB",
+      "better": "smaller",
+      "stat": "median of 3 runs",
+      "value": 11.80078125,
+      "runs": [
+        11.7890625,
+        11.80078125,
+        11.8203125
+      ],
+      "spread_pct": 0.264812975835816
+    },
+    {
+      "name": "e1/small/t1/extract/rss_steady_mib",
+      "unit": "MiB",
+      "better": "smaller",
+      "stat": "median of 3 runs",
+      "value": 11.80078125,
+      "runs": [
+        11.7890625,
+        11.80078125,
+        11.8203125
+      ],
+      "spread_pct": 0.264812975835816
+    },
+    {
+      "name": "e1/small/t1/extract/files",
+      "unit": "count",
+      "better": "info",
+      "stat": "count",
+      "value": 1813.0,
+      "runs": [
+        1813.0
+      ],
+      "spread_pct": null
+    },
+    {
+      "name": "e1/small/t1/extract/err_files",
+      "unit": "count",
+      "better": "info",
+      "stat": "count",
+      "value": 0.0,
+      "runs": [
+        0.0
+      ],
+      "spread_pct": null
+    },
+    {
+      "name": "e1/small/t1/extract/failed_files",
+      "unit": "count",
+      "better": "info",
+      "stat": "count",
+      "value": 0.0,
+      "runs": [
+        0.0
+      ],
+      "spread_pct": null
+    },
+    {
+      "name": "e1/small/t1/extract/decls",
+      "unit": "count",
+      "better": "info",
+      "stat": "count",
+      "value": 42198.0,
+      "runs": [
+        42198.0
+      ],
+      "spread_pct": null
+    },
+    {
+      "name": "e1/small/t4/read/work_ms",
+      "unit": "ms",
+      "better": "smaller",
+      "stat": "median of 3 runs",
+      "value": 3.555791,
+      "runs": [
+        3.506105,
+        3.616902,
+        3.555791
+      ],
+      "spread_pct": 3.115959290070768
+    },
+    {
+      "name": "e1/small/t4/read/total_ms",
+      "unit": "ms",
+      "better": "smaller",
+      "stat": "median of 3 runs",
+      "value": 14.521447,
+      "runs": [
+        14.521447,
+        19.441597,
+        13.738683
+      ],
+      "spread_pct": 39.27235350581799
+    },
+    {
+      "name": "e1/small/t4/hash/work_ms",
+      "unit": "ms",
+      "better": "smaller",
+      "stat": "median of 3 runs",
+      "value": 4.024665000000001,
+      "runs": [
+        4.024665000000001,
+        4.025837,
+        3.730744
+      ],
+      "spread_pct": 7.332113356018452
+    },
+    {
+      "name": "e1/small/t4/hash/total_ms",
+      "unit": "ms",
+      "better": "smaller",
+      "stat": "median of 3 runs",
+      "value": 14.212702,
+      "runs": [
+        13.974604,
+        14.212702,
+        15.970620000000002
+      ],
+      "spread_pct": 14.04388834719818
+    },
+    {
+      "name": "e1/small/t4/parse/work_ms",
+      "unit": "ms",
+      "better": "smaller",
+      "stat": "median of 3 runs",
+      "value": 137.07377100000002,
+      "runs": [
+        153.48342300000002,
+        135.844147,
+        137.07377100000002
+      ],
+      "spread_pct": 12.868454607555826
+    },
+    {
+      "name": "e1/small/t4/parse/total_ms",
+      "unit": "ms",
+      "better": "smaller",
+      "stat": "median of 3 runs",
+      "value": 148.594118,
+      "runs": [
+        169.266401,
+        146.389526,
+        148.594118
+      ],
+      "spread_pct": 15.39554546836101
+    },
+    {
+      "name": "e1/small/t4/extract/work_ms",
+      "unit": "ms",
+      "better": "smaller",
+      "stat": "median of 3 runs",
+      "value": 156.237772,
+      "runs": [
+        160.011628,
+        154.923601,
+        156.237772
+      ],
+      "spread_pct": 3.2565921382954763
+    },
+    {
+      "name": "e1/small/t4/extract/total_ms",
+      "unit": "ms",
+      "better": "smaller",
+      "stat": "median of 3 runs",
+      "value": 166.786379,
+      "runs": [
+        170.76706099999998,
+        165.529993,
+        166.786379
+      ],
+      "spread_pct": 3.139985430105172
+    },
+    {
+      "name": "e1/small/t4/extract/list_ms",
+      "unit": "ms",
+      "better": "smaller",
+      "stat": "median of 3 runs",
+      "value": 10.60625,
+      "runs": [
+        10.755071,
+        10.60625,
+        10.54826
+      ],
+      "spread_pct": 1.9498974661166606
+    },
+    {
+      "name": "e1/small/t4/extract/files_per_s",
+      "unit": "files/s",
+      "better": "larger",
+      "stat": "median of 3 runs",
+      "value": 11604.108128218828,
+      "runs": [
+        11330.426561249662,
+        11702.542338917105,
+        11604.108128218828
+      ],
+      "spread_pct": 3.206758964633679
+    },
+    {
+      "name": "e1/small/t4/extract/mb_per_s",
+      "unit": "MB/s",
+      "better": "larger",
+      "stat": "median of 3 runs",
+      "value": 50.62543390595713,
+      "runs": [
+        49.43143882018374,
+        51.05487446034772,
+        50.62543390595713
+      ],
+      "spread_pct": 3.206758964633674
+    },
+    {
+      "name": "e1/small/t4/extract/file_p50_ms",
+      "unit": "ms",
+      "better": "smaller",
+      "stat": "median of 3 runs",
+      "value": 0.141587,
+      "runs": [
+        0.146691,
+        0.141587,
+        0.140802
+      ],
+      "spread_pct": 4.15928015990167
+    },
+    {
+      "name": "e1/small/t4/extract/file_p95_ms",
+      "unit": "ms",
+      "better": "smaller",
+      "stat": "median of 3 runs",
+      "value": 1.221831,
+      "runs": [
+        1.226941,
+        1.200133,
+        1.221831
+      ],
+      "spread_pct": 2.1940841245638856
+    },
+    {
+      "name": "e1/small/t4/extract/file_max_ms",
+      "unit": "ms",
+      "better": "smaller",
+      "stat": "median of 3 runs",
+      "value": 10.591764,
+      "runs": [
+        10.609498,
+        10.517982,
+        10.591764
+      ],
+      "spread_pct": 0.864029825437957
+    },
+    {
+      "name": "e1/small/t4/extract/rss_peak_mib",
+      "unit": "MiB",
+      "better": "smaller",
+      "stat": "median of 3 runs",
+      "value": 15.8515625,
+      "runs": [
+        16.93359375,
+        15.46875,
+        15.8515625
+      ],
+      "spread_pct": 9.241005421389847
+    },
+    {
+      "name": "e1/small/t4/extract/rss_steady_mib",
+      "unit": "MiB",
+      "better": "smaller",
+      "stat": "median of 3 runs",
+      "value": 15.8515625,
+      "runs": [
+        16.93359375,
+        15.46875,
+        15.8515625
+      ],
+      "spread_pct": 9.241005421389847
+    },
+    {
+      "name": "e1/small/t4/extract/files",
+      "unit": "count",
+      "better": "info",
+      "stat": "count",
+      "value": 1813.0,
+      "runs": [
+        1813.0
+      ],
+      "spread_pct": null
+    },
+    {
+      "name": "e1/small/t4/extract/err_files",
+      "unit": "count",
+      "better": "info",
+      "stat": "count",
+      "value": 0.0,
+      "runs": [
+        0.0
+      ],
+      "spread_pct": null
+    },
+    {
+      "name": "e1/small/t4/extract/failed_files",
+      "unit": "count",
+      "better": "info",
+      "stat": "count",
+      "value": 0.0,
+      "runs": [
+        0.0
+      ],
+      "spread_pct": null
+    },
+    {
+      "name": "e1/small/t4/extract/decls",
+      "unit": "count",
+      "better": "info",
+      "stat": "count",
+      "value": 42198.0,
+      "runs": [
+        42198.0
+      ],
+      "spread_pct": null
+    },
+    {
+      "name": "e1/small/t1/cold/read/work_ms",
+      "unit": "ms",
+      "better": "smaller",
+      "stat": "median of 3 runs",
+      "value": 78.61670099999999,
+      "runs": [
+        95.000708,
+        78.61670099999999,
+        75.155534
+      ],
+      "spread_pct": 25.242949332101844
+    },
+    {
+      "name": "e1/small/t1/cold/read/total_ms",
+      "unit": "ms",
+      "better": "smaller",
+      "stat": "median of 3 runs",
+      "value": 139.94248100000002,
+      "runs": [
+        144.642777,
+        130.661426,
+        139.94248100000002
+      ],
+      "spread_pct": 9.990783999320398
+    },
+    {
+      "name": "e1/small/t1/cold/extract/work_ms",
+      "unit": "ms",
+      "better": "smaller",
+      "stat": "median of 3 runs",
+      "value": 814.134262,
+      "runs": [
+        832.116985,
+        814.134262,
+        752.1151659999999
+      ],
+      "spread_pct": 9.826612480780236
+    },
+    {
+      "name": "e1/small/t1/cold/extract/total_ms",
+      "unit": "ms",
+      "better": "smaller",
+      "stat": "median of 3 runs",
+      "value": 866.2341759999999,
+      "runs": [
+        892.5174430000001,
+        866.2341759999999,
+        804.787052
+      ],
+      "spread_pct": 10.127791471483118
+    },
+    {
+      "name": "e1/small/t4/cold/read/work_ms",
+      "unit": "ms",
+      "better": "smaller",
+      "stat": "median of 3 runs",
+      "value": 30.146683,
+      "runs": [
+        30.146683,
+        30.333217,
+        29.9964
+      ],
+      "spread_pct": 1.1172605622980143
+    },
+    {
+      "name": "e1/small/t4/cold/read/total_ms",
+      "unit": "ms",
+      "better": "smaller",
+      "stat": "median of 3 runs",
+      "value": 80.496967,
+      "runs": [
+        80.458549,
+        118.811208,
+        80.496967
+      ],
+      "spread_pct": 47.64484977427782
+    },
+    {
+      "name": "e1/small/t4/cold/extract/work_ms",
+      "unit": "ms",
+      "better": "smaller",
+      "stat": "median of 3 runs",
+      "value": 208.285527,
+      "runs": [
+        211.539575,
+        200.427699,
+        208.285527
+      ],
+      "spread_pct": 5.334924687301976
+    },
+    {
+      "name": "e1/small/t4/cold/extract/total_ms",
+      "unit": "ms",
+      "better": "smaller",
+      "stat": "median of 3 runs",
+      "value": 261.525881,
+      "runs": [
+        275.883329,
+        252.825994,
+        261.525881
+      ],
+      "spread_pct": 8.816463943008376
+    }
+  ],
+  "notes": []
+}

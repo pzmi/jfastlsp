@@ -41,7 +41,8 @@ Measured on a 4 vCPU Xeon 2.3 GHz VM (15 GB RAM, virtio disk, Linux, Rust 1.97.0
 throwaway Rust harness (archived in [`spikes/e1-parse/`](../spikes/e1-parse/README.md)): a `.gitignore`-aware walk, then per file a read, a blake3 hash, a parse
 with tree-sitter 0.27.2 and tree-sitter-java-orchard 0.5.25, and a walk that keeps package,
 imports and declarations. Cold runs follow a page-cache drop; warm runs are the median of three.
-The harness seeds `tools/jfl-bench` (BENCH-02); EVAL-05 re-runs it on the `bench.yml` runner.
+The harness seeded `tools/jfl-bench` (BENCH-02, which reproduces the junit-framework row within
+its noise band: [`doc/bench/README.md`](bench/README.md)); EVAL-05 re-runs it on the `bench.yml` runner.
 
 | Repository | Full index, 4 threads, warm | Cold | Files/s (4 thr, warm) | Per-file p95 | Per-file max | Peak RSS |
 |:--|--:|--:|--:|--:|--:|--:|
