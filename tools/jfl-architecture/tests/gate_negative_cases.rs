@@ -278,6 +278,11 @@ fn should_refuse_the_gate_when_any_steering_variable_is_set() -> TestResult {
         ("NEXTEST_RETRIES", "3"),
         ("NEXTEST_NO_TESTS", "pass"),
         ("NEXTEST_PROFILE", "lenient"),
+        // FND-02's review, LOW: a lookalike toolchain, cargo's internal channel override, and
+        // proptest's knobs (fnd §9: never inline PROPTEST_*).
+        ("RUSTUP_TOOLCHAIN", "1.97.0-evil"),
+        ("__CARGO_TEST_CHANNEL_OVERRIDE_DO_NOT_USE_THIS", "nightly"),
+        ("PROPTEST_CASES", "1"),
     ];
     let mut accepted = Vec::new();
 
@@ -320,6 +325,40 @@ fn should_refuse_the_gate_when_an_ancestor_cargo_config_sets_rustflags() -> Test
 }
 
 #[test]
+fn should_refuse_the_gate_when_a_cargo_config_steers_in_another_toml_form() -> TestResult {
+    // given: the forms FND-02's review found past the line grep
+    let forms = [
+        "profile = { dev = { overflow-checks = false } }\n",
+        "build = { rustflags = [\"--cap-lints=allow\"] }\n",
+        "\"build\".rustflags = [\"--cap-lints=allow\"]\n",
+        "[ \"profile\".dev ]\noverflow-checks = false\n",
+        "env = { RUSTC_BOOTSTRAP = \"1\" }\n",
+        // FND-07's review: TOML literal (single-quoted) keys.
+        "['profile'.dev]\noverflow-checks = false\n",
+        "'profile' = { dev = { overflow-checks = false } }\n",
+        "[build]\n'rustflags' = [\"--cap-lints=allow\"]\n",
+    ];
+    let mut accepted = Vec::new();
+
+    // when
+    for (index, form) in forms.iter().enumerate() {
+        let cargo_home = fresh_target(&format!("cargo-home-form-{index}"))?;
+        std::fs::write(cargo_home.join("config.toml"), form)?;
+        let output = just(&repo_root())
+            .arg("_preflight")
+            .env("CARGO_HOME", &cargo_home)
+            .output()?;
+        if output.status.success() {
+            accepted.push(*form);
+        }
+    }
+
+    // then
+    assert!(accepted.is_empty(), "preflight accepted {accepted:?}");
+    Ok(())
+}
+
+#[test]
 fn should_refuse_the_gate_when_the_cargo_home_config_sets_a_rustc_wrapper() -> TestResult {
     // given
     let cargo_home = fresh_target("cargo-home-config")?;
@@ -342,12 +381,12 @@ fn should_refuse_the_gate_when_the_cargo_home_config_sets_a_rustc_wrapper() -> T
 }
 
 #[test]
-fn should_pass_preflight_when_a_cargo_config_sets_only_network_options() -> TestResult {
+fn should_pass_preflight_when_a_cargo_config_sets_only_network_and_job_options() -> TestResult {
     // given
     let cargo_home = fresh_target("cargo-home-network")?;
     std::fs::write(
         cargo_home.join("config.toml"),
-        "[net]\ngit-fetch-with-cli = true\n",
+        "[net]\ngit-fetch-with-cli = true\n\n[build]\njobs = 2\ntarget-dir = \"elsewhere\"\n",
     )?;
 
     // when
@@ -488,6 +527,34 @@ fn should_fail_deny_bans_when_a_workspace_crate_has_a_build_script() -> TestResu
 }
 
 #[test]
+fn should_fail_deny_bans_when_a_bypassed_build_script_changes() -> TestResult {
+    // given: the repository's deny.toml with one reviewed checksum no longer matching
+    let policy = std::fs::read_to_string(repo_root().join("deny.toml"))?;
+    let reviewed =
+        "build-script = \"e2ea6a7a82f5404c3e28cb055883c737ee7903367a10206fbb47b75c009f0eb3\"";
+    assert!(policy.contains(reviewed), "serde's reviewed checksum moved");
+    let changed = fresh_target("deny-build-script-checksum")?.join("deny.toml");
+    std::fs::write(
+        &changed,
+        policy.replace(reviewed, &format!("build-script = \"{}\"", "0".repeat(64))),
+    )?;
+
+    // when
+    let output = Command::new("cargo")
+        .args(["deny", "--locked", "--config"])
+        .arg(&changed)
+        .args(["check", "bans"])
+        .current_dir(repo_root())
+        .output()?;
+
+    // then
+    let text = printed(&output);
+    assert!(!output.status.success(), "cargo deny passed:\n{text}");
+    assert!(text.contains("crate 'serde = "), "{text}");
+    Ok(())
+}
+
+#[test]
 fn should_not_run_a_stage_name_as_a_command_when_check_only_gets_one() -> TestResult {
     // given
     let marker = fresh_target("check-only-injection")?.join("ran");
@@ -516,7 +583,7 @@ fn should_name_the_valid_stages_when_check_only_gets_an_unknown_one() -> TestRes
     assert!(!output.status.success(), "check-only nope passed:\n{text}");
     assert!(text.contains("unknown stage 'nope'"), "{text}");
     assert!(
-        text.contains("valid stages: fmt-check clippy nostd"),
+        text.contains("valid stages: fmt-check architecture clippy nostd"),
         "{text}"
     );
     Ok(())

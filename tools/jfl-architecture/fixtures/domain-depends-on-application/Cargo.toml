@@ -1,0 +1,3 @@
+[workspace]
+members = ["domain", "application"]
+resolver = "3"

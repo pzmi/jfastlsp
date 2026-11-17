@@ -5,7 +5,7 @@ Date: 2026-11-16
 ## Status
 
 Proposed (orchestrator default; owner confirms at the FND checkpoint, DEC-07); amended
-2026-11-16. Supersedes
+2026-11-16 and 2026-11-17. Supersedes
 [0011](0011-pinned-toolchains-rust-1-97-0-and-tools-versions-toml.md) and
 [0012](0012-port-xtask-from-mayfly.md).
 
@@ -94,3 +94,31 @@ test before relying on them.
   `git merge-base HEAD origin/main` plus the working tree as their base; `mutants-diff` leaves
   `check` and runs in CI and before landing large tasks, with a time cap.
 - **Seven FND tasks.** FND-02 is the gate and its tools; the architecture test is FND-07.
+
+## Amended 2026-11-17 (orchestrator, FND-07): the architecture test's real size and its build scripts
+
+Status of this amendment: Proposed (orchestrator; owner confirms at FND-05).
+
+- **Size.** The architecture test is about 2,000 formatted lines of source plus about 1,500 of
+  tests, not "about 200" (and the glue estimate in Context is low by the same amount). Most of
+  it is what makes the test trustworthy rather than features: the policy parsed strictly
+  (`serde` with `deny_unknown_fields`, every table a typed struct); the `ARCH-clippy-lists` model
+  computed from the root list's sections independently of `scripts/clippy-lists.sh`, so a
+  generator bug cannot agree with itself; and a small lexer that removes literals and comments
+  and joins lines, so the source scan reads multi-line attributes and `cfg!` whole and never
+  matches inside a string. It is still the reuse choice: `cargo_metadata` does the graph,
+  cargo-deny, clippy and the compiler keep everything they can express, and no maintained tool
+  checks a layer table, per-crate clippy lists against grants, or test naming (`cargo-bylaw` and
+  `cargo-pup` remain too young, `dylint` needs real name resolution only for rules that bind by
+  review). The ported checker this ADR rejected was about 16k lines.
+- **Dependencies.** `cargo_metadata`, `toml` and `serde` (derive) for jfl-architecture, and
+  `serde_json` for its tests, each in `architecture.toml`'s `[external.*]` with its reason.
+- **Build scripts.** Their closure runs eight build scripts (camino, proc-macro2, quote, serde,
+  serde_core, serde_json, thiserror, zmij), each a rustc or target probe that only sets cfgs.
+  `deny.toml` admits them through `[bans.build] bypass`, each pinned by the SHA-256 of its
+  `build.rs` as read, rather than by name in `allow-build-scripts`: a release whose script
+  changes fails `bans` until it is read again (cargo-deny 0.21 supports this; a negative case in
+  `tests/gate_negative_cases.rs` pins it). The bypass is global, by crate rather than by
+  dependent: a production crate that later pulls serde reuses this review, and the task that
+  does so says so (fnd §3.5).
+

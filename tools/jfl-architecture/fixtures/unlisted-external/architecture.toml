@@ -1,0 +1,16 @@
+# ARCH-unlisted-external: `app` names `third-party` (a path crate outside the workspace, so it
+# resolves offline), which [external.normal] does not list (fnd §2.5).
+schema = 1
+
+[workspace]
+production = ["app"]
+
+[roles]
+application = ["app"]
+
+[grants]
+
+[dependencies.normal]
+app = []
+
+[external.normal]

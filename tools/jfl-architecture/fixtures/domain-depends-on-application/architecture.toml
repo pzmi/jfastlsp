@@ -1,0 +1,15 @@
+# ARCH-forbidden-edge: plan §6.3 lets the domain depend on nothing.
+schema = 1
+
+[workspace]
+production = ["domain", "application"]
+
+[roles]
+pure = ["domain"]
+application = ["application"]
+
+[grants]
+
+[dependencies.normal]
+domain = []
+application = []

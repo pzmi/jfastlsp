@@ -67,12 +67,36 @@ features = [
 
 [bans.build]
 # Only the crates named here may run a build script (fnd §2.2 rule 5), workspace crates included
-# (cargo-deny skips them by default): none yet. The tree-sitter grammars and bundled SQLite
-# compile C and are added by name, with the reason, by the task that adds them (IDX-07, IDX-08).
-# Pinned by tools/jfl-architecture/tests/gate_negative_cases.rs
+# (cargo-deny skips them by default). Production crates have none yet: the tree-sitter grammars
+# and bundled SQLite compile C and are added by name, with the reason, by the task that adds them
+# (IDX-07, IDX-08). Pinned by tools/jfl-architecture/tests/gate_negative_cases.rs
 # ::should_fail_deny_bans_when_a_workspace_crate_has_a_build_script.
 include-workspace = true
 allow-build-scripts = []
+# FND-07 (ADR 0030, amended 2026-11-17): the architecture test's cargo_metadata, serde and toml
+# bring eight build scripts that only probe rustc or the target and set cfgs (no C, no network,
+# read by hand). Each is allowed only with the SHA-256 of its build.rs as reviewed: a new version
+# whose script changed fails `bans` until someone reads it and updates the checksum. The bypass is
+# by crate, not by dependent, so a production crate pulling serde later reuses the review; the
+# task that does so says so.
+bypass = [
+  # camino: rustc version probe (cargo_metadata's paths), cfgs only; jfl-architecture's closure.
+  { crate = "camino", build-script = "5bc29910c9644c320a7cceed121474915f7e832f484f1bf694dec80a45182aa0" },
+  # proc-macro2: rustc version probe (serde_derive), cfgs only; jfl-architecture's closure.
+  { crate = "proc-macro2", build-script = "baeb20b52f6b536be8657a566591a507bb2e34a45cf8baa42b135510a0c3c729" },
+  # quote: rustc version probe (serde_derive), cfgs only; jfl-architecture's closure.
+  { crate = "quote", build-script = "cd6808c02e476b09a520105e2c6f6d325cccb1ecd542cbbcc836a0ae6f6fb0f1" },
+  # serde: rustc version probe, cfgs only; jfl-architecture's closure.
+  { crate = "serde", build-script = "e2ea6a7a82f5404c3e28cb055883c737ee7903367a10206fbb47b75c009f0eb3" },
+  # serde_core: rustc version probe, cfgs only; jfl-architecture's closure.
+  { crate = "serde_core", build-script = "7bc6b1eec8913ff4cd8e4b9b92cd04a82a4f38beb30a0b73a64c1e6e49f07b5f" },
+  # serde_json: target-arch probe (cargo_metadata), cfgs only; jfl-architecture's closure.
+  { crate = "serde_json", build-script = "a681e754be844c7dbef957f5d2d00b01f37c5dca160ef1055a8d8f975697a881" },
+  # thiserror: rustc feature probe (cargo_metadata), cfgs only; jfl-architecture's closure.
+  { crate = "thiserror", build-script = "ccc38283604f99237ad2333bbe395259e29fdf2ff4e04a60a95de9e4499c09a3" },
+  # zmij: rustc probe (serde_json's float formatting), cfgs only; jfl-architecture's closure.
+  { crate = "zmij", build-script = "ad320bc635887879bdbbf1b9322da4a157ec2c5a4243bd7c2cf9b6884a3b2a41" },
+]
 
 [sources]
 # crates.io only (ARCH-external-source).

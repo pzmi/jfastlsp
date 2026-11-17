@@ -1,0 +1,18 @@
+# ARCH-production-closure: the edge table allows helper -> testkit, but no production crate may
+# reach a test-only crate, directly or not (fnd §2.2 rule 4): app -> helper -> testkit.
+schema = 1
+
+[workspace]
+production = ["app", "helper"]
+test_only = ["testkit"]
+
+[roles]
+application = ["app"]
+support = ["helper"]
+
+[grants]
+
+[dependencies.normal]
+app = ["helper"]
+helper = ["testkit"]
+testkit = []

@@ -1,0 +1,14 @@
+# ARCH-layer-isolation: adapters never name a sibling adapter (fnd §2.2 rule 2).
+schema = 1
+
+[workspace]
+production = ["adapter-a", "adapter-b"]
+
+[roles]
+adapter = ["adapter-a", "adapter-b"]
+
+[grants]
+
+[dependencies.normal]
+adapter-a = []
+adapter-b = []

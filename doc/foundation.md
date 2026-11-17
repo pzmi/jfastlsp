@@ -75,7 +75,8 @@ Plan §6.3 is the edge table. Rules over it:
    normal or build edge, directly or through any package (`ARCH-production-closure`).
 5. **Build dependencies** are declared in `[dependencies.build]` (`ARCH-undeclared-build-dep`);
    none exist in v0.x. A third-party crate's build script (tree-sitter grammars and bundled
-   SQLite compile C) is allowed by name in `deny.toml`'s build-script allowlist with the reason.
+   SQLite compile C) is allowed in `deny.toml`, by name in the build-script allowlist or, for a
+   script read and found to only probe for cfgs, by `bypass` with its checksum, with the reason.
 6. **Targets.** Edges are evaluated through `cargo metadata --filter-platform` for
    `x86_64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu` and `aarch64-apple-darwin` (ADR 0006);
    a finding on only some of them names those targets.
@@ -125,8 +126,10 @@ Plan §6.5's table is enforced per crate, because clippy has no module-level con
   exactly its grants. Clippy has no inheritance, so the architecture test checks every crate's
   list against the canonical one and the `[grants]` table of `architecture.toml`
   (`ARCH-clippy-lists`). Only entries whose crate may be absent (Tokio, crossbeam, and std in
-  the no_std pure crates) carry `allow-invalid`; the `clippy` stage fails on any entry that names
-  no path, since clippy only warns about it. The lists are generated: `just clippy-lists` writes each crate's file
+  the no_std pure crates) carry `allow-invalid` (`ARCH-clippy-lists` refuses it on a std, core
+  or alloc path of the root list, and any `clippy.toml` or `.clippy.toml` other than the root's
+  and the members' own, since clippy takes the nearest one walking up from a crate); the `clippy`
+  stage fails on any entry that names no path, since clippy only warns about it. The lists are generated: `just clippy-lists` writes each crate's file
   from the root one (whose sections are marked `# grant: <name>`; the pure crates' extra entries
   are `#pure ` lines), and the `clippy` stage fails first when a file differs. The grants, kept tight for production crates (plan §6.5):
 
@@ -237,15 +240,26 @@ independent = ["jfl-oracle", "jfl-eval", "jfl-jdtls", "jfl-bench"]
 ```
 
 Parsed strictly: an unknown key or another `schema` value fails `ARCH-policy-schema`; a crate in
-two categories fails `ARCH-duplicate-category`, a present but empty list `ARCH-empty-selector`; a
-name that is not a workspace crate fails `ARCH-missing-crate`. An exception citing an ADR file
-that does not exist, or an exception that no longer matches anything, fails.
+two categories or two roles, or a role outside `production`, fails `ARCH-duplicate-category`, a
+present but empty list `ARCH-empty-selector`; a name that is not a workspace crate fails
+`ARCH-missing-crate`. A workspace member in no category, a production crate without a role, or a
+member without a `[dependencies.normal]` row fails `ARCH-missing-member`; a crate directory under
+`crates/` or `tools/` left out of `members`, or a glob in `members`, fails `ARCH-not-a-member`.
+An exception citing an ADR file that does not exist, or an exception that no longer matches
+anything, fails `ARCH-lint-suppression`; a row names exactly one lint, and every lint of an
+attribute needs its own row. The edge table itself follows the layer law (pure on pure, the
+application on pure, support on nothing, adapters on pure, application and support, roots on
+production, test-only crates never on tool-only ones, tool-only crates on nothing): a row past it
+fails `ARCH-forbidden-edge`, and meta-tests compare `[dependencies.normal]` with plan §6.3's table
+and `[grants]` with §2.4's.
 
 ### 3.2 The architecture test (`jfl-architecture`)
 
 A test-only crate in `tools/jfl-architecture` (FND-07), run by `just check-only architecture`
-under nextest. About 200 lines over the `cargo_metadata` crate (`cargo metadata --locked
---filter-platform` for each target of ADR 0006) plus a small source scan:
+under nextest. About 2,000 formatted lines plus 1,500 of tests (ADR 0030 guessed 200, amended; the strict policy parse, the
+clippy-list model and a small lexer that drops literals and comments make up most of it) over the
+`cargo_metadata` crate (`cargo metadata --locked --filter-platform` for each target of ADR 0006)
+plus a small source scan:
 
 1. **Graph:** every workspace member is classified; every normal and dev edge is in plan §6.3's
    matrix; the production closure reaches no test-only or tool-only crate; independent tools
@@ -269,7 +283,7 @@ Each rule names the layer that enforces it and the task that lands it.
 | Rule | What fails | Enforced by | Task |
 |:--|:--|:--|:--|
 | `ARCH-policy-schema`, `ARCH-metadata`, `ARCH-missing-member`, `ARCH-not-a-member`, `ARCH-missing-crate`, `ARCH-empty-selector`, `ARCH-duplicate-category` | the policy, the metadata or the inventory disagree | architecture test | FND-07 |
-| `ARCH-forbidden-edge`, `ARCH-forbidden-dev-edge`, `ARCH-undeclared-build-dep`, `ARCH-production-closure`, `ARCH-independent-oracle` | an edge outside plan §6.3 | architecture test | FND-07 |
+| `ARCH-forbidden-edge`, `ARCH-forbidden-dev-edge`, `ARCH-undeclared-build-dep`, `ARCH-production-closure`, `ARCH-independent-oracle`, `ARCH-layer-isolation`, `ARCH-policy-cycle` | an edge outside plan §6.3; an adapter naming a sibling adapter, composition or the CLI (by any edge, or in the table); a cycle in the table | architecture test | FND-07 |
 | `ARCH-unlisted-external`, `ARCH-external-feature` | §2.5, direct dependencies | architecture test | FND-07 |
 | `ARCH-external-source`, `ARCH-anyhow-in-library`, adapter-only crates outside their adapter | §2.5, transitive | cargo-deny | FND-02 |
 | `ARCH-domain-purity` | std or I/O in a pure crate or its closure | compiler (`#![no_std]`) and the `nostd` stage (§2.3) | FND-02 (stage), FND-07 (negative fixture) |
@@ -279,6 +293,7 @@ Each rule names the layer that enforces it and the task that lands it.
 | `ARCH-unsafe-code`, `ARCH-unfinished-code`, `ARCH-nightly-features` | `unsafe`, `todo!`/`unimplemented!`/`dbg!`, `#![feature]` | `[workspace.lints]` (`unsafe_code = "forbid"`, clippy `todo`, `dbg_macro`) and the stable toolchain | FND-01 |
 | `ARCH-lint-config`, `ARCH-lint-suppression` | lints loosened; `#[allow]`/`#[expect]`/`#[macro_export]` without an ADR-cited exception | architecture test (source scan) | FND-07 |
 | `ARCH-ignored-test`, `ARCH-test-name`, `ARCH-test-structure`, `ARCH-platform-branch` | `#[ignore]`; a misnamed test; missing sections; a `cfg!(target_os…)` branch | architecture test (source scan) | FND-07 |
+| `ARCH-hidden-source` | `#[path]`, `include!` or a target root outside its crate's directory: code the source scan would not read | architecture test (source scan, graph) | FND-07 |
 | `ARCH-ci-lockstep` | a stage in no CI job or two; `required` missing a job; a swallowed failure | architecture test | FND-05 |
 | `ARCH-fixtures-lock` | a golden fixture whose digest differs from `fixtures.lock` | architecture test | IDX-07 |
 | `ARCH-fuzz-crate` | the fuzz crate outside its policy rows | architecture test | REL-03 |
@@ -325,14 +340,18 @@ environment that steers the build, by allowlist: every `CARGO*`, `RUSTC*`, `RUST
 `RUSTUP_*`, `CLIPPY_*` and `NEXTEST_*` variable is refused except `CARGO_TARGET_DIR`,
 `CARGO_BUILD_JOBS`, `CARGO_INCREMENTAL`, `CARGO_HOME`, `CARGO_TERM_*`, `CARGO_NET_*`,
 `CARGO_HTTP_*`, `CARGO_REGISTRIES_CRATES_IO_PROTOCOL`, `RUSTUP_HOME` and rustup's download
-settings, `RUSTUP_TOOLCHAIN` naming the pinned toolchain, `RUSTFLAGS` empty or `-D warnings`, and
-`NEXTEST_PROFILE` naming a profile of `.config/nextest.toml`. It also refuses a cargo config file
-(`.cargo/config{,.toml}` in any ancestor of the working directory, or in `CARGO_HOME`) that sets
+settings, `RUSTUP_TOOLCHAIN` naming the pinned toolchain (bare or with one of ADR 0006's host
+triples), `RUSTFLAGS` empty or `-D warnings`, and `NEXTEST_PROFILE` naming a profile of
+`.config/nextest.toml`; `__CARGO_*` and `PROPTEST_*` are refused too (FND-07). It also refuses a
+cargo config file (`.cargo/config{,.toml}` in any ancestor of the working directory, or in `CARGO_HOME`) that sets
 compiler flags, a wrapper, `rustc`/`rustdoc`, a target, runner or linker, a profile, an alias,
-`[env]` or `[unstable]`. Independently, every cargo of the gate runs with `RUSTFLAGS="-D
+`[env]` or `[unstable]`, in any TOML form (a table header, a dotted key or an inline table,
+quoted or not). Independently, every cargo of the gate runs with `RUSTFLAGS="-D
 warnings"`, empty `RUSTDOCFLAGS`, `RUSTC_WRAPPER` and `RUSTC_WORKSPACE_WRAPPER` (which beat any
 config file), and nextest with `--retries 0 --no-tests fail`. Never export a steering variable for
 the gate. Each refusal has a negative case in `tools/jfl-architecture/tests/gate_negative_cases.rs`.
+A later recipe that needs a `PROPTEST_*` setting passes it to the test process inside the recipe,
+after `_preflight`, never through the caller's environment.
 
 ---
 
@@ -373,7 +392,8 @@ large_futures = "deny"
 only. `arithmetic_side_effects` applies to production code that handles offsets, lengths and
 counts from input; a crate whose arithmetic is all on trusted values may get an ADR-cited
 exception. Zero warnings: `-D warnings` in the gate. Each crate's `lib.rs` opens with a `//!`
-stating its single responsibility and its role.
+stating its single responsibility and its role; a pure crate's opens with `#![no_std]` and puts
+the `//!` right after it (`ARCH-domain-purity` checks the first line, §2.3).
 
 ### 4.3 Errors
 

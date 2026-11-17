@@ -17,10 +17,11 @@ cargo := "env RUSTFLAGS='-D warnings' RUSTDOCFLAGS= RUSTC_WRAPPER= RUSTC_WORKSPA
 
 # The stages of `quick` and `check`, in fnd §9's order. A stage enters `check` in the commit of
 # the task that introduces it (`architecture` with FND-07, `docs` with FND-03, ...).
-quick_stages := "fmt-check clippy unit-tests script-tests"
-check_stages := "fmt-check clippy nostd unit-tests integration-tests doctests script-tests deny"
+quick_stages := "fmt-check architecture clippy unit-tests script-tests"
+check_stages := "fmt-check architecture clippy nostd unit-tests integration-tests doctests script-tests deny"
 
-# The inner loop: fmt-check, clippy, unit tests and the scripts' self-tests. Not the gate.
+# The inner loop: fmt-check, architecture, clippy, unit tests and the scripts' self-tests. Not the
+# gate.
 quick: (check-only quick_stages)
 
 # The full blocking gate: every stage, in order; the first failure stops it with its exit code.
@@ -59,18 +60,29 @@ _preflight:
           CARGO_NET_* | CARGO_HTTP_* | CARGO_REGISTRIES_CRATES_IO_PROTOCOL | RUSTUP_HOME | \
           RUSTUP_DIST_SERVER | RUSTUP_UPDATE_ROOT | RUSTUP_MAX_RETRIES | RUSTUP_IO_THREADS) ;;
         RUSTUP_TOOLCHAIN)
-          case "$RUSTUP_TOOLCHAIN" in "$pinned" | "$pinned"-*) ;; *) refused+=("$name") ;; esac ;;
+          case "$RUSTUP_TOOLCHAIN" in
+            "$pinned" | "$pinned-x86_64-unknown-linux-gnu" | "$pinned-aarch64-unknown-linux-gnu" | \
+              "$pinned-aarch64-apple-darwin") ;;
+            *) refused+=("$name") ;;
+          esac ;;
         RUSTFLAGS)
           case "$RUSTFLAGS" in "" | "-D warnings") ;; *) refused+=("$name") ;; esac ;;
         NEXTEST_PROFILE)
           case "$NEXTEST_PROFILE" in default | ci | serial) ;; *) refused+=("$name") ;; esac ;;
-        CARGO | CARGO_* | RUSTC | RUSTC_* | RUSTDOC | RUSTDOC_* | RUSTDOCFLAGS | RUSTUP_* | CLIPPY_* | NEXTEST_*)
+        CARGO | CARGO_* | __CARGO_* | RUSTC | RUSTC_* | RUSTDOC | RUSTDOC_* | RUSTDOCFLAGS | RUSTUP_* | \
+          CLIPPY_* | NEXTEST_* | PROPTEST_*)
           refused+=("$name") ;;
       esac
     done < <(compgen -e)
     # Cargo reads .cargo/config{,.toml} in every ancestor of the working directory and in
-    # CARGO_HOME; a steering key in any of them is refused.
-    steering='^[[:space:]]*(\[(alias|env|profile|target|unstable)([].]|$)|(build\.|target\.[^=]*\.)?(rustflags|rustdocflags|rustc-wrapper|rustc-workspace-wrapper|rustc|rustdoc|target|runner|linker)[[:space:]]*=|(alias|env|profile|unstable)\.)'
+    # CARGO_HOME; a steering key in any of them is refused: a steering table header, a steering
+    # top-level key in dotted or inline-table form (`profile = { dev = ... }`), quoted (basic or
+    # literal) or not,
+    # and a steering key anywhere on a line (`build = { rustflags = [...] }`).
+    table='(alias|env|profile|target|unstable)'
+    key='(rustflags|rustdocflags|rustc-wrapper|rustc-workspace-wrapper|rustc|rustdoc|target|runner|linker)'
+    q="[\"']?"
+    steering="^[[:space:]]*\\[[[:space:]]*$q$table$q[[:space:]]*([].]|\$)|^[[:space:]]*$q$table$q[[:space:]]*[.=]|(^|[[:space:]{,.\"'])$key$q[[:space:]]*="
     configs=()
     dir="$PWD"
     while :; do
@@ -91,6 +103,13 @@ _preflight:
 # Formatting, checked, never applied.
 fmt-check: _preflight
     {{cargo}} fmt --all --check
+
+# The architecture test (fnd §3.2, FND-07): the dependency law over `cargo metadata` for each
+# target of ADR 0006, the clippy lists against `[grants]` and the source scan, over the tree
+# (tests/architecture.rs); plus the checker's own table-driven negative cases and the meta-test
+# (tests/rules.rs). The fixture workspaces run in `integration-tests`.
+architecture: _preflight (_require "cargo-nextest")
+    {{cargo}} nextest run --locked --retries 0 --no-tests fail -p jfl-architecture --test architecture --test rules
 
 # Clippy with the authority lists (fnd §2.4): the per-crate lists must match the root one first,
 # and a list entry naming a path that does not exist fails the stage (clippy only warns, and

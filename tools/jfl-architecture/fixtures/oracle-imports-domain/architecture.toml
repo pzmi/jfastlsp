@@ -1,0 +1,17 @@
+# ARCH-independent-oracle: an independent tool reaches no workspace crate (fnd §2.7), even with
+# the edge in the table.
+schema = 1
+
+[workspace]
+production = ["domain"]
+tool_only = ["oracle"]
+
+[roles]
+pure = ["domain"]
+
+[grants]
+independent = ["oracle"]
+
+[dependencies.normal]
+domain = []
+oracle = ["domain"]
