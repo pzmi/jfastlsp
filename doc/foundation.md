@@ -512,8 +512,15 @@ There is no event store (ADR 0008). What persists:
   reason beside it.
 - Every `uses:` is pinned to a 40-hex commit SHA with the version in a comment, or is a local
   action; container images by `@sha256:` digest. Checked by zizmor (`unpinned-uses` with a
-  hash-pin policy, template injection, excessive permissions), `pinact run --check
-  --verify-comment` and actionlint with shellcheck (`workflows` stage, FND-04).
+  hash-pin policy, template injection, excessive permissions), pinact and actionlint with
+  shellcheck. The `workflows` stage (FND-04, `scripts/workflows-check.sh`) is offline and
+  deterministic: actionlint, zizmor `--offline` with `.github/zizmor.yml`, `pinact run
+  --fix=false --no-api` (every `uses:` is a SHA), and shellcheck over `scripts/*.sh` and
+  `.claude/hooks/*.sh` (`spikes/e1-parse/*.sh` is excluded: archived evidence for plan §1.7, kept
+  as it ran and outside the workspace); a tree with no workflow file passes with a notice. The comment check,
+  `pinact run --check --verify-comment`, asks the GitHub API, so it is the recipe
+  `workflows-verify`, outside `check` (like `bench-gate`): `ci.yml`'s security job runs it with a
+  token (FND-05). The sandbox refuses the API, which is why it cannot be a stage of `check`.
 - `actions/checkout` with `persist-credentials: false`; no `pull_request_target`; inputs reach
   scripts through `env`, never interpolated into `run:`.
 - Concurrency per ref, and per commit on `main`: a newer push to `main` neither cancels nor
@@ -526,17 +533,33 @@ There is no event store (ADR 0008). What persists:
   crate with an ADR; `notify` is CC0-1.0 and tree-sitter grammars MIT, to confirm at the task
   that adds them), bans (no wildcards), sources (crates.io only); `[graph] targets` set to the
   three targets of ADR 0006.
-- `gitleaks` (the binary, pinned by mise) over the full history; `.gitleaks.toml` allowlists
-  nothing; fixtures build fake secrets at run time if they need any. GitHub secret scanning and
-  push protection are on (owner setting).
+- `gitleaks` (the binary, pinned by mise) over the full history (`secrets` stage,
+  `scripts/secrets-check.sh`: redacted, and a shallow clone fails rather than scanning part of
+  the history); `.gitleaks.toml` is exactly `[extend]` and `useDefault = true` and nothing else (the
+  script refuses any other non-comment line, a `.gitleaksignore` in the history, and runs gitleaks
+  with `--ignore-gitleaks-allow`, so no inline comment, ignore file, disabled rule or allowlist
+  can wave a finding through); fixtures build fake secrets at run time if they need any. GitHub secret
+  scanning and push protection are on (owner setting).
 - **Private names** (`private-names` stage, FND-04): the names are never committed, only their
   salted hashes. `.private-names.sha256` (committed since BOOT-02) has a `# salt: <hex>` header
   and one `sha256("<salt>:<name>")` per line, the name lower-cased with everything but ASCII
   letters and digits removed. The check tokenises the changed text (the diff against
   `git merge-base HEAD origin/main` plus the working tree, and the commit messages in that
-  range): it lower-cases, splits on anything that is not a letter or digit, and hashes every
-  token and every run of 2 or 3 adjacent tokens joined, so `Foo Bar`, `foo-bar` and `FooBar`
-  match one entry; a match fails with the path and line, never the name. It needs no secret, so
+  range): it folds the text to ASCII (NFKD, combining marks dropped, ł ø đ ß æ œ and the like
+  mapped, `scripts/private-names-fold.pl`, shared with the add script), lower-cases it, splits on
+  anything that is not a letter or digit, and hashes every token and every run of 2 or 3 adjacent
+  tokens joined (also after splitting camelCase), so `Foo Bar`, `foo-bar`, `FooBar` and an
+  accented name in NFC, NFD or plain ASCII match one entry; the add script refuses a name of more
+  than 3 words, which no run could match. The scope also covers the names of added and untracked
+  files, the author and committer of each commit in the range, the current branch name, files
+  git treats as binary (`--text`) and UTF-16 files with a byte-order mark; a change that removes
+  an entry from the list or alters its salt fails. A match fails with the path and line, never
+  the name (a path that holds the name is masked). **Limits, accepted under the accidental-leak
+  model:** there is no substring matching (`myquillmarrow` and `quillmarrows` miss), no
+  homoglyph or letter-swap matching, no reading of Windows-1250 or other legacy encodings, of
+  UTF-16 without a byte-order mark, of URL-encoded joins (`quill%20marrow`) or of untracked
+  files that contain NUL bytes, and a name of more than 3 words is covered only by its
+  distinctive part. It needs no secret, so
   it is a stage of `check` and runs in CI, on fork pull requests and in `land.sh`. A missing or
   empty hash file fails closed in CI (`CI=true`) and in `land.sh`, and only warns elsewhere (a
   downstream fork may not have one). The owner adds a name with `scripts/private-name-add.sh`,
@@ -567,7 +590,8 @@ There is no event store (ADR 0008). What persists:
    from a `mise.lock` that records each asset URL, but an install without a locked URL (for
    example `mise exec aqua:koalaman/shellcheck@0.11.0`) failed on the GitHub API: in the sandbox
    every tool is installed with `--locked`. `mise lock` itself worked in the sandbox for `just` and
-   `hyperfine`; a tool whose lock entry needs the API is locked where the API is reachable (CI,
+   `hyperfine`, and on 2026-11-17 for gitleaks, actionlint, zizmor, pinact, shellcheck and ripgrep
+   (each lock entry has a checksum); a tool whose lock entry needs the API is locked where the API is reachable (CI,
    or the owner's machine) and the reason recorded. A version bump of mise or just changes the script's version and every checksum
    in one commit, and `mise.toml` pins just at the same version.
 1. **mise** pins every tool other than Rust (ADR 0030): `mise.toml` names each tool and version,
@@ -630,7 +654,8 @@ needs one becomes a recipe parameter (`just conformance seed=42`).
 | `scripts/land.sh <sha>… [--no-push]` | cherry-pick onto a fresh `origin/main` worktree, check sign-offs and signatures, `just check`, push only on green | FND-03 |
 | `just coverage`, `just changed-lines` | llvm-cov vs `coverage-floor.toml`; diff-cover on the lines changed since `git merge-base HEAD origin/main` (plus the working tree) | FND-06 |
 | `just mutants-diff [base]` | cargo-mutants `--in-diff` over the same diff, with a time cap; outside `check` (below) | FND-06 |
-| `just private-names` | the hashed private-name check of §7.4 | FND-04 |
+| `just secrets`, `just workflows`, `just private-names` | gitleaks over the history; actionlint, zizmor, pinact (offline) and shellcheck; the hashed private-name check of §7.4 (`scripts/private-names-check.sh [--all]`) | FND-04 |
+| `just workflows-verify` | pinact's version-comment check; needs the GitHub API, so outside `check` (§7.3) | FND-04 |
 | `just bench-corpus` | fetch the pinned corpus of `doc/bench-corpus.md` into the cache directory | BENCH-01 |
 | `just bench [suite] [corpus=small]` | the benchmark suites with machine facts, JSON results; reports, never gates | BENCH-02 |
 | `just bench-gate` | compare a run with the history of the same runner class; `bench.yml` only | BENCH-04 |

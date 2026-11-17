@@ -44,7 +44,7 @@ run_fail() {
   if "$@" 2>"$err"; then fail "$what passed"; fi
   grep -q "$pat" "$err" || { cat "$err" >&2; fail "$what: wrong reason (wanted '$pat')"; }
 }
-fetch() { "$test_script" fetch small --cache "$cache" --local-source "$tmp/src" "$@"; }
+fetch() { "$test_script" fetch small --cache "$cache" --local-source "$tmp/src"; }
 
 # given an empty cache, when fetched, then it is verified and the tree is clean
 fetch 2>"$err" || fail "fetch"

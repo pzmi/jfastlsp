@@ -1,0 +1,8 @@
+# zizmor policy (fnd §7.3, FND-04): every `uses:` is pinned to a commit SHA, whatever the owner of
+# the action. Read by scripts/workflows-check.sh (--config); nothing else is configured here, so
+# every other audit runs at its default.
+rules:
+  unpinned-uses:
+    config:
+      policies:
+        "*": hash-pin

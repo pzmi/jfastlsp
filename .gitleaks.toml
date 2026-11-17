@@ -1,0 +1,5 @@
+# gitleaks policy (fnd §7.4, FND-04): the default ruleset and nothing allowlisted. A fixture that
+# needs a fake secret builds it at run time (scripts/test-secrets.sh), so no finding is ever
+# waved through.
+[extend]
+useDefault = true

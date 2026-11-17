@@ -14,3 +14,16 @@ just = "1.59.0"
 # project's dist release assets; the lock entries carry the SHA-256 of each asset (sha256.sum of
 # the release). Version 0.13.0 is the current release on 2026-11-17.
 "github:joshrotenberg/adrs" = "0.13.0"
+
+# Security and supply chain (FND-04, fnd §7.3, §7.4, §8): secret scan, workflow audits, shell lint.
+# Prebuilt release assets from the aqua registry, so a fresh session installs them from the lock.
+# Versions are the current releases on 2026-11-17.
+"aqua:gitleaks/gitleaks" = "8.30.1"
+"aqua:rhysd/actionlint" = "1.7.12"
+"aqua:zizmorcore/zizmor" = "1.32.0"
+"aqua:suzuki-shunsuke/pinact" = "5.0.2"
+"aqua:koalaman/shellcheck" = "0.11.0"
+
+# The benchmark harness's timer and its `rg` floor (BENCH-02); pinned here, no recipe yet.
+"aqua:sharkdp/hyperfine" = "2.0.0"
+"aqua:BurntSushi/ripgrep" = "15.2.0"

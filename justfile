@@ -18,7 +18,7 @@ cargo := "env RUSTFLAGS='-D warnings' RUSTDOCFLAGS= RUSTC_WRAPPER= RUSTC_WORKSPA
 # The stages of `quick` and `check`, in fnd §9's order. A stage enters `check` in the commit of
 # the task that introduces it (`architecture` with FND-07, `docs` with FND-03, ...).
 quick_stages := "fmt-check architecture clippy unit-tests script-tests"
-check_stages := "fmt-check architecture clippy nostd docs unit-tests integration-tests doctests script-tests deny"
+check_stages := "fmt-check architecture clippy nostd docs unit-tests integration-tests doctests script-tests deny secrets workflows private-names"
 
 # The inner loop: fmt-check, architecture, clippy, unit tests and the scripts' self-tests. Not the
 # gate.
@@ -180,6 +180,31 @@ dco range="origin/main..HEAD":
 deny: _preflight (_require "cargo-deny")
     {{cargo}} deny --locked check
 
+# gitleaks over the full history, default rules, nothing allowlisted (FND-04, fnd §7.4;
+# scripts/secrets-check.sh). A shallow clone fails: fetch the history in full.
+secrets: _preflight
+    bash scripts/secrets-check.sh
+
+# The static checks of GitHub Actions files and shell scripts, offline (FND-04, fnd §7.3;
+# scripts/workflows-check.sh): actionlint with shellcheck, zizmor's offline audits with the
+# hash-pin policy, pinact's syntactic pin check, then shellcheck over scripts/ and the hooks.
+# A tree without workflow files passes with a notice.
+workflows: _preflight
+    bash scripts/workflows-check.sh workflows
+    bash scripts/workflows-check.sh shell
+
+# pinact's comment check: each `# vX.Y.Z` names the SHA it sits on. Needs the GitHub API (set
+# GITHUB_TOKEN in CI), so it is outside `check`; ci.yml's security job runs it (FND-05).
+workflows-verify:
+    bash scripts/workflows-check.sh verify
+
+# No name whose salted hash is in .private-names.sha256 in the lines this change adds, the
+# untracked files or the commit messages since `git merge-base HEAD origin/main` (FND-04, fnd
+# §7.4; scripts/private-names-check.sh). The hash file is required under CI=true; add a name
+# with scripts/private-name-add.sh (owner).
+private-names: _preflight
+    bash scripts/private-names-check.sh
+
 # Fetch the pinned benchmark corpus of doc/bench-corpus.md into its cache (BENCH-01).
 bench-corpus size="small" cache="":
     bash scripts/bench-corpus.sh fetch {{quote(size)}} {{ if cache != "" { "--cache " + quote(cache) } else { "" } }}
@@ -190,7 +215,8 @@ jdtls-it:
     {{cargo}} nextest run -p jfl-jdtls --locked --retries 0 --features real-jdtls --test real_jdtls
 
 # just must be the version mise.toml and scripts/bootstrap-tools.sh pin.
-# Fail when a pinned tool is missing or wrong, or just is not its pinned version.
+# Fail when a pinned tool is missing or wrong, or just is not its pinned version. It lists the
+# security tools of FND-04 and fails when one is not on PATH.
 doctor:
     # Non-interactive shells never activate mise, which `mise doctor` reports as a problem:
     # the shims directory on PATH is the documented alternative for such setups.
@@ -200,6 +226,10 @@ doctor:
       actual="$({{just_executable()}} --version | cut -d' ' -f2)"; \
       if [ -z "$pinned" ] || [ "$pinned" != "$actual" ]; then \
         echo "doctor: just is $actual but mise.toml pins '$pinned'" >&2; exit 1; fi
+    for tool in gitleaks actionlint shellcheck zizmor pinact; do \
+      command -v "$tool" >/dev/null 2>&1 || { echo "doctor: $tool is not on PATH: run 'mise install --locked'" >&2; exit 1; }; \
+    done
+    mise ls --current | grep -E 'gitleaks|actionlint|shellcheck|zizmor|pinact'
 
 # Fail closed with mise's install hint when a pinned tool is not on PATH (fnd §8 rule 4).
 _require tool:
