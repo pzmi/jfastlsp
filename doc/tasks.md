@@ -7,9 +7,9 @@ own *what*; a citation "plan §5.2", "fnd §3" or "ver §4" points to a section 
 file owns *order* and *size*. Each task is one focused commit that a fresh agent can finish in one
 session after reading only what the card names.
 
-**Live gate:** the fallback gate (`cargo fmt --all --check && cargo clippy --workspace
---all-targets --locked -- -D warnings && cargo test --workspace --locked`) until FND-02 lands,
-then `just check` (and `just quick` while iterating), with tools from `mise install --locked`.
+**Live gate:** `just check` (and `just quick` while iterating), with tools from
+`mise install --locked`, since FND-02; before it, the fallback gate (`cargo fmt --all --check &&
+cargo clippy --workspace --all-targets --locked -- -D warnings && cargo test --workspace --locked`).
 Until FND-03 lands, the orchestrator lands commits by hand ([`sdlc.md`](sdlc.md) §2); from then
 on with `scripts/land.sh`. mise and just come from `scripts/bootstrap-tools.sh` (fnd §8), which
 the SessionStart hook runs in cloud sessions. Until FND-01 lands there is no Cargo workspace and

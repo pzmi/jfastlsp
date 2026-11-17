@@ -7,3 +7,5 @@ just = "1.59.0"
 # The test runner (FND-01); prebuilt release asset, no compile in a fresh session.
 "aqua:nextest-rs/nextest/cargo-nextest" = "0.9.152"
 
+# Licences, advisories, sources and bans: the `deny` stage (FND-02); prebuilt release asset.
+"aqua:EmbarkStudios/cargo-deny" = "0.21.0"

@@ -1,6 +1,7 @@
-# cargo-deny policy skeleton (fnd §7.4). FND-02 runs it as the `deny` stage and adds the
-# `wrappers`, `[[bans.features]]` and build-script entries of fnd §2.5; no third-party crate
-# exists yet, so only the graph, sources and base rules are set.
+# cargo-deny policy (fnd §2.5, §7.4; ADR 0030): the `deny` stage, `cargo deny --locked check`.
+# Advisories, licences, sources and bans: the transitive half of the dependency law, where the
+# architecture test (FND-07) holds the direct half. A widened entry needs the task to say so and
+# an ADR (fnd §3.5).
 [graph]
 # The three targets of ADR 0006.
 targets = [
@@ -8,12 +9,13 @@ targets = [
   "aarch64-unknown-linux-gnu",
   "aarch64-apple-darwin",
 ]
+all-features = true
 
 [advisories]
 yanked = "deny"
 
 [licenses]
-# Permissive allowlist; a per-crate exception needs an ADR (fnd §7.4).
+# Permissive allowlist of plan §16.2; a per-crate exception needs an ADR (fnd §7.4).
 allow = [
   "MIT",
   "Apache-2.0",
@@ -24,13 +26,56 @@ allow = [
   "BSD-3-Clause",
   "Unicode-3.0",
 ]
+# The allowlist is the plan's, not the graph's: most are not encountered yet.
+unused-allowed-license = "allow"
 
 [bans]
 multiple-versions = "warn"
 wildcards = "deny"
+# Workspace path dependencies carry no version; every registry dependency must.
 allow-wildcard-paths = true
+# `wrappers`: each adapter-only crate may be a direct dependency only of the crates named, so it
+# stays out of every other crate's closure (fnd §2.5). That this applies to workspace path crates
+# is pinned by tools/jfl-architecture/tests/gate_negative_cases.rs
+# ::should_fail_deny_bans_when_a_path_crate_is_wrapped_to_the_wrong_parent.
+# Until the adapters add these crates, cargo-deny warns `unused-wrapper` for each (it has no
+# setting to silence it); the warnings do not fail the stage.
+# `use-instead`: the rejected options of plan §16.3.
+deny = [
+  { crate = "tokio", wrappers = ["jfl-composition", "jfl-adapter-ipc", "tokio-util"], reason = "the async runtime is daemon-side only: composition and the IPC adapter (plan §16.2)" },
+  { crate = "tokio-util", wrappers = ["jfl-composition", "jfl-adapter-ipc"], reason = "daemon-side only (plan §16.2)" },
+  { crate = "rusqlite", wrappers = ["jfl-adapter-store"], reason = "storage is the store adapter's (ADR 0025)" },
+  { crate = "tree-sitter", wrappers = ["jfl-adapter-java", "tree-sitter-java-orchard"], reason = "the Java grammar is the Java adapter's (ADR 0022)" },
+  { crate = "tree-sitter-java-orchard", wrappers = ["jfl-adapter-java"], reason = "the Java grammar is the Java adapter's (ADR 0022)" },
+  { crate = "lsp-server", wrappers = ["jfl-adapter-lsp", "jfl-adapter-ipc"], reason = "LSP framing lives in the LSP and IPC adapters (ADR 0020, ADR 0021)" },
+  { crate = "gen-lsp-types", wrappers = ["jfl-adapter-lsp"], reason = "LSP types are the LSP adapter's (ADR 0020)" },
+  { crate = "anyhow", wrappers = ["jfl-cli", "jfl-architecture", "jfl-oracle", "jfl-eval", "jfl-jdtls", "jfl-bench"], reason = "anyhow only in binaries and tools (ARCH-anyhow-in-library)" },
+  { crate = "lsp-types", use-instead = "gen-lsp-types", reason = "stalled since 2024 (plan §16.3)" },
+  { crate = "tower-lsp", use-instead = "lsp-server", reason = "unmaintained (plan §16.3)" },
+  { crate = "git2", reason = "linked-worktree gap and a C build: the git CLI (ADR 0024)" },
+  { crate = "gix", reason = "linked-worktree gap: the git CLI (ADR 0024)" },
+  { crate = "bincode", use-instead = "postcard", reason = "unmaintained, RUSTSEC-2025-0141 (plan §16.3)" },
+  { crate = "fs2", reason = "std file locks since Rust 1.89 (plan §16.3)" },
+  { crate = "fs4", reason = "std file locks since Rust 1.89 (plan §16.3)" },
+  { crate = "fd-lock", reason = "std file locks since Rust 1.89 (plan §16.3)" },
+  { crate = "daemonize", reason = "fork() in a threaded process (plan §16.3)" },
+]
+# Features a crate may not enable (plan §16.2).
+features = [
+  { crate = "zip", deny = ["default"], reason = "zip without default features, deflate on (plan §16.2)" },
+]
+
+[bans.build]
+# Only the crates named here may run a build script (fnd §2.2 rule 5), workspace crates included
+# (cargo-deny skips them by default): none yet. The tree-sitter grammars and bundled SQLite
+# compile C and are added by name, with the reason, by the task that adds them (IDX-07, IDX-08).
+# Pinned by tools/jfl-architecture/tests/gate_negative_cases.rs
+# ::should_fail_deny_bans_when_a_workspace_crate_has_a_build_script.
+include-workspace = true
+allow-build-scripts = []
 
 [sources]
+# crates.io only (ARCH-external-source).
 unknown-registry = "deny"
 unknown-git = "deny"
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]

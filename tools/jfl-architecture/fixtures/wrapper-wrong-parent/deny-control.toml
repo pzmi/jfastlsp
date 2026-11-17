@@ -1,0 +1,3 @@
+# The positive control: both parents are wrappers, so `cargo deny check bans` passes.
+[bans]
+deny = [{ crate = "wrapped", wrappers = ["allowed-parent", "wrong-parent"], reason = "fixture" }]

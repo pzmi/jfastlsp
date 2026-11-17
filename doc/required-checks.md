@@ -26,7 +26,7 @@ editing the ruleset.
 |:--|:--|:--|:--|
 | `architecture` | Architecture and policy | `check-only architecture deny` | FND-05 |
 | `static` | Static quality | `doctor`, then `check-only fmt-check clippy nostd docs` | FND-05 |
-| `tests` | Tests (Linux x86-64) | `check-only unit-tests integration-tests doctests` | FND-05 |
+| `tests` | Tests (Linux x86-64) | `check-only unit-tests integration-tests doctests script-tests` | FND-05 |
 | `linux-arm` | Linux (arm64) | `check-only platform-tests` on `ubuntu-24.04-arm` | FND-05 |
 | `macos` | macOS (arm64) | `check-only platform-tests` on `macos-15` | FND-05 |
 | `security` | Security | `check-only secrets workflows private-names` | FND-05 |

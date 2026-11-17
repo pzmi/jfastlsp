@@ -57,3 +57,7 @@ indexing_slicing = "deny"
 arithmetic_side_effects = "deny"
 await_holding_lock = "deny"
 large_futures = "deny"
+# The authority lists of clippy.toml (fnd §2.4): denied, never warned.
+disallowed_macros = "deny"
+disallowed_methods = "deny"
+disallowed_types = "deny"

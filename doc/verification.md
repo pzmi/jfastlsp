@@ -64,7 +64,8 @@ Rules across levels:
    projects copied, never used in place; no fixed paths, no network.
 4. **nextest.** Profiles `default`, `ci` (no fail-fast, JUnit) and `serial`; `retries = 0` in
    every profile; slow-timeout 30 s, terminated after four periods. Tests that start the daemon
-   or a JVM share a test group bounded to the lane's parallelism (FND-02).
+   or a JVM share a test group bounded to the lane's parallelism (FND-02): such a test lives in a
+   module named `daemon_or_jvm`, which `.config/nextest.toml` puts in the `daemon-or-jvm` group.
 5. **Nothing skips.** A test that cannot find its environment (the pinned JDK, `git`) fails. Tests
    that need the target repository or a Claude Code run live in owner-run harnesses, never in the
    gate.

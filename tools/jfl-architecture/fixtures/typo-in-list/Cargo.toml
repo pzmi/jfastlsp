@@ -1,0 +1,11 @@
+[package]
+name = "typo-in-list"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[lints.clippy]
+disallowed_methods = "deny"
+
+# Its own workspace, not a member of the main one.
+[workspace]

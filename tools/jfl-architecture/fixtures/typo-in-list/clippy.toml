@@ -1,0 +1,4 @@
+# A mistyped std path without allow-invalid: clippy only warns, so the clippy stage must fail it.
+disallowed-methods = [
+  { path = "std::thread::sleeep", reason = "fixture: a typo of std::thread::sleep" },
+]

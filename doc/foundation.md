@@ -108,11 +108,14 @@ Plan §6.5's table is enforced per crate, because clippy has no module-level con
   - `process`: `std::process::Command`, `tokio::process::Command`;
   - `socket`: `std::os::unix::net::*` types and Tokio's Unix types (TCP and UDP types are in no
     grant: denied everywhere);
-  - `fs`: `std::fs` functions and types, Tokio's fs;
-  - `spawn`: `std::thread::spawn`, `tokio::spawn`;
-  - `sleep`: `std::thread::sleep`, `tokio::time::sleep`;
-  - `clock`: `SystemTime::now`, `Instant::now`;
-  - `env`: `std::env::var`, `var_os`, `vars`, `set_var`, `remove_var`;
+  - `fs`: `std::fs` functions and types, the `Path` methods that touch the filesystem, Tokio's fs;
+  - `spawn`: `std::thread::spawn`, `Builder::spawn`, `scope`, `Scope::spawn`,
+    `Builder::spawn_scoped`, `tokio::spawn` and its `spawn_blocking`/`spawn_local`;
+  - `sleep`: `std::thread::sleep`, `park_timeout`, `tokio::time::sleep`, `sleep_until`;
+  - `clock`: `SystemTime::now`, `Instant::now`, `SystemTime::elapsed`, `Instant::elapsed`,
+    Tokio's `Instant::now`;
+  - `env`: `std::env::var`, `var_os`, `vars`, `vars_os`, `set_var`, `remove_var`, `home_dir`,
+    `temp_dir`, `current_dir`, `set_current_dir`, `current_exe`;
   - no grant: unbounded channels (`tokio::sync::mpsc::unbounded_channel`,
     `std::sync::mpsc::channel`, `crossbeam_channel::unbounded`).
 
@@ -121,7 +124,11 @@ Plan §6.5's table is enforced per crate, because clippy has no module-level con
 - A crate granted an authority carries **its own `clippy.toml`**: the canonical list minus
   exactly its grants. Clippy has no inheritance, so the architecture test checks every crate's
   list against the canonical one and the `[grants]` table of `architecture.toml`
-  (`ARCH-clippy-lists`). The grants, kept tight for production crates (plan §6.5):
+  (`ARCH-clippy-lists`). Only entries whose crate may be absent (Tokio, crossbeam, and std in
+  the no_std pure crates) carry `allow-invalid`; the `clippy` stage fails on any entry that names
+  no path, since clippy only warns about it. The lists are generated: `just clippy-lists` writes each crate's file
+  from the root one (whose sections are marked `# grant: <name>`; the pure crates' extra entries
+  are `#pure ` lines), and the `clippy` stage fails first when a file differs. The grants, kept tight for production crates (plan §6.5):
 
   | Crate | Grants | Why |
   |:--|:--|:--|
@@ -314,9 +321,18 @@ and proves necessary becomes a `dylint` lint through an ADR.
 
 The gate defends against honest mistakes, shortcuts and drift, not a determined insider; review
 is the backstop. The `justfile`'s `_preflight` recipe, a dependency of every stage, refuses an
-environment that steers the build: `RUSTC_WRAPPER`, `RUSTC_WORKSPACE_WRAPPER`, `RUSTFLAGS` other
-than `-D warnings`, `CLIPPY_CONF_DIR`, `CLIPPY_*`, `RUSTC_BOOTSTRAP`, `CARGO_ALIAS_*`,
-`CARGO_UNSTABLE_*`, per-target runners. Never export them for the gate.
+environment that steers the build, by allowlist: every `CARGO*`, `RUSTC*`, `RUSTDOC*`,
+`RUSTUP_*`, `CLIPPY_*` and `NEXTEST_*` variable is refused except `CARGO_TARGET_DIR`,
+`CARGO_BUILD_JOBS`, `CARGO_INCREMENTAL`, `CARGO_HOME`, `CARGO_TERM_*`, `CARGO_NET_*`,
+`CARGO_HTTP_*`, `CARGO_REGISTRIES_CRATES_IO_PROTOCOL`, `RUSTUP_HOME` and rustup's download
+settings, `RUSTUP_TOOLCHAIN` naming the pinned toolchain, `RUSTFLAGS` empty or `-D warnings`, and
+`NEXTEST_PROFILE` naming a profile of `.config/nextest.toml`. It also refuses a cargo config file
+(`.cargo/config{,.toml}` in any ancestor of the working directory, or in `CARGO_HOME`) that sets
+compiler flags, a wrapper, `rustc`/`rustdoc`, a target, runner or linker, a profile, an alias,
+`[env]` or `[unstable]`. Independently, every cargo of the gate runs with `RUSTFLAGS="-D
+warnings"`, empty `RUSTDOCFLAGS`, `RUSTC_WRAPPER` and `RUSTC_WORKSPACE_WRAPPER` (which beat any
+config file), and nextest with `--retries 0 --no-tests fail`. Never export a steering variable for
+the gate. Each refusal has a negative case in `tools/jfl-architecture/tests/gate_negative_cases.rs`.
 
 ---
 
@@ -580,10 +596,11 @@ needs one becomes a recipe parameter (`just conformance seed=42`).
 |:--|:--|:--|
 | `bash scripts/bootstrap-tools.sh` | install the pinned mise and just (checksum-verified), then `mise install --locked` | BOOT-02 |
 | `mise install --locked` | install every pinned tool from `mise.lock` | FND-01 |
-| `just quick` | fmt-check, architecture (from FND-07), clippy, unit tests: the inner loop | FND-02 |
+| `just quick` | fmt-check, architecture (from FND-07), clippy, unit tests, script tests: the inner loop | FND-02 |
 | `just check` | the full blocking gate: every stage, in order, stopping at none silently | FND-02 |
 | `just check-only <stage>…` | named stages through the same recipes (what each CI job runs) | FND-02 |
 | `just --list`, `just --dump --dump-format json` | the stage catalog | FND-02 |
+| `just clippy-lists` | rewrite every crate's `clippy.toml` from the root list and `[grants]` (§2.4); the `clippy` stage fails when one differs | FND-02 |
 | `just doctor` | `mise doctor` and `mise ls --missing` | FND-01 |
 | `adrs new "<title>"`, `just adr-index` | create an ADR; check the index against the files | FND-03 |
 | `scripts/land.sh <sha>… [--no-push]` | cherry-pick onto a fresh `origin/main` worktree, `just check`, push only on green | FND-03 |
@@ -606,7 +623,7 @@ needs one becomes a recipe parameter (`just conformance seed=42`).
 
 Stages of `check` in order (each a recipe): `fmt-check`, `architecture`, `clippy`, `nostd`
 (§2.3), `docs` (the ADR index matches the files), `unit-tests`, `integration-tests`, `doctests`,
-`e2e-tests`, `lsp-conformance`, `formal-typecheck`, `formal-test`, `formal-freshness`,
+`script-tests` (the offline self-tests `scripts/test-*.sh`), `e2e-tests`, `lsp-conformance`, `formal-typecheck`, `formal-test`, `formal-freshness`,
 `conformance-replay`, `java-fixtures`, `coverage`, `changed-lines`, `deny`, `secrets`,
 `workflows`, `private-names`. A stage enters `check` in the commit of the task that introduces
 it, together with its `ci.yml` job entry.

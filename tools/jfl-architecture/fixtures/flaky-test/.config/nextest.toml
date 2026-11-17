@@ -1,0 +1,3 @@
+# The fixture's own retries, which the gate's `--retries 0` must beat.
+[profile.default]
+retries = 3

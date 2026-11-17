@@ -1,0 +1,4 @@
+# `wrapped` may be a dependency of `allowed-parent` only; `wrong-parent` also depends on it, so
+# `cargo deny check bans` must fail (fnd §2.5: wrappers apply to workspace path crates).
+[bans]
+deny = [{ crate = "wrapped", wrappers = ["allowed-parent"], reason = "fixture" }]

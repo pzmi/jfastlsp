@@ -1,0 +1,3 @@
+[workspace]
+members = ["allowed-parent", "wrong-parent", "wrapped"]
+resolver = "3"

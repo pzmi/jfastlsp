@@ -1,0 +1,3 @@
+# The only table the `nostd` recipe reads: the pure crates to build without std.
+[roles]
+pure = ["pure"]
