@@ -84,12 +84,18 @@ jfl-jdtls = { rustix = ["net", "process", "std"], serde = ["default", "derive"],
 # xtask (XT-01, ADR 0035): regex holds the shapes the preflight and the tool configuration check
 # ported from awk and sed (the same patterns, line for line); already in the graph (ignore, under
 # jfl-bench), MIT OR Apache-2.0, no build script. No clap: a hand parser keeps the launcher's first
-# build one crate deep (scripts/xtask.sh).
-xtask = { regex = ["default"] }
+# build one crate deep (scripts/xtask.sh). sha2 (XT-02) checks each release asset `install-tools`
+# fetches against tools/versions.toml in process, so no hashing program found on PATH can vouch
+# for a tampered archive: RustCrypto, MIT OR Apache-2.0, no build script, in the graph already
+# (jfl-architecture).
+xtask = { regex = ["default"], sha2 = ["default"] }
 
 jfl-bench = { blake3 = ["default"], ignore = ["default"], rayon = ["default"], serde = ["default", "derive"], serde_json = ["default"], toml = ["default"], tree-sitter = ["default"], tree-sitter-java-orchard = ["default"] }
 
 [external.dev]
+# xtask (XT-02): toml reads tools/versions.toml, mise.toml and mise.lock in tests/versions.rs, an
+# oracle independent of xtask's own pinned-shape reader; in the graph already (jfl-architecture).
+xtask = { toml = ["default"] }
 
 [external.build]
 

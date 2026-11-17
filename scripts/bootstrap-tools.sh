@@ -14,7 +14,8 @@
 # mirror (mise only), then `cargo install --locked` (just only). The checksums below were
 # copied from each release's SHASUMS256.txt / SHA256SUMS and checked against the downloaded
 # archives on 2026-11-16. A version bump changes the version and every checksum in one commit,
-# and FND-01's mise.toml pins just at the same version (`just doctor` compares them).
+# and mise.toml, mise.lock and tools/versions.toml pin just at the same version and digests (a unit
+# test of tools/xtask/src/versions.rs compares them; `just doctor` checks the just on PATH).
 set -euo pipefail
 
 MISE_VERSION="2026.10.10"

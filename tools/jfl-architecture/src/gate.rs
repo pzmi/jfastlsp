@@ -69,15 +69,16 @@ pub const MISE_LOCK: &str = "mise.lock";
 /// reads by path (`.github/zizmor.yml`, `deny.toml`) and the tool pins (`mise.toml`, whose new
 /// tool would land on the stages' PATH, and `mise.lock`; FND-09), and what decides landing and
 /// guards a session (`scripts/land.sh`, `scripts/dco-check.sh`, the SessionStart and Stop hooks;
-/// the FND-09 review's G5), and the launcher that builds and runs xtask (`scripts/xtask.sh`,
-/// XT-01). Every `scripts/test-*.sh` and every xtask composition source ([`XTASK_SOURCES`]) is
+/// the FND-09 review's G5), the launcher that builds and runs xtask (`scripts/xtask.sh`,
+/// XT-01) and xtask's tool pins (`tools/versions.toml`, whose URLs and digests `install-tools`
+/// trusts and whose tools lead the stages' PATH; XT-02). Every `scripts/test-*.sh` and every xtask composition source ([`XTASK_SOURCES`]) is
 /// pinned too, found by [`gate_files`]. Not pinned, each for its reason (fnd §3.6):
 /// `architecture.toml` and the `clippy.toml` files change with every new crate and are held to
 /// their schema by the architecture test itself (`ARCH-policy-schema`, `ARCH-clippy-lists`);
 /// this checker's own sources are code under its meta-test (`tests/rules.rs`, one negative case
 /// per rule) and review; `.gitleaks.toml` is compared byte for byte with what the pinned
 /// `scripts/gitleaks-config.sh` generates.
-pub const GATE_FILES: [&str; 17] = [
+pub const GATE_FILES: [&str; 18] = [
     ".claude/hooks/session-start.sh",
     ".claude/hooks/stop-gate.sh",
     ".github/zizmor.yml",
@@ -95,6 +96,7 @@ pub const GATE_FILES: [&str; 17] = [
     "scripts/secrets-check.sh",
     "scripts/workflows-check.sh",
     "scripts/xtask.sh",
+    "tools/versions.toml",
 ];
 /// The xtask composition (XT-01, ADR 0035): its manifest and every file under its `src/` (the
 /// stage catalog, each stage's command, the preflight and the tool configuration check), pinned

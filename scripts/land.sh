@@ -19,7 +19,9 @@
 #      (scripts/dco-check.sh) and a signature in the commit HEADER (a `gpgsig` line in the message
 #      body does not count; --allow-unsigned waives it for a repository that does not sign);
 #   5. check each cherry-picked tree's tool configuration with THIS checkout's xtask
-#      (`scripts/xtask.sh tool-config`, built from this checkout, from outside the tree) before
+#      (`scripts/xtask.sh tool-config`, built from this checkout, from outside the tree, into
+#      a target directory of its own that no gate is given: `$XDG_CACHE_HOME/jfastlsp/land-xtask`,
+#      else `~/.cache/jfastlsp/land-xtask`, refused as CARGO_TARGET_DIR; XT-02) before
 #      anything there runs, a Cargo.lock resolution included
 #      (mise runs code from a trusted configuration as it loads it, `just` evaluates the
 #      justfile's `mise bin-paths`, and any cargo command runs a configured rustc-wrapper or a
@@ -36,7 +38,10 @@
 #
 # --no-push stops after step 5 (a dry run: the gate on what would land). In both modes the result
 # is kept as refs/land/last; after a push the local branch fast-forwards to it when it can.
-# CARGO_TARGET_DIR passes through to the gate (a fresh worktree otherwise builds from scratch).
+# CARGO_TARGET_DIR passes through to the gate (a fresh worktree otherwise builds from scratch), never
+# to the tree check: code the gate runs can write into its target directory, and cargo relinks no
+# binary it considers fresh, so an xtask built there could be one a gated tree left (the XT-01
+# review's LOW, XT-02).
 # Exit: 0 landed (or dry run green), 1 refused, aborted or gate red, 2 usage.
 #
 # Pinned by: tools/jfl-architecture/tests/land_scripts.rs (land cases)
@@ -79,6 +84,17 @@ done
 root="$(git rev-parse --show-toplevel)"
 cd "$root"
 [ -z "$(git status --porcelain)" ] || die "the checkout is dirty; commit, stash or remove the changes first"
+cache_base="${XDG_CACHE_HOME:-}"
+case "$cache_base" in /*) ;; *) cache_base="$HOME/.cache" ;; esac
+land_target="$cache_base/jfastlsp/land-xtask"
+mkdir -p "$land_target" || die "cannot create $land_target"
+land_target="$(cd "$land_target" && pwd -P)"
+if [ -n "${CARGO_TARGET_DIR:-}" ]; then
+  mkdir -p "$CARGO_TARGET_DIR" || die "cannot create $CARGO_TARGET_DIR"
+  gate_target="$(cd "$CARGO_TARGET_DIR" && pwd -P)"
+  case "$gate_target/" in "$land_target"/*) die "CARGO_TARGET_DIR $gate_target is the tree check's own target directory ($land_target); give the gate another" ;; esac
+  case "$land_target/" in "$gate_target"/*) die "CARGO_TARGET_DIR $gate_target holds the tree check's own target directory ($land_target); give the gate another" ;; esac
+fi
 commits=()
 for ref in "${requested[@]}"; do
   sha="$(git rev-parse --verify --quiet "$ref^{commit}")" || die "$ref is not a commit"
@@ -100,9 +116,10 @@ trap cleanup EXIT
 # cherry-pick of $2, before anything there runs: mise runs code from a trusted configuration as it
 # loads it, and cargo (even the `cargo update` that resolves a Cargo.lock conflict) runs a
 # configured rustc-wrapper and the toolchain a rust-toolchain file names (FND-09, its review's G2).
-# xtask is built from this checkout and from outside the tree, so the tree steers nothing of it.
+# xtask is built from this checkout and from outside the tree, so the tree steers nothing of it,
+# into $land_target, which no gate is given, so no gated code left the binary it runs (XT-02).
 check_tree() {
-  bash "$here/xtask.sh" tool-config "$1" >&2 ||
+  CARGO_TARGET_DIR="$land_target" bash "$here/xtask.sh" tool-config "$1" >&2 ||
     die "the tree after the cherry-pick of $2 has tool configuration outside its allowlist (above); nothing in it was run"
 }
 

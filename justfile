@@ -169,22 +169,18 @@ jdtls-it:
     bash scripts/jdtls-fetch.sh
     {{cargo}} nextest run -p jfl-jdtls --locked --retries 0 --features real-jdtls --test real_jdtls
 
-# just must be the version mise.toml and scripts/bootstrap-tools.sh pin.
-# Fail when a pinned tool is missing or wrong, or just is not its pinned version. It lists the
-# security tools of FND-04 and fails when one is not on PATH.
+# Every tool of tools/versions.toml on the stages' PATH at its pinned version (xtask's cache first,
+# then mise's install directories), and versions.toml agreeing with mise.toml and mise.lock;
+# fails naming each missing or wrong tool and the fix (XT-02, fnd §8).
 doctor:
-    # Non-interactive shells never activate mise, which `mise doctor` reports as a problem:
-    # the shims directory on PATH is the documented alternative for such setups.
-    PATH="${MISE_DATA_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/mise}/shims:$PATH" mise doctor
-    missing="$(mise ls --missing)"; test -z "$missing"
-    pinned="$(sed -n 's/^just = "\(.*\)"$/\1/p' mise.toml)"; \
-      actual="$({{just_executable()}} --version | cut -d' ' -f2)"; \
-      if [ -z "$pinned" ] || [ "$pinned" != "$actual" ]; then \
-        echo "doctor: just is $actual but mise.toml pins '$pinned'" >&2; exit 1; fi
-    for tool in gitleaks actionlint shellcheck zizmor pinact; do \
-      command -v "$tool" >/dev/null 2>&1 || { echo "doctor: $tool is not on PATH: run 'mise install --locked'" >&2; exit 1; }; \
-    done
-    mise ls --current | grep -E 'gitleaks|actionlint|shellcheck|zizmor|pinact'
+    bash {{xtask}} doctor
+
+# The pinned tools of tools/versions.toml (all, or the ones named), each release asset checked
+# against its SHA-256, into the tool cache outside the repository that the stages' PATH puts
+# first (XT-02, fnd §8). mise.lock's `mise install --locked` installs the same assets until XT-08.
+[positional-arguments]
+install-tools *tools:
+    bash {{xtask}} install-tools "$@"
 
 # Fail closed with mise's install hint when a pinned tool is not on PATH (fnd §8 rule 4).
 _require tool:

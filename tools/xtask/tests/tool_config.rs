@@ -354,12 +354,31 @@ fn launcher_dir(target: &Path, repo: &Path) -> Result<PathBuf, Box<dyn Error>> {
     Ok(target.join("xtask").join(sum))
 }
 
-/// A scratch repository `name` holding the bootstrap and the launcher, a fake `mise`, `just` and
-/// `cargo` (each call logged to `calls`) and, where the launcher looks for the binary it built,
-/// this test's xtask.
+/// The host triple of the toolchain directory the launcher builds with.
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+const HOST: &str = "x86_64-unknown-linux-gnu";
+#[cfg(all(target_os = "linux", target_arch = "aarch64"))]
+const HOST: &str = "aarch64-unknown-linux-gnu";
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+const HOST: &str = "aarch64-apple-darwin";
+
+/// The channel rust-toolchain.toml pins.
+fn channel() -> Result<String, Box<dyn Error>> {
+    let text = fs::read_to_string(repo_root().join("rust-toolchain.toml"))?;
+    text.lines()
+        .find_map(|l| l.strip_prefix("channel = \"")?.strip_suffix('"'))
+        .map(str::to_owned)
+        .ok_or_else(|| "no channel".into())
+}
+
+/// A scratch repository `name` holding the bootstrap and the launcher, a fake `mise` and `just` on
+/// PATH and a fake `cargo` in a scratch RUSTUP_HOME's pinned toolchain, where the launcher takes it
+/// from (each call logged to `calls`) and, where the launcher looks for the binary it built, this
+/// test's xtask.
 struct Bootstrap {
     repo: PathBuf,
     bin: PathBuf,
+    rustup: PathBuf,
     target: PathBuf,
     calls: PathBuf,
 }
@@ -394,18 +413,29 @@ impl Bootstrap {
             bin.join("just"),
             format!("#!/usr/bin/env bash\necho \"just {}\"\n", pinned("JUST")?),
         )?;
+        let rustup = scratch.0.join(format!("{name}-rustup"));
+        let toolchain = rustup
+            .join("toolchains")
+            .join(format!("{}-{HOST}", channel()?))
+            .join("bin");
+        fs::create_dir_all(&toolchain)?;
         fs::write(
-            bin.join("cargo"),
+            toolchain.join("cargo"),
             format!("#!/usr/bin/env bash\necho \"cargo in $PWD: $*\" >>'{log}'\n"),
         )?;
+        for tool in ["rustc", "rustdoc"] {
+            fs::write(toolchain.join(tool), "#!/bin/sh\nexit 1\n")?;
+        }
         let chmod = Command::new("chmod")
             .arg("+x")
-            .args([bin.join("mise"), bin.join("just"), bin.join("cargo")])
+            .args([bin.join("mise"), bin.join("just")])
+            .args(["cargo", "rustc", "rustdoc"].map(|t| toolchain.join(t)))
             .output()?;
         assert!(chmod.status.success(), "{}", printed(&chmod));
         Ok(Self {
             repo,
             bin,
+            rustup,
             target,
             calls,
         })
@@ -422,6 +452,7 @@ impl Bootstrap {
             .arg(self.repo.join("scripts/bootstrap-tools.sh"))
             .arg(&self.bin)
             .env("PATH", path)
+            .env("RUSTUP_HOME", &self.rustup)
             .env("CARGO_TARGET_DIR", &self.target)
             .output()?)
     }

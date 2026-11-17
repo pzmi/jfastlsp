@@ -1305,3 +1305,133 @@ fn should_refuse_before_cargo_runs_when_a_cherry_pick_brings_a_cargo_config_and_
     );
     Ok(())
 }
+
+/// The host triple of the toolchain directory scripts/xtask.sh builds with.
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+const HOST: &str = "x86_64-unknown-linux-gnu";
+#[cfg(all(target_os = "linux", target_arch = "aarch64"))]
+const HOST: &str = "aarch64-unknown-linux-gnu";
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+const HOST: &str = "aarch64-apple-darwin";
+
+#[test]
+fn should_not_run_a_binary_left_in_the_gate_s_target_dir_when_checking_a_tree() -> TestResult {
+    // given: the XT-01 review's LOW. Code a gated tree ran left an `xtask` that passes every tree
+    // where the launcher builds this checkout's xtask in the gate's CARGO_TARGET_DIR, and cargo
+    // (here a fake of the pinned toolchain) keeps a binary it considers fresh. The lane commit
+    // brings a `.shellcheckrc`, which the real check refuses; the fresh build stands for it.
+    use sha2::{Digest as _, Sha256};
+    let lab = Lab::new("land-planted-xtask")?;
+    lab.seed(&[])?;
+    let before = lab.origin_head()?;
+    let sha = lab.lane_commit("lane", &[(".shellcheckrc", "disable=all\n")], "T1: rc")?;
+    let channel = fs::read_to_string(repo_root().join("rust-toolchain.toml"))?
+        .lines()
+        .find_map(|l| {
+            l.strip_prefix("channel = \"")?
+                .strip_suffix('"')
+                .map(str::to_owned)
+        })
+        .ok_or("no channel")?;
+    let toolchain = lab
+        .dir("rustup/toolchains")
+        .join(format!("{channel}-{HOST}"))
+        .join("bin");
+    fs::create_dir_all(&toolchain)?;
+    fs::write(
+        toolchain.join("cargo"),
+        "#!/usr/bin/env bash\nbin=\"$CARGO_TARGET_DIR/debug/xtask\"\n\
+         if [ ! -e \"$bin\" ]; then mkdir -p \"$(dirname \"$bin\")\"\n\
+         printf '#!/bin/sh\\necho \"fresh xtask: refused\" >&2\\nexit 1\\n' >\"$bin\"; chmod +x \"$bin\"; fi\n",
+    )?;
+    for tool in ["rustc", "rustdoc"] {
+        fs::write(toolchain.join(tool), "#!/bin/sh\nexit 1\n")?;
+    }
+    succeeded(&lab.run("chmod", &["+x", "cargo", "rustc", "rustdoc"], &toolchain)?)?;
+    let gate_target = lab.dir("gate-target");
+    let key: String = Sha256::digest(
+        fs::canonicalize(repo_root())?
+            .as_os_str()
+            .as_encoded_bytes(),
+    )
+    .iter()
+    .map(|b| format!("{b:02x}"))
+    .collect();
+    let planted = gate_target.join("xtask").join(key).join("debug/xtask");
+    let ran = lab.dir("planted-ran");
+    fs::create_dir_all(planted.parent().ok_or("no parent")?)?;
+    fs::write(
+        &planted,
+        format!("#!/bin/sh\ntouch '{}'\nexit 0\n", ran.display()),
+    )?;
+    succeeded(
+        &lab.command("chmod", &lab.base)
+            .arg("+x")
+            .arg(&planted)
+            .output()?,
+    )?;
+
+    // when
+    let output = lab
+        .command("bash", &lab.dir("work"))
+        .arg(script("land.sh"))
+        .args([
+            "--author",
+            "Ann Author <ann@example.test>",
+            "--allow-unsigned",
+            "--no-push",
+        ])
+        .arg(&sha)
+        .env("RUSTUP_HOME", lab.dir("rustup"))
+        .env("CARGO_TARGET_DIR", &gate_target)
+        .env("XDG_CACHE_HOME", lab.dir("cache"))
+        .output()?;
+
+    // then: the tree check ran a binary built in its own target directory, never the planted one
+    let text = printed(&output);
+    assert!(!output.status.success(), "{text}");
+    assert!(text.contains("fresh xtask: refused"), "{text}");
+    assert!(text.contains("tool configuration"), "{text}");
+    assert!(!ran.try_exists()?, "the planted xtask ran:\n{text}");
+    assert_eq!(lab.origin_head()?, before);
+    Ok(())
+}
+
+#[test]
+fn should_refuse_to_land_when_the_gate_s_target_dir_is_the_tree_check_s_own() -> TestResult {
+    // given: CARGO_TARGET_DIR naming the tree check's target directory, or one holding it
+    let lab = Lab::new("land-shared-check-target")?;
+    lab.seed(&[])?;
+    let sha = lab.lane_commit("lane", &[("b.txt", "b\n")], "T1: b")?;
+    let cache = lab.dir("cache");
+    let mut outputs = Vec::new();
+
+    // when
+    for target in [cache.join("jfastlsp/land-xtask"), cache.clone()] {
+        outputs.push(
+            lab.command("bash", &lab.dir("work"))
+                .arg(script("land.sh"))
+                .args([
+                    "--author",
+                    "Ann Author <ann@example.test>",
+                    "--allow-unsigned",
+                    "--no-push",
+                ])
+                .arg(&sha)
+                .env("XDG_CACHE_HOME", &cache)
+                .env("CARGO_TARGET_DIR", &target)
+                .output()?,
+        );
+    }
+
+    // then
+    for output in &outputs {
+        let text = printed(output);
+        assert!(!output.status.success(), "{text}");
+        assert!(
+            text.contains("the tree check's own target directory"),
+            "{text}"
+        );
+    }
+    Ok(())
+}

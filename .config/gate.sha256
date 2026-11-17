@@ -4,7 +4,7 @@
 # tools/xtask/src: the stage catalog, each stage's command and the preflight; XT-01) and its
 # launcher (scripts/xtask.sh), each script the gate runs (every scripts/test-*.sh included), the
 # policies a stage reads by path (.github/zizmor.yml, deny.toml) and the tool pins (mise.toml,
-# mise.lock), what decides landing (scripts/land.sh, scripts/dco-check.sh) and the session
+# mise.lock, tools/versions.toml; XT-02), what decides landing (scripts/land.sh, scripts/dco-check.sh) and the session
 # hooks (.claude/hooks/session-start.sh, stop-gate.sh; FND-09). A change to any of them fails the
 # architecture stage until its line here changes in the same commit, so the gate cannot be
 # neutered without a visible edit of this file; review reads every changed line as a change of
@@ -36,11 +36,11 @@ f3a96899cfe73035eb8d9970f307e778353ef1ea4f07d6a2f45214e8e52e36ea  justfile::work
 20465d1733a28182ef067d7463730f94c96b457029e00f5dc15c9963e6a80e21  mise.lock
 b78ef320b09ca720ac030054c905d39189f151200dee44562e58d653f43f08dc  mise.toml
 d1d095b275741a3a7d99a90678ebab77a06ea0088f0d6e5a4a4a76dc341d0a45  scripts/adr-index.sh
-0bf793c940b04f7aadf812dc60714b74f2ab92572b1e61c4616ff1e5760aff7d  scripts/bootstrap-tools.sh
+6b7838cd926008c8d686be4236b7084414a46be349efb80dfa5e3e4d66f1bfb2  scripts/bootstrap-tools.sh
 948f24f7356c375c4d37181de24d47fbda594e631c4935ca22ac95b0d58b83f6  scripts/clippy-lists.sh
 db120d42fc19cde8c34da5c064a284d7f66b33124b78d3aed961bac8076f86dd  scripts/dco-check.sh
 3e452d3b368160755f88ca58646bfd74f1089b3102a9b25be60056b81d097b03  scripts/gitleaks-config.sh
-2a54b572848b60fb0a861e46d78a7689bada43d77edbb4c7884d65324868791a  scripts/land.sh
+a89bf1ebd45f7ad351b54d31e5576cc102f3aa684fb37d83f9e823a3ba65b841  scripts/land.sh
 af2223db8d3d4253e7dc645c53c97b3319acb655e7716f48705bb1e4b038d420  scripts/private-names-check.sh
 4f1e4eef1d49d28c5130b6b9f3ffa7eb75ee911ba8cd7eebeece85dc331b7212  scripts/private-names-fold.pl
 b541a0462b00f86ea05a87581303478768099bce4dd3befdf498780bc0d80974  scripts/secrets-check.sh
@@ -51,11 +51,14 @@ ea950cd1fd5aab4c476a912709b42040373829b7a3145d7a0cc102f188f33779  scripts/test-c
 1f5bd3086859375aa9122fe0d8eeec28f550121381b95ac28d71e06d4323181e  scripts/test-secrets.sh
 789be32ee285676ca01aaf67f71ccfae548e5d476cfe3d97025c51d20d5e4b27  scripts/test-workflows.sh
 0055af2ce7e9ba6dabc7f9ecb1abf3859bb9492d78f94b8d6820d7efbe9f7def  scripts/workflows-check.sh
-718ccf8cdbb337da39f892e218f23adb80ecc09afac5443d7f1a27c9840596cd  scripts/xtask.sh
-a1e5df68447c8276b3f38c6c450ece94f55ad95fcf0f2091119b9a40ef5d3453  tools/xtask/Cargo.toml
+0a6f4cb6958ed35f7c301410fe9f686a7485623995d2137fad14a02f27c9ed23  scripts/xtask.sh
+0c712bfad4d6df9d016175018a4b0e78346167489dd965ef292d0419e25c9d25  tools/versions.toml
+0ff0664706ff82564d19c3d2e65002a2f6b33d258808155cfab38866a6c81b31  tools/xtask/Cargo.toml
 c7d5f0fc2251eb804da5b0ea5ba089d36627d001c9b0a0d785a91671b160eed0  tools/xtask/src/catalog.rs
-8c8cb7c4105c4156e28687a1fb8b65ec5aacff39361ffab4615c7077ed4a6483  tools/xtask/src/main.rs
+8929e39fd46147e124d4d66f1e0151096f3824bc68e6eb48461eb8493476edcf  tools/xtask/src/main.rs
 69d82165d67fca9a25d4debecc5a15d5987746a2a7460024e3c44cc49d95c71a  tools/xtask/src/preflight.rs
-bde0deba71ec0fd67edfa0f898891e8c6aa8f01520c35a2da433c3fb4f2e1340  tools/xtask/src/process.rs
+e4f261ad9248c6039e7372d6768e4ecf93db2161cb7a448a4cd30328962d6950  tools/xtask/src/process.rs
 aed00643743546817327d397dc10aa4a28e98ff5fcfcf75680db9d9360fd9b8d  tools/xtask/src/stages.rs
 6d9a3789ec5a83e514dd4aad0529462ac6fdf3e49681a077c10cd741b55065da  tools/xtask/src/tool_config.rs
+c7dcdf235f2859f9b7074a2152898c60eb714ea7039db960064bbe8a8226759f  tools/xtask/src/tools.rs
+d0f221b70f3401bd187b077251516cafed72b3947b29aa25a2969d3376ea0ff0  tools/xtask/src/versions.rs

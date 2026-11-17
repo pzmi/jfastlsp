@@ -859,6 +859,8 @@ name = "xtask"
 version = "0.1.0"
 dependencies = [
  "regex",
+ "sha2",
+ "toml",
 ]
 
 [[package]]

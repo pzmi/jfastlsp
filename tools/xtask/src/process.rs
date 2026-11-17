@@ -179,7 +179,8 @@ impl Stage {
             && !on_path(tool, context.path.as_deref())
         {
             eprintln!(
-                "{tool} is missing: run 'mise install --locked' (or bash scripts/bootstrap-tools.sh); just doctor says what else is"
+                "{tool} is missing: {}; just doctor says what else is",
+                crate::tools::INSTALL_HINT
             );
             return 1;
         }

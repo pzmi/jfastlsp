@@ -392,7 +392,7 @@ TOML form fails closed. mise is held the same way: `mise.toml` is only `[tools]`
 version string, `mise.lock` holds only checksummed GitHub release assets, no other mise
 configuration file inside the repository may load (`mise config ls`, failing closed when mise
 cannot read its configuration), and the stages run the pinned tools from their install
-directories (`mise bin-paths`) rather than through shims, so no mise `[env]` reaches a tool
+directories (xtask's tool cache first, then `mise bin-paths`; XT-02, §8) rather than through shims, so no mise `[env]` reaches a tool
 after `_preflight` has looked. Since mise runs code from a trusted configuration as it loads it
 (`[env] _.source`, `{{exec(...)}}` templates), nothing calls mise on a tree before xtask's
 `tool-config` (`tools/xtask/src/tool_config.rs`, no mise; `scripts/tool-config-check.sh` in bash
@@ -411,14 +411,25 @@ when the check refuses or cannot run. xtask itself is built by `scripts/xtask.sh
 the caller's environment, and that build is the one step before any preflight, so nothing may
 steer it: it refuses, before cargo runs, any cargo configuration file in an ancestor of the
 directory it builds from (`/` included) and a CARGO_HOME configuration outside the plain shape
-above; it builds with a CARGO_HOME of its own (links to the registry and git caches, nothing
-else), a cleared environment plus an allowlist, RUSTFLAGS `-D warnings`, `RUSTC` and `RUSTDOC`
-set to the pinned toolchain's binaries (`rustup which`) and the pinned toolchain; and it never
-starts xtask through `cargo run`, whose configured `runner` would replace it. A steered build
+above; it builds with a CARGO_HOME of its own (exactly two links, to the registry and git caches,
+and nothing else: a directory there is refused, since cargo would compile its sources unverified;
+the XT-01 review's Y1), a cleared environment plus an allowlist, RUSTFLAGS `-D warnings`, the
+pinned toolchain's own `cargo`, `rustc` and `rustdoc` from
+`${RUSTUP_HOME:-~/.rustup}/toolchains/<channel>-<host>/bin` (no rustup, and nothing of the
+caller's PATH: the launcher runs with `/usr/bin:/bin`, the build with the toolchain's directory
+before it; XT-02); and it never starts xtask through `cargo run`, whose configured `runner` would
+replace it. A steered build
 could link a binary that exits 0, and the gate would pass having run nothing (the XT-01 review's
 X1). It builds into one directory per checkout (keyed by the SHA-256 of its path), since cargo
 relinks no fresh binary and two checkouts sharing `CARGO_TARGET_DIR` (land.sh and its worktree)
-would otherwise run each other's xtask. The tree's own xtask, `build.rs` included, is built from
+would otherwise run each other's xtask. Two launchers of one checkout serialise on a lock in that
+directory, across the build and a copy of the binary to a path of that run alone, which is what
+runs (one launcher's cargo replaced `debug/xtask` while another started it: "No such file or
+directory" after a green build, XT-02). `scripts/land.sh`'s tree check builds into
+`$XDG_CACHE_HOME/jfastlsp/land-xtask` (else `~/.cache/...`), a target directory no gate is given
+(land.sh refuses one as CARGO_TARGET_DIR), so no binary that gated code left in a shared target
+directory, which cargo would keep as fresh, judges the next tree (the XT-01 review's LOW). The
+tree's own xtask, `build.rs` included, is built from
 source before its `tool-config` runs: like every build script, proc-macro and test the gate
 compiles, that is code, and review before landing is its control (XT-01). An untrusted `mise.toml` with only `[tools]` loads; one with
 an `[env]` makes mise fail without running it. The same check holds the implicit configuration
@@ -434,7 +445,7 @@ catalog and their dependencies, the justfile's top-level lines, the xtask compos
 manifest and every file of `tools/xtask/src`, with the launcher `scripts/xtask.sh`; XT-01), the scripts the stages run (every `scripts/test-*.sh`, which
 `script-tests` runs by glob, included), the policies a stage reads by path
 (`.github/zizmor.yml`, `deny.toml`) and the tool pins (`mise.toml`, whose new tool would land on
-the stages' PATH, and `mise.lock`) are hashed in `.config/gate.sha256` (FND-09 added all but the
+the stages' PATH, `mise.lock` and `tools/versions.toml`, XT-02) are hashed in `.config/gate.sha256` (FND-09 added all but the
 recipes and scripts),
 and `.config/nextest.toml` keeps its allowlisted keys (no `default-filter`, no `[scripts]`,
 `retries = 0`). A pin moves only with its line in that file, in the same commit, which review
@@ -780,9 +791,28 @@ There is no event store (ADR 0008). What persists:
    cargo-llvm-cov 0.9.1, diff-cover 11.0.2, cargo-mutants 27.1.0, gitleaks 8.30.1, actionlint
    1.7.12, zizmor 1.32.0, pinact 5.0.2, adrs 0.13.0, Quint 0.33.1, Apalache 0.62.1 (Quint 0.33.x
    is validated against it, not 0.63.0), cargo-fuzz 0.13.2, dist 0.34.0, release-plz 0.4.3.
-3. `just doctor` runs `mise doctor` and `mise ls --missing` and exits non-zero if any pinned tool
-   is missing or wrong.
-4. **Fail closed.** A recipe whose tool is missing fails with mise's install hint. A stage is
+3. **`tools/versions.toml` and xtask** (XT-02, ADR 0035): every tool `mise.toml` pins, with its
+   version, the `mise.toml` key it stands for, the command that prints its version, and per
+   platform of ADR 0006 the release asset's URL, its SHA-256 and the program's path in the
+   archive (mise.lock's URL and checksum). The file has a pinned line shape (`tools/xtask/src/
+   versions.rs`): a URL is a GitHub release asset (`https://github.com/<owner>/<repo>/releases/
+   download/<tag>/<asset>`), never `api.github.com`, so every download xtask makes passes the
+   sandbox's proxy. `just install-tools [TOOL...]` (`bash scripts/xtask.sh install-tools`)
+   downloads each asset with `curl --proto =https` (from `/usr/bin:/bin`, as `tar`), checks its
+   SHA-256 in process and refuses a mismatch, installing nothing, then moves the one program into
+   `$XDG_CACHE_HOME/jfastlsp/tools/<tool>/<version>/<platform>/bin` (else `~/.cache/...`; a cache
+   inside the repository is refused); `--archives DIR` takes the assets from a directory instead.
+   The stages' PATH puts those directories first, then mise's install directories (`mise
+   bin-paths`), mise's shims, the inherited PATH. `just doctor` (`xtask doctor`) fails when
+   versions.toml disagrees with mise.toml or mise.lock (a version, tool, platform, URL or digest),
+   then resolves every pinned program on the stages' PATH and runs its probe, naming each missing
+   or wrong tool with where it was found and the fix. Verified in the cloud sandbox on
+   2026-11-17: `install-tools` installed all eleven tools for linux-x64 in about 9 s, and the 33
+   assets of the three platforms matched their pins. mise stays installed and in CI until XT-08;
+   a bump changes `mise.toml`, `mise.lock` and `tools/versions.toml` in one commit, which
+   `doctor` and `tools/xtask/tests/versions.rs` (a real TOML parser) hold together.
+4. **Fail closed.** A recipe whose tool is missing fails with the install hint (`install-tools`,
+   or `mise install --locked`). A stage is
    never reported as skipped-but-green. When local and CI disagree, run `just doctor` first.
 5. Quint runs from mise's pinned npm package and never downloads an evaluator at run time;
    Apalache's archive is verified against its checksum in `mise.lock`.

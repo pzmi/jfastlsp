@@ -11,6 +11,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
+use sha2::{Digest as _, Sha256};
+
 type TestResult = Result<(), Box<dyn Error>>;
 
 fn repo_root() -> PathBuf {
@@ -199,6 +201,48 @@ fn should_not_apply_the_working_directory_s_cargo_config_when_the_launcher_build
     Ok(())
 }
 
+/// The host triple of the toolchain directory the launcher builds with.
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+const HOST: &str = "x86_64-unknown-linux-gnu";
+#[cfg(all(target_os = "linux", target_arch = "aarch64"))]
+const HOST: &str = "aarch64-unknown-linux-gnu";
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+const HOST: &str = "aarch64-apple-darwin";
+
+fn chmod_x(file: &Path) -> TestResult {
+    let chmod = Command::new("chmod").arg("+x").arg(file).output()?;
+    assert!(chmod.status.success(), "{}", printed(&chmod));
+    Ok(())
+}
+
+/// A RUSTUP_HOME under `dir` whose pinned toolchain holds `cargo` (this script) and a rustc and
+/// rustdoc that fail: the launcher builds with the toolchain's own cargo (XT-02).
+fn fake_toolchain(dir: &Path, cargo: &str) -> Result<PathBuf, Box<dyn Error>> {
+    let home = dir.join("rustup");
+    let bin = home
+        .join("toolchains")
+        .join(format!("{}-{HOST}", channel()?))
+        .join("bin");
+    fs::create_dir_all(&bin)?;
+    fs::write(bin.join("cargo"), cargo)?;
+    for tool in ["rustc", "rustdoc"] {
+        fs::write(bin.join(tool), "#!/bin/sh\nexit 1\n")?;
+    }
+    for tool in ["cargo", "rustc", "rustdoc"] {
+        chmod_x(&bin.join(tool))?;
+    }
+    Ok(home)
+}
+
+/// A checkout under `dir` holding only the launcher and rust-toolchain.toml, by its physical path.
+fn bare_checkout(dir: &Path) -> Result<PathBuf, Box<dyn Error>> {
+    fs::create_dir_all(dir.join("scripts"))?;
+    for file in ["scripts/xtask.sh", "rust-toolchain.toml"] {
+        fs::copy(repo_root().join(file), dir.join(file))?;
+    }
+    Ok(fs::canonicalize(dir)?)
+}
+
 /// A fake `cargo` that, like cargo with a fresh unit, links `debug/xtask` only when nothing is
 /// there yet; the binary it links prints the checkout it was "built" from.
 const FRESH_CARGO: &str = r#"#!/usr/bin/env bash
@@ -221,27 +265,10 @@ fn should_run_each_checkout_s_own_xtask_when_two_checkouts_share_a_target_dir() 
     // relinks nothing it considers fresh (the land worktree and the landing checkout share
     // CARGO_TARGET_DIR; land.sh's retry runs the landing checkout's xtask after the worktree's)
     let scratch = Scratch::new("shared-target")?;
-    let bin = scratch.0.join("bin");
-    fs::create_dir_all(&bin)?;
-    fs::write(bin.join("cargo"), FRESH_CARGO)?;
-    let chmod = Command::new("chmod")
-        .arg("+x")
-        .arg(bin.join("cargo"))
-        .output()?;
-    assert!(chmod.status.success(), "{}", printed(&chmod));
+    let rustup = fake_toolchain(&scratch.0, FRESH_CARGO)?;
     let mut checkouts = Vec::new();
     for name in ["a", "b"] {
-        let root = scratch.0.join(name);
-        fs::create_dir_all(root.join("scripts"))?;
-        for file in ["scripts/xtask.sh", "rust-toolchain.toml"] {
-            fs::copy(repo_root().join(file), root.join(file))?;
-        }
-        checkouts.push(fs::canonicalize(&root)?);
-    }
-    let mut path = std::ffi::OsString::from(&bin);
-    if let Some(rest) = std::env::var_os("PATH") {
-        path.push(":");
-        path.push(rest);
+        checkouts.push(bare_checkout(&scratch.0.join(name))?);
     }
     let target = scratch.0.join("target");
 
@@ -252,7 +279,7 @@ fn should_run_each_checkout_s_own_xtask_when_two_checkouts_share_a_target_dir() 
             .arg(root.join("scripts/xtask.sh"))
             .arg("list")
             .current_dir(root)
-            .env("PATH", &path)
+            .env("RUSTUP_HOME", &rustup)
             .env("CARGO_TARGET_DIR", &target)
             .output()?;
         assert!(output.status.success(), "{}", printed(&output));
@@ -265,6 +292,214 @@ fn should_run_each_checkout_s_own_xtask_when_two_checkouts_share_a_target_dir() 
         .map(|root| format!("built from {}", root.display()))
         .collect();
     assert_eq!(said, expected);
+    Ok(())
+}
+
+#[test]
+fn should_build_with_the_pinned_toolchain_when_programs_are_planted_on_path() -> TestResult {
+    // given: a cargo, rustup, linker and the helpers the launcher uses first on the caller's PATH
+    // (the XT-01 review's PATH LOW), each leaving a mark and then running the real program, so a
+    // launcher that runs them still works and only the marks tell
+    let scratch = Scratch::new("planted-path")?;
+    let planted = ["cargo", "rustup", "cc", "uname", "sha256sum", "perl", "sed"];
+    let mut marks = Vec::new();
+    for name in planted {
+        let real = std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())
+            .map(|dir| dir.join(name))
+            .find(|file| file.is_file())
+            .ok_or_else(|| format!("no {name} on PATH"))?;
+        let mark = scratch.0.join(format!("{name}.ran"));
+        let script = scratch.0.join(name);
+        fs::write(
+            &script,
+            format!(
+                "#!/bin/sh\ntouch '{}'\nexec '{}' \"$@\"\n",
+                mark.display(),
+                real.display()
+            ),
+        )?;
+        chmod_x(&script)?;
+        marks.push(mark);
+    }
+    let mut path = std::ffi::OsString::from(&scratch.0);
+    if let Some(rest) = std::env::var_os("PATH") {
+        path.push(":");
+        path.push(rest);
+    }
+
+    // when
+    let output = launcher(&repo_root(), &["list"])
+        .env("PATH", path)
+        .output()?;
+
+    // then: the real xtask listed the stages, and nothing planted ran
+    let text = printed(&output);
+    assert!(output.status.success(), "{text}");
+    assert!(text.lines().any(|l| l == "private-names"), "{text}");
+    let ran: Vec<&str> = planted
+        .iter()
+        .zip(&marks)
+        .filter(|(_, mark)| mark.exists())
+        .map(|(name, _)| *name)
+        .collect();
+    assert!(ran.is_empty(), "planted programs ran: {ran:?}\n{text}");
+    Ok(())
+}
+
+#[test]
+fn should_refuse_to_build_when_its_cargo_home_holds_a_directory_for_a_cache_link() -> TestResult {
+    // given: the launcher's own CARGO_HOME with a real `registry` directory where the link to the
+    // real registry belongs (cargo would compile its sources unverified; the XT-01 review's Y1),
+    // and a plain file for `git`, in a scratch target directory
+    let scratch = Scratch::new("cache-links")?;
+    let checkout = bare_checkout(&scratch.0.join("checkout"))?;
+    let rustup = fake_toolchain(&scratch.0, FRESH_CARGO)?;
+    let target = scratch.0.join("target");
+    let key: String = Sha256::digest(checkout.as_os_str().as_encoded_bytes())
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect();
+    let home = target.join("xtask").join(key).join("cargo-home");
+    fs::create_dir_all(home.join("registry/src"))?;
+    let mut cases = Vec::new();
+
+    // when
+    for (entry, planted_dir) in [("registry", true), ("git", false)] {
+        if !planted_dir {
+            fs::remove_dir_all(home.join("registry"))?;
+            if home.join("git").symlink_metadata().is_ok() {
+                fs::remove_file(home.join("git"))?;
+            }
+            fs::write(home.join("git"), "")?;
+        }
+        let output = Command::new("bash")
+            .arg(checkout.join("scripts/xtask.sh"))
+            .arg("list")
+            .current_dir(&checkout)
+            .env("RUSTUP_HOME", &rustup)
+            .env("CARGO_TARGET_DIR", &target)
+            .output()?;
+        cases.push((entry, output));
+    }
+
+    // then
+    for (entry, output) in &cases {
+        let text = printed(output);
+        assert!(
+            !output.status.success(),
+            "{entry}: the launcher ran xtask:\n{text}"
+        );
+        assert!(text.contains("refusing to build xtask"), "{entry}: {text}");
+        assert!(
+            text.contains(&format!("cargo-home/{entry} is not a link")),
+            "{text}"
+        );
+    }
+    Ok(())
+}
+
+/// A fake `cargo` for the race: the first build links `debug/xtask`; the build that takes the
+/// `hold` token removes it (as cargo's uplift does before relinking), says so through the
+/// `removed` FIFO and relinks only once the `release` FIFO lets it; any other build finds its
+/// unit fresh and relinks nothing.
+fn race_cargo(control: &Path) -> String {
+    format!(
+        r#"#!/usr/bin/env bash
+c='{}'
+bin="$CARGO_TARGET_DIR/debug/xtask"
+link() {{
+  mkdir -p "$(dirname "$bin")"
+  printf '#!/usr/bin/env bash\necho ran\n' >"$bin.new"
+  chmod +x "$bin.new"
+  mv "$bin.new" "$bin"
+}}
+if mv "$c/hold" "$c/hold.taken" 2>/dev/null; then
+  rm -f "$bin"
+  echo removed >"$c/removed"
+  read -r _ <"$c/release"
+  link
+elif [ ! -e "$c/linked" ]; then
+  link
+  touch "$c/linked"
+fi
+"#,
+        control.display()
+    )
+}
+
+#[test]
+fn should_run_the_built_xtask_when_another_launcher_of_the_checkout_relinks_it() -> TestResult {
+    // given: launcher B of a checkout stopped inside its build with `debug/xtask` removed (the
+    // race BENCH-03's lane hit: one launcher started the binary another's cargo was replacing)
+    use std::io::{BufRead as _, BufReader, Read as _, Write as _};
+    let scratch = Scratch::new("race")?;
+    let control = scratch.0.join("control");
+    fs::create_dir_all(&control)?;
+    for fifo in ["removed", "release"] {
+        let made = Command::new("mkfifo").arg(control.join(fifo)).output()?;
+        assert!(made.status.success(), "{}", printed(&made));
+    }
+    let rustup = fake_toolchain(&scratch.0, &race_cargo(&control))?;
+    let checkout = bare_checkout(&scratch.0.join("checkout"))?;
+    let target = scratch.0.join("target");
+    let run = |stdout: std::process::Stdio, stderr: std::process::Stdio| {
+        Command::new("bash")
+            .arg(checkout.join("scripts/xtask.sh"))
+            .arg("list")
+            .current_dir(&checkout)
+            .env("RUSTUP_HOME", &rustup)
+            .env("CARGO_TARGET_DIR", &target)
+            .stdout(stdout)
+            .stderr(stderr)
+            .spawn()
+    };
+    let warm =
+        run(std::process::Stdio::piped(), std::process::Stdio::piped())?.wait_with_output()?;
+    assert!(warm.status.success(), "{}", printed(&warm));
+    fs::write(control.join("hold"), "")?;
+    let b = run(std::process::Stdio::piped(), std::process::Stdio::piped())?;
+    let mut said = String::new();
+    BufReader::new(fs::File::open(control.join("removed"))?).read_line(&mut said)?;
+
+    // when: launcher A starts while B's build holds no binary; once A waits for B (or has ended),
+    // B is let go
+    let mut a = run(std::process::Stdio::piped(), std::process::Stdio::piped())?;
+    let mut a_err = BufReader::new(a.stderr.take().ok_or("no stderr")?);
+    let mut early = String::new();
+    loop {
+        let mut line = String::new();
+        if a_err.read_line(&mut line)? == 0 {
+            break;
+        }
+        early.push_str(&line);
+        if line.contains("waiting for another launcher") {
+            break;
+        }
+    }
+    fs::OpenOptions::new()
+        .write(true)
+        .open(control.join("release"))?
+        .write_all(b"go\n")?;
+    let b = b.wait_with_output()?;
+    let mut a_out = String::new();
+    a.stdout
+        .take()
+        .ok_or("no stdout")?
+        .read_to_string(&mut a_out)?;
+    a_err.read_to_string(&mut early)?;
+    let a_status = a.wait()?;
+
+    // then: both ran the binary B's build linked
+    assert_eq!(said.trim(), "removed");
+    assert!(b.status.success(), "{}", printed(&b));
+    assert!(a_status.success(), "A failed:\n{a_out}{early}");
+    assert_eq!(a_out.trim(), "ran", "{early}");
+    assert!(
+        fs::read_dir(target.join("xtask"))?
+            .flatten()
+            .all(|d| fs::read_dir(d.path().join("run")).is_ok_and(|mut r| r.next().is_none())),
+        "a private copy of xtask was left behind"
+    );
     Ok(())
 }
 
