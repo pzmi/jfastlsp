@@ -438,7 +438,8 @@ fn should_fail_the_unit_tests_stage_when_a_test_passes_only_on_a_retry() -> Test
 
 #[test]
 fn should_pass_plain_nextest_when_the_flaky_test_is_retried() -> TestResult {
-    // given: the control, nextest without the gate's flags
+    // given: the control, nextest without the gate's flags, and without the runner's own
+    // profile (CI's NEXTEST_PROFILE=ci names a profile the fixture does not have)
     let workspace = fixture("flaky-test");
 
     // when
@@ -447,6 +448,7 @@ fn should_pass_plain_nextest_when_the_flaky_test_is_retried() -> TestResult {
         .current_dir(&workspace)
         .env("CARGO_TARGET_DIR", fresh_target("flaky-plain")?)
         .env_remove("NEXTEST_RETRIES")
+        .env_remove("NEXTEST_PROFILE")
         .output()?;
 
     // then

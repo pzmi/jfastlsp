@@ -199,8 +199,10 @@ pub fn check(tree: &dyn tree::Tree, metadata: &[(String, Metadata)], scope: Scop
 }
 
 /// Runs `cargo metadata --locked --filter-platform <target>` in `root` for each of [`TARGETS`]
-/// and then [`check`] over the files under `root`. A metadata failure is an `ARCH-metadata`
-/// finding, never a pass.
+/// and then [`check`] over the files under `root`. A metadata failure, or a `root` that is not
+/// itself the workspace root cargo finds, is an `ARCH-metadata` finding, never a pass. Pinned by
+/// `tests/rules.rs::should_report_arch_metadata_when_cargo_metadata_fails` and
+/// `::should_report_arch_metadata_when_the_root_sits_inside_another_workspace`.
 pub fn check_repository(root: &Path, scope: Scope) -> Vec<Finding> {
     let mut metadata = Vec::new();
     for target in TARGETS {
@@ -213,7 +215,28 @@ pub fn check_repository(root: &Path, scope: Scope) -> Vec<Finding> {
             ])
             .exec();
         match result {
-            Ok(data) => metadata.push((target.to_owned(), data)),
+            Ok(data) => {
+                // cargo walks up to the nearest workspace: a directory inside another workspace
+                // (a target directory under the repository, as in CI) would otherwise be checked
+                // as that workspace with this directory's files.
+                let found = data.workspace_root.as_std_path();
+                let same = match (found.canonicalize(), root.canonicalize()) {
+                    (Ok(found), Ok(root)) => found == root,
+                    _ => false,
+                };
+                if !same {
+                    return vec![Finding::new(
+                        "ARCH-metadata",
+                        "Cargo.toml",
+                        format!(
+                            "{} is not a workspace root: cargo found the workspace at {}",
+                            root.display(),
+                            found.display()
+                        ),
+                    )];
+                }
+                metadata.push((target.to_owned(), data));
+            }
             Err(error) => {
                 return vec![Finding::new(
                     "ARCH-metadata",

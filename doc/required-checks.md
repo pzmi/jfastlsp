@@ -71,6 +71,12 @@ concurrency group. A pull request's older run is cancelled by its newer one. Cac
 `Swatinem/rust-cache`'s, keyed by the toolchain, `Cargo.lock` and `mise.lock`) are saved only
 from `main`.
 
+CI differs from a local gate in three ways that a test can depend on: its target directory is
+`./target` inside the checkout (a scratch directory under it is inside this workspace), every
+child process inherits `NEXTEST_PROFILE=ci`, and the `linux-arm` and `macos` jobs run on other
+platforms. `just ci-parity` reproduces the first two locally; the platforms are seen only after
+the push, by design of ADR 0002, so a red `linux-arm` or `macos` job on `main` is fixed at once.
+
 ## Planned checks
 
 Not in `ci.yml` yet; each arrives with its task, which adds the job, its row above and its name

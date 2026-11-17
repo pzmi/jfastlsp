@@ -991,18 +991,38 @@ fn should_report_arch_metadata_when_the_metadata_does_not_parse() {
 
 #[test]
 fn should_report_arch_metadata_when_cargo_metadata_fails() -> TestResult {
-    // given: a directory with no workspace at all
-    let empty = Path::new(env!("CARGO_TARGET_TMPDIR")).join("rules-no-workspace");
+    // given: a directory with no workspace at all (outside every workspace: the target directory
+    // may sit inside the repository, whose workspace cargo would find from below)
+    let empty = std::env::temp_dir().join(format!("jfl-rules-no-workspace-{}", std::process::id()));
     std::fs::create_dir_all(&empty)?;
 
     // when
     let findings = check_repository(&empty, Scope::ALL);
+    std::fs::remove_dir_all(&empty)?;
 
     // then
     assert!(
         findings
             .iter()
             .any(|f| f.rule == "ARCH-metadata" && f.at == "Cargo.toml"),
+        "{findings:?}"
+    );
+    Ok(())
+}
+
+#[test]
+fn should_report_arch_metadata_when_the_root_sits_inside_another_workspace() -> TestResult {
+    // given: a directory inside this repository's workspace, with no workspace of its own
+    let inner = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+
+    // when
+    let findings = check_repository(&inner, Scope::ALL);
+
+    // then
+    assert!(
+        findings.iter().any(|f| f.rule == "ARCH-metadata"
+            && f.at == "Cargo.toml"
+            && f.message.contains("is not a workspace root")),
         "{findings:?}"
     );
     Ok(())

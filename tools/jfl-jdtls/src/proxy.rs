@@ -69,6 +69,8 @@ pub fn run_lsp(options: &LspOptions) -> io::Result<()> {
                 "daemon refused the client: {why}"
             )));
         }
+        // The LSP stream continues on this connection: no deadline from here on.
+        stream.set_read_timeout(None)?;
         stream
     };
     let mut to_daemon = stream.try_clone()?;
@@ -98,6 +100,12 @@ fn copy_flushing<R: Read, W: Write>(reader: &mut R, writer: &mut W) -> io::Resul
     }
 }
 
+/// Sends the hello and reads the reply under [`REPLY_TIMEOUT`], leaving that read timeout set:
+/// after a `status` or `stop` reply the daemon closes the connection, and on macOS `setsockopt`
+/// on a socket whose peer has gone fails with EINVAL, so only the `lsp` caller, whose connection
+/// stays open, clears it. Pinned on macOS by
+/// `tests/daemon.rs::daemon_or_jvm::should_give_different_data_dirs_when_worktrees_share_a_basename`
+/// (its `status` call), run by ci.yml's `macos` job.
 fn exchange(stream: &mut UnixStream, hello: &Value) -> io::Result<Value> {
     let body = serde_json::to_vec(hello).map_err(io::Error::other)?;
     write_frame(stream, &body)?;
@@ -107,7 +115,6 @@ fn exchange(stream: &mut UnixStream, hello: &Value) -> io::Result<Value> {
     let reply = read_frame(&mut reader, MAX_HELLO_BYTES)?.ok_or_else(|| {
         io::Error::new(io::ErrorKind::UnexpectedEof, "daemon closed the connection")
     })?;
-    stream.set_read_timeout(None)?;
     serde_json::from_slice(&reply).map_err(io::Error::other)
 }
 
