@@ -11,3 +11,26 @@ description = "The only child-process runner: argv only, cleared environment plu
 
 [lints]
 workspace = true
+
+[dependencies]
+rustix = { version = "1.1.6", default-features = false, features = ["std", "process", "event"] }
+thiserror = "2"
+
+[dev-dependencies]
+jfl-testkit = { path = "../jfl-testkit" }
+
+# The child jfl-process's own tests and benchmark start (no shell, the same output on Linux and
+# macOS); nothing else starts it, and no release artefact ships it (only jfl-cli's `jfl` is
+# released). It stays a bin target of this crate because only a crate's own tests and benches get
+# a bin's path (CARGO_BIN_EXE_*): gating it behind a feature needs a dev-dependency of the crate on
+# itself, which ARCH-forbidden-dev-edge refuses, and another crate's bin cannot be located.
+[[bin]]
+name = "jfl-process-test-child"
+path = "src/bin/jfl-process-test-child.rs"
+test = false
+doc = false
+
+# Spawn overhead against std (`just bench-process`); reports, never gates.
+[[bench]]
+name = "spawn"
+harness = false

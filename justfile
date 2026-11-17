@@ -169,6 +169,20 @@ bench-domain corpus="small": _preflight
       | while IFS= read -r -d '' file; do cat -- "$root/$file"; printf '\0'; done \
       | {{cargo}} bench --locked -p jfl-domain --bench positions
 
+# jfl-process's spawn overhead against std's Command on the same child (IDX-04): median and p95
+# per arm, printed; with a corpus size, also the git adapter's two reconcile calls in that
+# corpus's checkout. `just bench-process`, `just bench-process small`. Reports, never gates.
+bench-process corpus="": _preflight
+    #!/usr/bin/env bash
+    set -euo pipefail
+    repo=()
+    if [ -n {{quote(corpus)}} ]; then
+      bash scripts/bench-corpus.sh fetch {{quote(corpus)}}
+      repo=("$(bash scripts/bench-corpus.sh path {{quote(corpus)}})")
+    fi
+    # ${repo[@]+...}: an empty array under `set -u` is an error in bash 3.2 (macOS).
+    {{cargo}} bench --locked -p jfl-process --bench spawn -- ${repo[@]+"${repo[@]}"}
+
 # Every tool of tools/versions.toml on the stages' PATH at its pinned version (xtask's cache first,
 # then mise's install directories), and versions.toml agreeing with mise.toml and mise.lock;
 # fails naming each missing or wrong tool and the fix (XT-02, fnd §8).

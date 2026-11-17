@@ -46,6 +46,11 @@ disallowed-methods = [
   { path = "std::env::var_os", reason = "the environment needs the env grant (fnd §2.4, ARCH-env-authority)" },
   { path = "std::env::vars", reason = "the environment needs the env grant (fnd §2.4, ARCH-env-authority)" },
   { path = "std::env::vars_os", reason = "the environment needs the env grant (fnd §2.4, ARCH-env-authority)" },
+  # grant: process
+  { path = "rustix::process::kill_current_process_group", reason = "signalling a process is the child runner's: it needs the process grant (fnd §2.4, ARCH-process-authority)", allow-invalid = true },
+  { path = "rustix::process::kill_process", reason = "signalling a process is the child runner's: it needs the process grant (fnd §2.4, ARCH-process-authority)", allow-invalid = true },
+  { path = "rustix::process::kill_process_group", reason = "signalling a process is the child runner's: it needs the process grant (fnd §2.4, ARCH-process-authority)", allow-invalid = true },
+  { path = "rustix::process::pidfd_send_signal", reason = "signalling a process is the child runner's: it needs the process grant (fnd §2.4, ARCH-process-authority)", allow-invalid = true },
   # grant: none
   { path = "crossbeam_channel::unbounded", reason = "unbounded channels are denied everywhere: use a bounded one (fnd §2.4, ARCH-unbounded-channel)", allow-invalid = true },
   { path = "std::sync::mpsc::channel", reason = "unbounded channels are denied everywhere: use sync_channel (fnd §2.4, ARCH-unbounded-channel)" },

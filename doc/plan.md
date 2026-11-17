@@ -1006,7 +1006,7 @@ that adds a subsystem says on its card what reuse it considered.
 | `gen-lsp-types` | 0.11.0 (2026-07-28) | MIT | `jfl-adapter-lsp` | LSP 3.18 metamodel; exact pin |
 | `line-index` | 0.1.2 | MIT OR Apache-2.0 | `jfl-domain` or its tests | UTF-8 ↔ UTF-16 |
 | `tokio`, `tokio-util` | 1.54, 0.7.20 | MIT | daemon side only | `peer_cred()`, `CancellationToken` |
-| `rustix` | 1.1.6 | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT | `jfl-adapter-ipc`, daemon start | safe `setsid`, uid and mode checks |
+| `rustix` | 1.1.6 | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT | `jfl-process`, `jfl-adapter-ipc`, daemon start | safe `setsid`, uid and mode checks; the group kill, `waitid`, pidfd and `poll(2)` of the child runner |
 | `tree-sitter`, `tree-sitter-java-orchard` | 0.27.2, 0.5.25 (2026-11-15) | MIT | `jfl-adapter-java` | C via `cc` |
 | `cafebabe`, `zip` | 0.9.0 (then the fix commit, ADR 0023), 9.6.1 | 0BSD, MIT | `jfl-adapter-classfile` | `zip` without default features, `deflate` on |
 | `ristretto_jimage` | =0.35.0 | Apache-2.0 OR MIT | `jfl-adapter-classfile` | `lib/modules`; needs Rust 1.99.1 (FND-10) |

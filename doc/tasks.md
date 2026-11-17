@@ -1318,16 +1318,23 @@ but follow in lane CLI (M2). Starts after the go decision.
   group killed as a group on deadline or drop, stdout and stderr captured up to a byte limit (excess
   counted, not buffered), and an outcome that keeps exited, killed on deadline, failed to start and
   output-truncated apart. Also a long-lived child mode with framed stdin and stdout for the JVM
-  helpers (SEM-04, PROJ-01), and a detached mode (`process_group(0)`, null stdin, output to a log
-  file) for the daemon launcher (ADR 0021). The `process_runner` contract suite in `jfl-testkit`
+  helpers (SEM-04, PROJ-01), and a detached mode (left in the launcher's process group so the
+  daemon's own `setsid` succeeds, which it cannot as a group leader; null stdin, output to a log
+  file) for the daemon launcher (ADR 0021, amended 2026-11-17). The `process_runner` contract suite in `jfl-testkit`
   with a scripted fake.
 - **Reuse considered:** std `Command` with `process_group(0)` (no `pre_exec`, which is `unsafe`);
-  `rustix` for the child's `setsid`; `daemonize`/`fork` rejected.
+  `rustix` 1.1.6 for the safe calls std lacks (the group kill, `waitid` with `WNOWAIT`, Linux's
+  pidfd, `poll(2)`), so one thread waits on both pipes and the exit with no sleep (the crate holds
+  no spawn or sleep grant); the daemon calls `setsid` itself (ADR 0021). `command-group` and
+  `process-wrap` rejected: they add the group and kill-on-drop that `process_group(0)` and
+  `killpg` already give, and neither bounds output or enforces a deadline without threads;
+  `daemonize`/`fork` rejected. macOS has no safe exit descriptor (rustix's `kevent` is
+  `unsafe`), so there a wait is cut into 5 ms slices between checks of the leader.
 - **Accept:**
-  - [ ] integration tests: a child that ignores SIGTERM is killed with its group at the deadline; a grandchild does not survive; an argument with spaces and quotes arrives intact; the environment holds only the allowlist
-  - [ ] the contract suite passes for the fake and the real runner and fails for a deliberately broken runner
-  - [ ] clippy's lists refuse `std::process` in every crate without the grant (FND-02's negative case still passes)
-  - [ ] runs on the bench corpus (small at least, `just bench`) and reports the metrics it affects; its correctness tests also run against the real-corpus cases that apply (BENCH-05)
+  - [x] integration tests: a child that ignores SIGTERM is killed with its group at the deadline; a grandchild does not survive; an argument with spaces and quotes arrives intact; the environment holds only the allowlist
+  - [x] the contract suite passes for the fake and the real runner and fails for a deliberately broken runner
+  - [x] clippy's lists refuse `std::process` in every crate without the grant (FND-02's negative case still passes)
+  - [x] runs on the bench corpus (small at least, `just bench-process small`: the git adapter's two reconcile calls in the small corpus, through `jfl-process` and std) and reports the metrics it affects; no real-corpus case applies (the crate reads no Java)
 - **Impact:** public API (support crate).
 
 #### IDX-05: Git adapter: roots, identity, freshness stat, changed files

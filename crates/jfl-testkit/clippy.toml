@@ -30,6 +30,7 @@ disallowed-methods = [
   { path = "std::env::var_os", reason = "the environment needs the env grant (fnd §2.4, ARCH-env-authority)" },
   { path = "std::env::vars", reason = "the environment needs the env grant (fnd §2.4, ARCH-env-authority)" },
   { path = "std::env::vars_os", reason = "the environment needs the env grant (fnd §2.4, ARCH-env-authority)" },
+  # grant: process (granted to this crate: lifted)
   # grant: none
   { path = "crossbeam_channel::unbounded", reason = "unbounded channels are denied everywhere: use a bounded one (fnd §2.4, ARCH-unbounded-channel)", allow-invalid = true },
   { path = "std::sync::mpsc::channel", reason = "unbounded channels are denied everywhere: use sync_channel (fnd §2.4, ARCH-unbounded-channel)" },

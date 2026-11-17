@@ -94,6 +94,12 @@ jfl-eval = { serde = ["default", "derive"], serde_json = ["default"], toml = ["d
 # (cargo_metadata), MIT OR Apache-2.0, its build script reviewed in deny.toml.
 jfl-domain = { thiserror = [] }
 
+# jfl-process (IDX-04): rustix gives the safe calls std lacks: the group kill (killpg), the
+# leader's exit without reaping it (waitid WNOWAIT), Linux's pidfd and poll(2), so the runner waits
+# on both pipes and the exit with no thread and no sleep (plan §16.2 lists rustix 1.1.6); no
+# default features. thiserror for the typed errors (fnd §4.3), in the graph already.
+jfl-process = { rustix = ["event", "process", "std"], thiserror = ["default"] }
+
 jfl-bench = { blake3 = ["default"], ignore = ["default"], rayon = ["default"], serde = ["default", "derive"], serde_json = ["default"], toml = ["default"], tree-sitter = ["default"], tree-sitter-java-orchard = ["default"] }
 
 [external.dev]

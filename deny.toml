@@ -107,8 +107,11 @@ bypass = [
   # zmij: rustc probe (serde_json's float formatting), cfgs only; jfl-architecture's closure.
   { crate = "zmij", build-script = "ad320bc635887879bdbbf1b9322da4a157ec2c5a4243bd7c2cf9b6884a3b2a41" },
   # libc: rustc version probe and target cfgs, cfgs only; cpufeatures's (sha2 and blake3) on
-  # aarch64. Added by EVAL-11 for rustix, which left the graph with jfl-jdtls (FND-12).
+  # aarch64, and rustix's backend on macOS (jfl-process, IDX-04). Added by EVAL-11 for rustix.
   { crate = "libc", build-script = "e70593206df4d2a3138eab463567e0ae8f91c1bea565da4ab5370ea8986840ac" },
+  # rustix 1.1.6: rustc feature probes (compiles probe snippets with $RUSTC) and target cfgs, cfgs
+  # only; the same script EVAL-11 reviewed (checksum unchanged); jfl-process's closure (IDX-04).
+  { crate = "rustix", build-script = "f7609b919173e7121493266d0f89db724a1e47bb105ebd05397f869639603eec" },
   # BENCH-02 (ADR 0031, amended 2026-11-17): jfl-bench reuses the serde and serde_json entries above
   # and adds the E1 pipeline's crates. Each script below was read at the version pinned in Cargo.lock.
   # blake3: compiles its own vendored C and assembly (SSE/AVX/NEON) with the `cc` crate and sets

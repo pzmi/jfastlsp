@@ -4,7 +4,8 @@ Date: 2026-11-16
 
 ## Status
 
-Accepted (owner, 2026-11-17).
+Accepted (owner, 2026-11-17); amended 2026-11-17 (orchestrator: detached children are not
+put in a process group by the launcher).
 
 ## Context
 
@@ -28,7 +29,10 @@ lifecycles worth copying in sccache, turborepo, buck2 and Biome.
   for the daemon's life; a pid file is informational only (turborepo's failure mode is a stale
   pid file over a dead socket). A spawn lock serialises racing proxies.
 - **Spawn:** `jfl-process`'s detached mode runs `jfl daemon` with `process_group(0)`; the daemon
-  calls `rustix::process::setsid()` (rustix 1.1, safe API) itself, so no `pre_exec`. sccache's
+  calls `rustix::process::setsid()` (rustix 1.1, safe API) itself, so no `pre_exec`. (orchestrator,
+  2026-11-17, technical correction under the owner's delegation): process_group(0) and setsid
+  conflict (EPERM); detached children are not placed in a group by the launcher; the daemon calls
+  setsid. See the amendment below. sccache's
   handshake: the proxy binds a one-shot notify socket before spawning, the child reports ready or
   its error, the proxy waits with a bounded budget.
 - Version handshake on connect; a mismatch asks the old daemon to stop and respawns (buck2,
@@ -45,3 +49,17 @@ unchanged. `daemon.qnt` is unaffected.
 - `jsonrpsee`, `tarpc`: heavy, or a second protocol no LSP tool can read.
 - `fs2` (2018), `fd-lock`, `fs4`: unnecessary since Rust 1.89. `daemonize`/`fork`: `fork()` in a
   multi-threaded process is unsafe in practice. `interprocess`: only if Windows becomes a target.
+
+## Amended 2026-11-17 (orchestrator, technical correction under the owner's delegation): no launcher-made group
+
+`process_group(0)` and `setsid` conflict: `process_group(0)` makes the child the leader of a new
+process group, and POSIX `setsid()` fails with `EPERM` for a process group leader, so the daemon's
+own `setsid` could never succeed (found in IDX-04's review). The detached mode of `jfl-process`
+therefore starts the child in the launcher's process group, with null stdin and its output in the
+log the launcher opened; the daemon calls `setsid` first thing, which gives it its own session and
+process group, so a terminal's Ctrl-C or hang-up still never reaches it. Pinned by
+`crates/jfl-process/tests/detached.rs::should_let_the_child_call_setsid_when_detached` (a detached
+child's `setsid` succeeds) and
+`crates/jfl-process/tests/run.rs::should_refuse_setsid_to_a_group_leader_when_run` (it fails in a
+child that leads its own group). The one-shot and long-lived modes keep `process_group(0)`: their
+group is killed as a whole.
