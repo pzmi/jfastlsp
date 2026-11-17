@@ -7,7 +7,7 @@
 use std::error::Error;
 use std::path::Path;
 
-use jfl_architecture::gate::{self, GATE_FILES, MISE, NEXTEST, PINS, RULE, TOOLCHAIN};
+use jfl_architecture::gate::{self, GATE_FILES, MISE, MISE_LOCK, NEXTEST, PINS, RULE, TOOLCHAIN};
 use jfl_architecture::{Finding, ci, tree::MemoryTree};
 
 type TestResult = Result<(), Box<dyn Error>>;
@@ -20,14 +20,28 @@ fn repo_file(path: &str) -> Result<String, Box<dyn Error>> {
     )?)
 }
 
+/// The repository's `scripts/test-*.sh`, which the pin manifest covers by glob.
+fn test_scripts() -> Result<Vec<String>, Box<dyn Error>> {
+    let mut found = Vec::new();
+    for entry in std::fs::read_dir(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scripts"))? {
+        let name = entry?.file_name().to_string_lossy().into_owned();
+        if name.starts_with("test-") && name.ends_with(".sh") {
+            found.push(format!("scripts/{name}"));
+        }
+    }
+    found.sort();
+    Ok(found)
+}
+
 /// The gate's files as the repository has them.
 fn baseline() -> Result<MemoryTree, Box<dyn Error>> {
     let mut tree = MemoryTree::new();
-    for path in [ci::JUSTFILE, PINS, NEXTEST, MISE, TOOLCHAIN, "mise.lock"]
+    let fixed = [ci::JUSTFILE, PINS, NEXTEST, MISE, TOOLCHAIN, MISE_LOCK]
         .into_iter()
         .chain(GATE_FILES)
-    {
-        tree = tree.with(path, &repo_file(path)?);
+        .map(str::to_owned);
+    for path in fixed.chain(test_scripts()?) {
+        tree = tree.with(&path, &repo_file(&path)?);
     }
     Ok(tree)
 }
@@ -135,7 +149,7 @@ fn should_fail_gate_config_when_the_manifest_lists_too_much_or_too_little() -> T
     let pins = repo_file(PINS)?;
     let extra = baseline()?.with(
         PINS,
-        &format!("{pins}{}  scripts/land.sh\n", "0".repeat(64)),
+        &format!("{pins}{}  scripts/bench-corpus.sh\n", "0".repeat(64)),
     );
     let first = pins
         .lines()
@@ -153,7 +167,7 @@ fn should_fail_gate_config_when_the_manifest_lists_too_much_or_too_little() -> T
     assert_reported(
         &extra_found,
         PINS,
-        "`scripts/land.sh` is pinned but is no part",
+        "`scripts/bench-corpus.sh` is pinned but is no part",
     );
     assert_reported(
         &missing_found,
@@ -170,14 +184,14 @@ fn should_fail_gate_config_when_a_gate_recipe_runs_an_unpinned_script() -> TestR
     let tree = edited(
         ci::JUSTFILE,
         "    bash scripts/secrets-check.sh\n",
-        "    bash scripts/secrets-check.sh\n    bash scripts/land.sh --no-push\n",
+        "    bash scripts/secrets-check.sh\n    bash scripts/bench-corpus.sh fetch small\n",
     )?;
 
     // when
     let found = gate::check(&tree);
 
     // then
-    assert_reported(&found, ci::JUSTFILE, "runs `scripts/land.sh`");
+    assert_reported(&found, ci::JUSTFILE, "runs `scripts/bench-corpus.sh`");
     Ok(())
 }
 
@@ -304,5 +318,280 @@ fn should_fail_gate_config_when_the_tree_holds_a_cargo_or_mise_config() -> TestR
     for (findings, path, reason) in found {
         assert_reported(&findings, path, reason);
     }
+    Ok(())
+}
+
+#[test]
+fn should_fail_gate_config_when_a_tool_reads_an_unlisted_configuration_file() -> TestResult {
+    // given: the FND-08 re-verification's F1, configuration files the gate's linters (and mise)
+    // read without a command line naming them, at the root, under .github/ and under .config/
+    let files = [
+        (
+            ".shellcheckrc",
+            "disable=all\n",
+            ".shellcheckrc",
+            "not an allowed entry at the root",
+        ),
+        (
+            ".yamllint",
+            "rules: {}\n",
+            ".yamllint",
+            "not an allowed entry at the root",
+        ),
+        (
+            ".mise.toml",
+            "[tools]\n",
+            ".mise.toml",
+            "not an allowed entry at the root",
+        ),
+        (
+            "mise.dev.toml",
+            "[tools]\n",
+            "mise.dev.toml",
+            "not an allowed entry at the root",
+        ),
+        (
+            ".github/actionlint.yaml",
+            "paths: {}\n",
+            ".github/actionlint.yaml",
+            "not an allowed entry of .github/",
+        ),
+        (
+            ".github/pinact.yaml",
+            "ignore_actions: []\n",
+            ".github/pinact.yaml",
+            "not an allowed entry of .github/",
+        ),
+        (
+            ".config/mise/config.toml",
+            "[env]\n",
+            ".config/mise",
+            "not an allowed entry of .config/",
+        ),
+        (
+            "crates/x/rustfmt.toml",
+            "ignore = [\"*\"]\n",
+            "crates/x/rustfmt.toml",
+            "a rustfmt configuration file",
+        ),
+    ];
+
+    // when
+    let mut found = Vec::new();
+    for (path, contents, at, reason) in files {
+        found.push((gate::check(&baseline()?.with(path, contents)), at, reason));
+    }
+
+    // then
+    for (findings, at, reason) in found {
+        assert_reported(&findings, at, reason);
+    }
+    Ok(())
+}
+
+#[test]
+fn should_fail_gate_config_when_mise_names_a_plugin_backend_or_a_template() -> TestResult {
+    // given: a backend whose plugin is code, and a version that is a template
+    let cases = [
+        (
+            "\"asdf:someone/plugin\" = \"1.0.0\"\n",
+            "is not `just`, an aqua or a github backend",
+        ),
+        (
+            "\"vfox:someone/plugin\" = \"1.0.0\"\n",
+            "is not `just`, an aqua or a github backend",
+        ),
+        (
+            "\"aqua:a/b\" = \"{{exec(command='true')}}\"\n",
+            "must be pinned by a plain version string",
+        ),
+    ];
+
+    // when
+    let mut found = Vec::new();
+    for (line, reason) in cases {
+        let text = format!("{}{line}", repo_file(MISE)?);
+        found.push((gate::check(&baseline()?.with(MISE, &text)), reason));
+    }
+
+    // then
+    for (findings, reason) in found {
+        assert_reported(&findings, MISE, reason);
+    }
+    Ok(())
+}
+
+#[test]
+fn should_fail_gate_config_when_mise_lock_leaves_its_shape() -> TestResult {
+    // given: an asset from elsewhere, a checksum that is not SHA-256, a key mise.lock does not
+    // allow, and an entry for a tool mise.toml does not pin
+    let lock = repo_file(MISE_LOCK)?;
+    let first_url = lock
+        .lines()
+        .find(|l| l.starts_with("url = "))
+        .ok_or("no url line")?;
+    let first_checksum = lock
+        .lines()
+        .find(|l| l.starts_with("checksum = "))
+        .ok_or("no checksum line")?;
+    let cases = [
+        lock.replacen(
+            first_url,
+            "url = \"https://example.invalid/tool.tar.gz\"",
+            1,
+        ),
+        lock.replacen(first_checksum, "checksum = \"blake3:00\"", 1),
+        lock.replacen(
+            "lockfile_version = 3",
+            "lockfile_version = 3\n[settings]\nx = 1",
+            1,
+        ),
+        format!("{lock}\n[[tools.\"aqua:a/b\"]]\nversion = \"1.0.0\"\nbackend = \"aqua:a/b\"\n"),
+    ];
+
+    // when
+    let mut found = Vec::new();
+    for text in &cases {
+        found.push(gate::check(&baseline()?.with(MISE_LOCK, text)));
+    }
+
+    // then
+    for findings in found {
+        assert_reported(&findings, MISE_LOCK, "");
+    }
+    Ok(())
+}
+
+#[test]
+fn should_fail_gate_config_when_a_test_script_or_a_policy_changes_without_its_pin() -> TestResult {
+    // given: the FND-08 re-verification's F4, files that define the gate besides its recipes
+    let new_test = baseline()?.with("scripts/test-anything.sh", "exit 0\n");
+    let cases = [
+        (
+            "scripts/test-secrets.sh",
+            "set -euo pipefail\n",
+            "set -euo pipefail\nexit 0\n",
+            "`scripts/test-secrets.sh` changed",
+        ),
+        (
+            ".github/zizmor.yml",
+            "\"*\": hash-pin",
+            "\"*\": ref-pin",
+            "`.github/zizmor.yml` changed",
+        ),
+        (
+            "deny.toml",
+            "[advisories]",
+            "[advisories]\nignore = [\"RUSTSEC-0000-0000\"]",
+            "`deny.toml` changed",
+        ),
+    ];
+
+    // when
+    let new_found = gate::check(&new_test);
+    let mut found = Vec::new();
+    for (path, from, to, reason) in cases {
+        found.push((gate::check(&edited(path, from, to)?), reason));
+    }
+
+    // then
+    assert_reported(
+        &new_found,
+        PINS,
+        "`scripts/test-anything.sh` is part of the gate but not pinned",
+    );
+    for (findings, reason) in found {
+        assert_reported(&findings, PINS, reason);
+    }
+    Ok(())
+}
+
+#[test]
+fn should_fail_gate_config_when_what_decides_landing_changes_without_its_pin() -> TestResult {
+    // given: the FND-09 review's G5, the landing script without its tree check, the DCO check
+    // and the hooks neutered
+    let cases = [
+        (
+            "scripts/land.sh",
+            "    check_tree \"$tree\" \"$sha\"\n",
+            "",
+            "`scripts/land.sh` changed",
+        ),
+        (
+            "scripts/dco-check.sh",
+            "set -euo pipefail\n",
+            "set -euo pipefail\nexit 0\n",
+            "`scripts/dco-check.sh` changed",
+        ),
+        (
+            ".claude/hooks/stop-gate.sh",
+            "set -uo pipefail\n",
+            "set -uo pipefail\nexit 0\n",
+            "`.claude/hooks/stop-gate.sh` changed",
+        ),
+        (
+            ".claude/hooks/session-start.sh",
+            "set -uo pipefail\n",
+            "set -uo pipefail\nexit 0\n",
+            "`.claude/hooks/session-start.sh` changed",
+        ),
+    ];
+
+    // when
+    let mut found = Vec::new();
+    for (path, from, to, reason) in cases {
+        found.push((gate::check(&edited(path, from, to)?), reason));
+    }
+
+    // then
+    for (findings, reason) in found {
+        assert_reported(&findings, PINS, reason);
+    }
+    Ok(())
+}
+
+#[test]
+fn should_fail_gate_config_when_a_cargo_dir_or_a_nested_gitleaks_policy_exists() -> TestResult {
+    // given: the FND-09 review's G2 (any `.cargo` entry at the root) and G4 (a policy file whose
+    // self-allowlist would cover it, deeper down)
+    let cargo_dir = baseline()?.with(".cargo/notes.txt", "x\n");
+    let nested = baseline()?.with("crates/x/.gitleaks.toml", "title = \"x\"\n");
+
+    // when
+    let cargo_found = gate::check(&cargo_dir);
+    let nested_found = gate::check(&nested);
+
+    // then
+    assert_reported(&cargo_found, ".cargo", "not an allowed entry at the root");
+    assert_reported(
+        &nested_found,
+        "crates/x/.gitleaks.toml",
+        "a gitleaks policy",
+    );
+    Ok(())
+}
+
+#[test]
+fn should_fail_gate_config_when_a_cargo_or_toolchain_file_differs_only_by_case() -> TestResult {
+    // given: the FND-09 review's H6, names a case-insensitive file system (macOS) opens as the
+    // ones cargo and rustup read
+    let cargo = baseline()?.with("crates/x/.Cargo/Config.toml", "[build]\n");
+    let toolchain = baseline()?.with("crates/x/Rust-Toolchain.toml", "[toolchain]\n");
+
+    // when
+    let cargo_found = gate::check(&cargo);
+    let toolchain_found = gate::check(&toolchain);
+
+    // then
+    assert_reported(
+        &cargo_found,
+        "crates/x/.Cargo/Config.toml",
+        "a cargo configuration file",
+    );
+    assert_reported(
+        &toolchain_found,
+        "crates/x/Rust-Toolchain.toml",
+        "a toolchain file",
+    );
     Ok(())
 }

@@ -63,7 +63,10 @@ jfl-bench = []
 # ARCH-ci-lockstep (FND-05): a maintained serde_yaml fork, MIT OR Apache-2.0, no build script.
 # sha2 hashes the gate's pinned recipes and scripts for ARCH-gate-config (FND-08): RustCrypto,
 # MIT OR Apache-2.0, no build script; the SHA-256 lines read the same as `sha256sum`.
-jfl-architecture = { cargo_metadata = ["default"], serde = ["default", "derive"], serde_norway = ["default"], sha2 = ["default"], toml = ["default"] }
+# yaml-rust2 reads every YAML file under .github/ event by event for ARCH-workflow-yaml (FND-09):
+# the anchors, aliases and tags a serde reader resolves silently are events here; MIT OR
+# Apache-2.0, no build script, default features off (no encoding_rs).
+jfl-architecture = { cargo_metadata = ["default"], serde = ["default", "derive"], serde_norway = ["default"], sha2 = ["default"], toml = ["default"], yaml-rust2 = [] }
 # jfl-jdtls (EVAL-11, ADR 0028): serde_json parses only the JSON-RPC envelope and forwards params,
 # result and error as raw values (raw_value); serde derives the envelope; sha1_smol keys jdtls's
 # -data on the full worktree path; rustix gives the effective uid, the socket peer's uid and the

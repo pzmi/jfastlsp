@@ -8,8 +8,10 @@ set shell := ["bash", "-euo", "pipefail", "-c"]
 # (`mise bin-paths`), so a stage runs the real binary and never a mise shim, which would apply a
 # mise `[env]` after `_preflight` has looked (fnd §3.6, FND-08); then mise's shims, for a shell
 # without mise's tools installed (`doctor` says what is missing). CI's mise-action installs the
-# same tools.
-mise_bins := shell('cd "$1" && { mise bin-paths 2>/dev/null || true; } | paste -s -d : -', justfile_directory())
+# same tools. mise runs code from a trusted configuration as it loads it, so the tree's tool
+# configuration passes scripts/tool-config-check.sh (bash and awk, no mise) first; a refusal
+# fails every recipe before mise has run (FND-09).
+mise_bins := shell('cd "$1" && bash scripts/tool-config-check.sh "$1" && { mise bin-paths 2>/dev/null || true; } | paste -s -d : -', justfile_directory())
 mise_shims := env("MISE_DATA_DIR", env("XDG_DATA_HOME", env("HOME") / ".local/share") / "mise") / "shims"
 export PATH := if mise_bins == "" { mise_shims + ":" + env("PATH") } else { mise_bins + ":" + mise_shims + ":" + env("PATH") }
 
@@ -112,7 +114,7 @@ _preflight:
     git -C "$root" rev-parse --git-dir >/dev/null 2>&1 || { echo "preflight: $root is not a git work tree" >&2; exit 1; }
     while IFS= read -r -d '' file; do refused+=("$root/$file"); done < <(
       git -C "$root" ls-files -z --cached --others --exclude-standard -- \
-        ':(glob)**/.cargo/config' ':(glob)**/.cargo/config.toml')
+        ':(glob,icase)**/.cargo/config' ':(glob,icase)**/.cargo/config.toml')
     dir="$PWD"
     while :; do
       for file in "$dir/.cargo/config" "$dir/.cargo/config.toml"; do
@@ -129,18 +131,14 @@ _preflight:
     for file in "$home/config" "$home/config.toml"; do
       if [ -f "$file" ] && ! plain_config "$file"; then refused+=("$file"); fi
     done
-    # mise (fnd §3.6, FND-08): the root mise.toml is only [tools] with plain version strings, and
+    # mise and the other tools' implicit configuration (fnd §3.6, FND-08, FND-09): the root
+    # mise.toml is only [tools] with allowlisted backends and plain versions, mise.lock holds only
+    # checksummed release assets, and the root, .github/ and .config/ hold only allowlisted
+    # entries (scripts/tool-config-check.sh, which the top-level lines already ran before mise);
     # mise loads no other configuration file from inside the repository (an [env], a [hooks] or
     # a task there would reach the tools of the gate).
     mise_toml="$root/mise.toml"
-    if [ -f "$mise_toml" ] && ! awk '
-        /^[[:space:]]*(#.*)?$/ { next }
-        /^\[tools\][[:space:]]*(#.*)?$/ { tools = 1; next }
-        tools && /^("[A-Za-z0-9:\/._@-]+"|[A-Za-z0-9_-]+)[[:space:]]*=[[:space:]]*"[A-Za-z0-9._+-]+"[[:space:]]*(#.*)?$/ { next }
-        { bad = 1; exit }
-        END { exit bad }' "$mise_toml"; then
-      refused+=("$mise_toml")
-    fi
+    bash "$root/scripts/tool-config-check.sh" "$root" || refused+=("$root (its tool configuration, above)")
     if command -v mise >/dev/null 2>&1; then
       # A configuration mise cannot load (an untrusted one with [env], say) fails closed.
       listing="$(mise config ls --json 2>/dev/null)" || listing='"path": "mise config ls failed"'
@@ -161,10 +159,11 @@ fmt-check: _preflight
 # target of ADR 0006, the clippy lists against `[grants]` and the source scan, over the tree
 # (tests/architecture.rs, with ARCH-ci-lockstep over ci.yml); plus the checker's own table-driven
 # negative cases and the meta-test (tests/rules.rs), the lockstep's (tests/ci_lockstep.rs) and the
-# gate configuration's (tests/gate_config.rs, ARCH-gate-config). The fixture workspaces run in
+# gate configuration's (tests/gate_config.rs, ARCH-gate-config) and the decoded YAML under
+# .github/ (tests/workflow_yaml.rs, ARCH-workflow-yaml). The fixture workspaces run in
 # `integration-tests`.
 architecture: _preflight (_require "cargo-nextest")
-    {{cargo}} nextest run --locked --retries 0 --no-tests fail -p jfl-architecture --test architecture --test rules --test ci_lockstep --test gate_config
+    {{cargo}} nextest run --locked --retries 0 --no-tests fail -p jfl-architecture --test architecture --test rules --test ci_lockstep --test gate_config --test workflow_yaml
 
 # Clippy with the authority lists (fnd §2.4): the per-crate lists must match the root one first,
 # and a list entry naming a path that does not exist fails the stage (clippy only warns, and

@@ -32,6 +32,7 @@ targets), **IDX-15** (M1 and the blocking bench gate), **LSP-06** (M2), **SEM-07
 | FND-04 | Security and supply chain: gitleaks, zizmor, pinact, actionlint, private names | FND-03 | standard | S |  | EVAL-11 |
 | FND-05 | CI workflows and required checks | FND-04 | standard | M | ⛳ | EVAL-02, EVAL-06 |
 | FND-08 | Checkpoint fixes: close the gate bypasses found at the FND-05 ⛳ | FND-05 | deep | L |  | FND-06, BENCH-03 |
+| FND-09 | Close the gate gaps left after FND-08: tool configs, secrets in trees, mise before its check | FND-08 | deep | M |  | FND-06, BENCH-03 |
 | FND-06 | Coverage, changed lines, mutation in the diff | FND-05 | standard | M |  | EVAL-03, EVAL-10, BENCH-03 |
 | DEC-07 | (owner) Confirm the Proposed defaults | FND-05 | light | S |  | DEC-08 |
 | DEC-08 | (owner) Shared skills plugin or repo-local skills | FND-05 | light | S |  | DEC-07 |
@@ -113,7 +114,7 @@ Seven small tasks assemble the foundation from maintained tools (ADR 0030): mise
 gate, the compiler, clippy and cargo-deny for the dependency law (FND-02), one architecture test
 (FND-07), adrs and a land script, the security scanners, CI, coverage and mutation in the diff. The FND checkpoint (FND-05)
 puts the Proposed defaults and the skills question to the owner (DEC-07, DEC-08); FND-08 lands
-the checkpoint reviews' fixes.
+the checkpoint reviews' fixes and FND-09 the gaps its re-verification found.
 
 #### FND-01: Workspace, toolchain, crate stubs, mise
 - **Depends on:** none. **Model:** standard. **Size:** M. **Parallel with:** DEC-01.
@@ -313,6 +314,51 @@ the checkpoint reviews' fixes.
   - [ ] `just check` and `just ci-parity` are green on the tree
   - [ ] fnd §3 states the allowlist principle; fnd §3.3 has the `ARCH-gate-config` row and the meta-test covers it
 - **Impact:** none (tooling); the gate's configuration is pinned.
+
+#### FND-09: Close the gate gaps left after FND-08
+- **Depends on:** FND-08. **Model:** deep. **Size:** M. **Parallel with:** FND-06, BENCH-03.
+- **Cites:** fnd §3, §3.3, §3.6, §7.3, §7.4, §8; ADR 0030; the re-verification of FND-08 (the
+  FND-05 checkpoint's adversarial review, findings F1 to F4).
+- Each fix is an allowlist or a pinned shape (fnd §3) with a negative case that reproduces the
+  reviewer's bypass:
+  - **F1** (MEDIUM): the linters of the `workflows` stage read no implicit configuration:
+    shellcheck runs with `--norc`, actionlint with `-config-file /dev/null`, zizmor with the
+    pinned `.github/zizmor.yml`; the entries allowed at the repository root (its dotfiles and
+    the `mise*` names), under `.github/` and under `.config/` are allowlists, and no
+    `rustfmt.toml` may exist (`scripts/tool-config-check.sh` before any tool, `ARCH-gate-config`
+    after).
+  - **F2** (MEDIUM): the `secrets` stage also scans every blob reachable from any ref as a file
+    (`gitleaks dir`), so a NUL byte, a `-diff` attribute or a merge resolution hides nothing;
+    every `.gitattributes` in the history holds only allowlisted attributes; the policy's
+    global self-allowlist is gone.
+  - **F3** (MEDIUM): no mise runs on a tree before its configuration passes a non-mise shape
+    check (`mise.toml` only `[tools]` with allowlisted backends and plain versions, `mise.lock`
+    only checksummed GitHub release assets, no other mise file at the root): the justfile's
+    top-level lines, `_preflight`, `land.sh` (with the landing checkout's own copy of the check,
+    and no longer trusting the merged tree), `scripts/bootstrap-tools.sh` (which no longer runs
+    `mise trust`) and the Stop hook. The reviewer's payload (`[env] _.source` and an `exec`
+    template, with the tree trusted) runs nothing.
+  - **F4** (LOW): `.config/gate.sha256` also pins `scripts/test-*.sh` (by glob), the new check,
+    `.github/zizmor.yml`, `deny.toml`, `mise.toml` and `mise.lock`; fnd §3.6 says why
+    `architecture.toml`, the `clippy.toml` files and the checker's own sources are not pinned.
+  - The review's G1 to G6: blobs are scanned as text and the pass fails on any file gitleaks
+    skips as binary or any archive (G1); `land.sh` checks each cherry-picked tree, cargo and
+    toolchain configuration included, before any cargo or mise runs, and fnd §3.6 says the gate
+    is not a sandbox (G2); inline shellcheck and zizmor suppressions are an allowlist (G3); no
+    `.gitleaks.toml` may exist but the root one, which needs no allowlist of its own (G4); `land.sh`,
+    `dco-check.sh` and the two hooks are pinned (G5); commit and tag messages are scanned (G6).
+  - The secret-scanning alert: the generated policy holds no secret-shaped literal (every text
+    its own rules match is rewritten into the same regex with one character in a class), scans
+    clean with itself and has no self-allowlist; no token-shaped text is committed whole.
+- **Reuse considered:** gitleaks' own `dir` mode over the history's blobs rather than a second
+  scanner; a policy that matches nothing of itself rather than any allowlist of its path; the
+  linters' own flags (`--norc`, `-config-file`) rather than wrappers; mise's untrusted-config
+  behaviour (it reads `[tools]`, refuses `[env]`) rather than trusting the tree.
+- **Accept:**
+  - [ ] each finding above has its negative case, which fails before the fix and passes after
+  - [ ] the reviewer's mise payload runs nothing through `just`, `land.sh` or the bootstrap
+  - [ ] `just check` and `just ci-parity` are green on the tree
+- **Impact:** none (tooling); the gate reads no implicit tool configuration.
 
 #### FND-06: Coverage, changed lines, mutation in the diff
 - **Depends on:** FND-05. **Model:** standard. **Size:** M. **Parallel with:** EVAL-03, EVAL-10, BENCH-03.

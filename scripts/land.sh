@@ -18,10 +18,18 @@
 #      overrides it, for a scratch repository), a `Signed-off-by` matching the author
 #      (scripts/dco-check.sh) and a signature in the commit HEADER (a `gpgsig` line in the message
 #      body does not count; --allow-unsigned waives it for a repository that does not sign);
-#   5. run `just check` on the merged tree. Once FND-04 adds the `private-names` stage to `check`,
-#      a missing or empty `.private-names.sha256` aborts here (fnd §7.4); a tree whose justfile
-#      names the stage but leaves it out of `check` aborts too; so does a gate that left the tree
-#      changed (what was gated must be what is pushed);
+#   5. check each cherry-picked tree's tool configuration with THIS checkout's
+#      scripts/tool-config-check.sh before anything there runs, a Cargo.lock resolution included
+#      (mise runs code from a trusted configuration as it loads it, `just` evaluates the
+#      justfile's `mise bin-paths`, and any cargo command runs a configured rustc-wrapper or a
+#      toolchain `path`), never trusting the tree for mise (FND-09); a commit that widens that
+#      check's allowlists lands only once this checkout has it (land it by hand, doc/sdlc.md);
+#      then run `just check` on the merged tree. The gate is not a sandbox: it compiles and runs
+#      the tree's build scripts, proc-macros and tests with this user's privileges, so review
+#      before landing is the control for code (fnd §3.6). A missing or
+#      empty `.private-names.sha256` aborts here when the justfile has the `private-names` stage
+#      (fnd §7.4); a tree whose justfile names the stage but leaves it out of `check` aborts too;
+#      so does a gate that left the tree changed (what was gated must be what is pushed);
 #   6. push the result to <remote> <branch>, never forced; on a non-fast-forward fetch and redo
 #      everything (cherry-pick and gate included) once.
 #
@@ -36,7 +44,8 @@ set -euo pipefail
 # The same `just` as the Stop hook (.claude/hooks/stop-gate.sh): the first on PATH, with the
 # bootstrap's ~/.local/bin only as the last resort. The justfile runs the stages' tools from their
 # install directories and `_preflight` refuses a mise [env], so how just is found does not change
-# what the gate sees (fnd §3.6, FND-08).
+# what the gate sees (fnd §3.6, FND-08); a mise shim of just loads the tree's mise.toml, which
+# tool-config-check.sh has passed first (FND-09).
 case ":$PATH:" in *":$HOME/.local/bin:"*) ;; *) PATH="$PATH:$HOME/.local/bin" ;; esac
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
@@ -86,8 +95,18 @@ trap cleanup EXIT
 
 # Resolve the two conflicts land.sh may resolve, in the worktree $1 (cherry-pick of $2); abort on
 # any other. Every command is checked: this runs where `set -e` is off.
+# The landing checkout's own scripts/tool-config-check.sh on the tree $1 after the cherry-pick of
+# $2, before anything there runs: mise runs code from a trusted configuration as it loads it, and
+# cargo (even the `cargo update` that resolves a Cargo.lock conflict) runs a configured
+# rustc-wrapper and the toolchain a rust-toolchain file names (FND-09, its review's G2).
+check_tree() {
+  bash "$here/tool-config-check.sh" "$1" >&2 ||
+    die "the tree after the cherry-pick of $2 has tool configuration outside its allowlist (above); nothing in it was run"
+}
+
 resolve_conflicts() {
   local tree="$1" file others=() lock=0 index=0 files
+  check_tree "$tree" "$2"
   files="$(git -C "$tree" diff --name-only --diff-filter=U)" || die "cannot list the conflicts"
   [ -n "$files" ] || die "cherry-pick of $2 failed: $3"
   while IFS= read -r file; do
@@ -150,6 +169,7 @@ attempt() {
   for sha in "${commits[@]}"; do
     echo "land: cherry-pick $(git log -1 --format='%h %s' "$sha")" >&2
     if ! why="$(git -C "$tree" cherry-pick "$sha" 2>&1)"; then resolve_conflicts "$tree" "$sha" "$why"; fi
+    check_tree "$tree" "$sha"
   done
   head="$(git -C "$tree" rev-parse HEAD)" || die "cannot read the merged head"
   [ "$head" != "$base" ] || die "nothing to land: the commits change nothing on $remote/$branch"
@@ -165,7 +185,7 @@ attempt() {
   done
   require_private_names "$tree"
   echo "land: just check on the merged tree ($(git -C "$tree" rev-parse --short "$head"))" >&2
-  (cd "$tree" && MISE_TRUSTED_CONFIG_PATHS="$tree" just check) || die "just check failed; nothing was pushed"
+  (cd "$tree" && just check) || die "just check failed; nothing was pushed"
   changed="$(git -C "$tree" status --porcelain)" || die "cannot read the gated tree's status"
   [ "$(git -C "$tree" rev-parse HEAD)" = "$head" ] && [ -z "$changed" ] ||
     die "the gate changed the tree, so what was gated is not what would be pushed: $(tr '\n' ' ' <<<"$changed")"

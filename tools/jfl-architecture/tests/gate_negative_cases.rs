@@ -598,13 +598,20 @@ fn should_name_the_valid_stages_when_check_only_gets_an_unknown_one() -> TestRes
     Ok(())
 }
 
-/// A scratch git repository holding a copy of the repository's justfile, rust-toolchain.toml
-/// and mise.toml, so a case can commit the file `_preflight` must refuse without touching the
-/// real tree (`_preflight` takes the justfile's directory as the repository root).
+/// A scratch git repository holding a copy of the repository's justfile, rust-toolchain.toml,
+/// mise.toml, mise.lock and the tool configuration check the justfile runs before mise, so a
+/// case can commit the file `_preflight` must refuse without touching the real tree
+/// (`_preflight` takes the justfile's directory as the repository root).
 fn scratch_repository(case: &str) -> Result<PathBuf, Box<dyn Error>> {
     let root = fresh_target(case)?.join("repo");
-    std::fs::create_dir_all(&root)?;
-    for file in ["justfile", "rust-toolchain.toml", "mise.toml"] {
+    std::fs::create_dir_all(root.join("scripts"))?;
+    for file in [
+        "justfile",
+        "rust-toolchain.toml",
+        "mise.toml",
+        "mise.lock",
+        "scripts/tool-config-check.sh",
+    ] {
         std::fs::copy(repo_root().join(file), root.join(file))?;
     }
     let init = Command::new("git")
@@ -743,5 +750,56 @@ fn should_refuse_the_gate_when_another_mise_config_sits_in_the_repository() -> T
     let text = printed(&output);
     assert!(!output.status.success(), "preflight passed:\n{text}");
     assert!(text.contains("mise.local.toml"), "{text}");
+    Ok(())
+}
+
+#[test]
+fn should_run_nothing_from_mise_toml_when_the_gate_meets_the_reviewer_s_payload() -> TestResult {
+    // given: the FND-08 re-verification's F3, a mise.toml whose [env] sources a script and
+    // expands an exec template, in a tree mise trusts (as land.sh used to make it); mise runs
+    // both as it loads the file, which the justfile's top-level `mise bin-paths` did before
+    // `_preflight` could look
+    let root = scratch_repository("mise-payload")?;
+    let sourced = root.join("ran-source");
+    let executed = root.join("ran-exec");
+    std::fs::write(
+        root.join("payload.sh"),
+        format!("touch '{}'\n", sourced.display()),
+    )?;
+    let mise = root.join("mise.toml");
+    let mut text = std::fs::read_to_string(&mise)?;
+    text.push_str(&format!(
+        "\n[env]\n_.source = \"{{{{config_root}}}}/payload.sh\"\nX = \"{{{{exec(command='touch {}')}}}}\"\n",
+        executed.display()
+    ));
+    std::fs::write(&mise, text)?;
+
+    // when
+    let output = scratch_preflight(&root)
+        .env("MISE_TRUSTED_CONFIG_PATHS", &root)
+        .output()?;
+    let ran_through_the_gate = (sourced.try_exists()?, executed.try_exists()?);
+    let control = Command::new("mise")
+        .arg("bin-paths")
+        .current_dir(&root)
+        .env_clear()
+        .envs(
+            PASSED_THROUGH
+                .iter()
+                .filter_map(|n| std::env::var_os(n).map(|v| (*n, v))),
+        )
+        .env("MISE_TRUSTED_CONFIG_PATHS", &root)
+        .output()?;
+
+    // then: the gate refused before mise loaded the file; mise itself, the control, runs both
+    let printed_text = printed(&output);
+    assert!(!output.status.success(), "the gate passed:\n{printed_text}");
+    assert!(printed_text.contains("mise.toml"), "{printed_text}");
+    assert_eq!(ran_through_the_gate, (false, false), "{printed_text}");
+    assert!(
+        sourced.try_exists()? && executed.try_exists()?,
+        "the control did not run the payload, so the case proves nothing:\n{}",
+        printed(&control)
+    );
     Ok(())
 }

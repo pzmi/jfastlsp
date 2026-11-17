@@ -49,6 +49,12 @@ if [ -f justfile ] && grep -qsE '^quick([[:space:]]|:)' justfile; then
     echo "the gate is \`just quick\` but \`just\` is not installed: run \`bash scripts/bootstrap-tools.sh\`, then the gate" >&2
     exit 2
   fi
+  # `just` may be mise's shim, which loads mise.toml before the justfile's own check runs: the
+  # tool configuration passes scripts/tool-config-check.sh first (bash and awk, no mise; FND-09).
+  if [ -f scripts/tool-config-check.sh ] && ! bash scripts/tool-config-check.sh "$PWD" >&2; then
+    echo "the tool configuration is outside its allowlist (above); fix it before stopping (fnd §3.6)" >&2
+    exit 2
+  fi
   gate="just quick"
   run() { just quick; }
 else

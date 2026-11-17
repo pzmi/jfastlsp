@@ -5,9 +5,14 @@
 # and other lockfiles), so `[extend] useDefault = true` inherited it and a token in such a file
 # passed the gate (the FND-05 checkpoint's N5). Every rule, and each rule's own value allowlist
 # (placeholders and stopwords, which never match a real token), is kept as gitleaks ships it.
-# One global allowlist entry is added back: the path of this policy itself, whose rule texts
-# (example key prefixes) trip its own rules once it is committed. It cannot hide a token: the
-# stage refuses any .gitleaks.toml that differs from this script's output by a single byte.
+# The policy holds no secret-shaped literal (FND-09; GitHub's secret scanning raised an alert on
+# the public test keys of the `gcp-api-key` rule's allowlist): every text of the policy that one
+# of its own rules matches, its rule-level allowlists set aside, is rewritten into the same regex
+# with one character in a class (`AIzaSyAnLA7NfeLquW1tJ[F]px...` matches what `...tJFpx...`
+# matched, but no longer is the token), which only a regex may take (a literal anywhere else
+# fails the generator). The policy then scans clean with itself, needs no allowlist of its own,
+# and a token committed in `.gitleaks.toml`, now or in its history, is found like any other (the
+# FND-08 re-verification's F2, the FND-09 review's G4).
 #
 # Usage: scripts/gitleaks-config.sh [--check] [FILE]     (default FILE: .gitleaks.toml)
 #   without --check: write FILE; with --check: exit 1 unless FILE is byte for byte what this
@@ -66,14 +71,107 @@ if [ "$rules" -lt 100 ] || grep -qE '^\[(allowlist|\[allowlists)\]' "$generated"
   echo "gitleaks-config: the default configuration of $binary was not found whole ($rules rules)" >&2
   exit 1
 fi
-cat >>"$generated" <<'TOML'
-
-# Added by scripts/gitleaks-config.sh: the one allowlisted path is this policy file, pinned byte
-# for byte by the secrets stage.
-[[allowlists]]
-description = "the generated policy itself"
-paths = ['''^\.gitleaks\.toml$''']
-TOML
+# Defang: scan the policy with its own rules and none of their allowlists, and put one character
+# of every match in a class, until nothing matches (at most three rounds).
+scan="$(mktemp -d)"
+trap 'rm -f "$generated"; rm -rf "$scan"' EXIT
+mkdir "$scan/tree"
+bare() { awk '/^\[\[rules\.allowlists\]\]/ { skip = 1; next } skip && /^\[/ { skip = 0 } !skip' "$1"; }
+self_scan() {
+  bare "$1" >"$scan/bare.toml"
+  cp "$1" "$scan/tree/.gitleaks.toml"
+  rm -f "$scan/report.json"
+  local code=0
+  "$binary" dir --no-banner --log-level error --report-format json --report-path "$scan/report.json" \
+    --config "$scan/bare.toml" "$scan/tree" >/dev/null 2>&1 || code=$?
+  if [ "$code" -gt 1 ] || [ ! -f "$scan/report.json" ]; then
+    echo "gitleaks-config: scanning the policy with itself failed (exit $code)" >&2
+    exit 1
+  fi
+}
+cp "$generated" "$scan/original"
+round=0
+while :; do
+  self_scan "$generated"
+  if ! perl -MJSON::PP -e 'exit(@{ JSON::PP->new->decode(do { local $/; <STDIN> }) } ? 0 : 1)' \
+      <"$scan/report.json"; then
+    break
+  fi
+  round=$((round + 1))
+  if [ "$round" -gt 3 ]; then
+    echo "gitleaks-config: the policy still matches its own rules after 3 rounds of defanging" >&2
+    exit 1
+  fi
+  perl -MJSON::PP -e '
+    use strict; use warnings;
+    my ($report, $policy) = @ARGV;
+    open(my $r, "<", $report) or die "report: $!";
+    my $findings = JSON::PP->new->decode(do { local $/; <$r> });
+    open(my $p, "<", $policy) or die "policy: $!";
+    my @lines = <$p>;
+    # Which lines are regexes: a `regex = ` line, or an entry of a `regexes = [` array.
+    my ($in, @regex) = (0);
+    for my $i (0 .. $#lines) {
+      $in = 1 if $lines[$i] =~ /^regexes = \[/;
+      $regex[$i] = $in || $lines[$i] =~ /^regex = /;
+      $in = 0 if $in && $lines[$i] =~ /^\]/;
+    }
+    for my $f (@$findings) {
+      my $i = $f->{StartLine} - 1;
+      my $secret = $f->{Secret};
+      die "a literal outside a regex matches rule $f->{RuleID} at line $f->{StartLine}\n" unless $regex[$i];
+      my $at = index($lines[$i], $secret);
+      die "the match of rule $f->{RuleID} is not on line $f->{StartLine}\n" if $at < 0;
+      my $j = $at + int(length($secret) / 2);
+      $j++ while $j < $at + length($secret)
+        && !(substr($lines[$i], $j, 1) =~ /[A-Za-z0-9]/ && substr($lines[$i], $j - 1, 1) ne "\\");
+      die "no character to defang in the match of rule $f->{RuleID}\n" if $j >= $at + length($secret);
+      substr($lines[$i], $j, 1) = "[" . substr($lines[$i], $j, 1) . "]";
+    }
+    print @lines;
+  ' "$scan/report.json" "$generated" >"$scan/policy" || {
+    echo "gitleaks-config: could not defang the policy" >&2
+    exit 1
+  }
+  cp "$scan/policy" "$generated"
+done
+# Each rewrite must differ from the original only by one ASCII letter or digit wrapped as `[x]`,
+# outside any existing class, quantifier or escape, so the regex means what it meant (the FND-09
+# review's H5); anything else fails the generator.
+perl -e '
+  use strict; use warnings;
+  my ($old, $new) = @ARGV;
+  open(my $a, "<", $old) or die "$old: $!";
+  open(my $b, "<", $new) or die "$new: $!";
+  my @o = <$a>; my @n = <$b>;
+  die "the defanged policy has another number of lines\n" unless @o == @n;
+  for my $k (0 .. $#o) {
+    next if $o[$k] eq $n[$k];
+    my ($s, $t) = ($o[$k], $n[$k]);
+    # Inside \Q...\E every character is literal, `[` included, so a class there would change
+    # what the regex matches; a rewritten line may hold no \Q at all (FND-09 review, L1).
+    die "line " . ($k + 1) . ": a rewrite in a regex that uses \\Q\n" if index($s, "\\Q") >= 0;
+    my ($i, $j, $class, $brace, $esc) = (0, 0, 0, 0, 0);
+    while ($i < length($s) || $j < length($t)) {
+      my $c = substr($s, $i, 1);
+      if ($j < length($t) && substr($t, $j, 1) eq $c) {
+        if ($esc) { $esc = 0 }
+        elsif ($c eq "\\") { $esc = 1 }
+        elsif ($c eq "[") { $class++ }
+        elsif ($c eq "]" && $class) { $class-- }
+        elsif ($c eq "{") { $brace++ }
+        elsif ($c eq "}" && $brace) { $brace-- }
+        $i++; $j++; next;
+      }
+      die "line " . ($k + 1) . ": a rewrite other than one character in a class\n"
+        unless $c =~ /^[A-Za-z0-9]$/ && substr($t, $j, 3) eq "[$c]" && !$class && !$brace && !$esc;
+      $i++; $j += 3;
+    }
+  }
+' "$scan/original" "$generated" || {
+  echo "gitleaks-config: a defanged regex would not mean what the original meant" >&2
+  exit 1
+}
 
 if [ "$check" -eq 0 ]; then
   cp "$generated" "$file"

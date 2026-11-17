@@ -313,7 +313,8 @@ Each rule names the layer that enforces it and the task that lands it.
 | `ARCH-ignored-test`, `ARCH-test-name`, `ARCH-test-structure`, `ARCH-platform-branch` | `#[ignore]`; a misnamed test; missing sections; a `cfg!(target_os…)` branch | architecture test (source scan) | FND-07 |
 | `ARCH-hidden-source` | `#[path]`, `include!`, a target root outside its crate's directory, or a file the scan's lexer cannot follow to its end (it fails closed): code the source scan would not read | architecture test (source scan, graph) | FND-07 |
 | `ARCH-ci-lockstep` | a stage in no CI job or two; `required` missing a job; a swallowed failure; `on:` other than push to main, pull requests and dispatch | architecture test | FND-05 |
-| `ARCH-gate-config` | a gate recipe or script that differs from its pin; `.config/nextest.toml`, `mise.toml` or `rust-toolchain.toml` outside its shape; a cargo, mise or toolchain configuration file elsewhere in the tree | architecture test | FND-08 |
+| `ARCH-gate-config` | a gate recipe, script (every `scripts/test-*.sh` included), stage policy (`.github/zizmor.yml`, `deny.toml`) or tool pin (`mise.toml`, `mise.lock`) that differs from its pin; `.config/nextest.toml`, `mise.toml`, `mise.lock` or `rust-toolchain.toml` outside its shape; a cargo, mise, toolchain or rustfmt configuration file elsewhere in the tree; a dot-entry or `mise*` entry of the root, or an entry of `.github/` or `.config/`, outside its allowlist | architecture test (and `scripts/tool-config-check.sh` before any tool runs) | FND-08, FND-09 |
+| `ARCH-workflow-yaml` | a YAML file under `.github/` that does not parse, holds two documents or an anchor, alias, tag or merge key; a decoded `run` value with a shellcheck directive or zizmor ignore outside `allowed_suppressions` of `scripts/workflows-check.sh` (or one twice, or `disable=all`); a `shell` other than bash or sh | architecture test (`yaml-rust2`, the decoded authority over the `workflows` stage's line checks) | FND-09 |
 | `ARCH-fixtures-lock` | a golden fixture whose digest differs from `fixtures.lock` | architecture test | IDX-07 |
 | `ARCH-fuzz-crate` | the fuzz crate outside its policy rows | architecture test | REL-03 |
 
@@ -354,7 +355,12 @@ and proves necessary becomes a `dylint` lint through an ADR.
 ### 3.6 Threat model of the gate
 
 The gate defends against honest mistakes, shortcuts and drift, not a determined insider; review
-is the backstop. The `justfile`'s `_preflight` recipe, a dependency of every stage, refuses an
+is the backstop. **The gate is not a sandbox**: `just check` (and `land.sh`, which runs it on the
+merged tree) compiles and runs the tree's build scripts, proc-macros and tests with the user's
+own privileges, so that code can change the tools, caches and scripts a later gate uses (mise's
+install directories, `~/.cargo`, `~/.local/bin`). The checks below keep configuration files from
+steering the gate silently; for code, review before landing is the control (the FND-09
+review's G2). The `justfile`'s `_preflight` recipe, a dependency of every stage, refuses an
 environment that steers the build, by allowlist: every `CARGO*`, `RUSTC*`, `RUSTDOC*`,
 `RUSTUP_*`, `CLIPPY_*` and `NEXTEST_*` variable is refused except `CARGO_TARGET_DIR`,
 `CARGO_BUILD_JOBS`, `CARGO_INCREMENTAL`, `CARGO_HOME`, `CARGO_TERM_*`, `CARGO_NET_*`,
@@ -369,18 +375,48 @@ checkpoint's N1 spelled `target` and `runner` with TOML unicode escapes past a l
 it (an ancestor of the working directory, `CARGO_HOME`) a file passes only when every line is a
 comment, a blank, a header of `[net]`, `[http]`, `[term]`, `[build]` or `[registries.crates-io]`,
 or a bare key that table allows with a plain value (`plain_config` in the justfile), so any other
-TOML form fails closed. mise is held the same way: `mise.toml` is only `[tools]` with plain
-version strings, no other mise configuration file inside the repository may load (`mise config
-ls`, failing closed when mise cannot read its configuration), and the stages run the pinned
-tools from their install directories (`mise bin-paths`) rather than through shims, so no mise
-`[env]` reaches a tool after `_preflight` has looked. The architecture test repeats these checks
+TOML form fails closed. mise is held the same way: `mise.toml` is only `[tools]`, each tool
+`just` or an `aqua:` or `github:` backend (a plugin backend's plugin is code) pinned by a plain
+version string, `mise.lock` holds only checksummed GitHub release assets, no other mise
+configuration file inside the repository may load (`mise config ls`, failing closed when mise
+cannot read its configuration), and the stages run the pinned tools from their install
+directories (`mise bin-paths`) rather than through shims, so no mise `[env]` reaches a tool
+after `_preflight` has looked. Since mise runs code from a trusted configuration as it loads it
+(`[env] _.source`, `{{exec(...)}}` templates), nothing calls mise on a tree before
+`scripts/tool-config-check.sh` (bash and awk, no mise) has passed its tool configuration
+(FND-09, the FND-08 re-verification's F3): the justfile's top-level lines run it before
+`mise bin-paths`, `_preflight` runs it again, `scripts/land.sh` runs the landing checkout's own
+copy on each cherry-picked tree before anything there runs, the `cargo update` that resolves a
+Cargo.lock conflict included, and no longer trusts the tree for mise (the check also refuses a
+cargo configuration file at any depth and a toolchain file beyond the root
+`rust-toolchain.toml`'s shape, which any cargo command would obey: a `rustc-wrapper`, a
+toolchain `path`; the FND-09 review's G2),
+`scripts/bootstrap-tools.sh` runs it before `mise install` and no longer runs `mise trust`
+(it removes the trust `mise install` records by itself), and the Stop hook runs it before
+`just`, which may be mise's shim. An untrusted `mise.toml` with only `[tools]` loads; one with
+an `[env]` makes mise fail without running it. The same check holds the implicit configuration
+of the other tools of the gate to allowlists: the root's dot-entries and `mise*` entries, and
+the entries of `.github/` and `.config/` (so `.shellcheckrc`, `.yamllint`, `.tool-versions`,
+`.pinact.yaml`, `.envrc`, `.github/actionlint.yaml` and `.config/mise/` fail, whatever a tool
+reads next); the linters also run with explicit configuration (shellcheck `--norc`, actionlint
+`-config-file /dev/null`, zizmor `--config .github/zizmor.yml`, pinned), and no `rustfmt.toml`
+may exist. The architecture test repeats these checks
 with a real TOML parser (`ARCH-gate-config`) and pins the gate itself: the recipes of `check`,
 `quick`, `check-only`, `ci-parity` and `platform-tests`, every stage and their dependencies,
-the justfile's top-level lines and the scripts the stages run are hashed in `.config/gate.sha256`,
+the justfile's top-level lines, the scripts the stages run (every `scripts/test-*.sh`, which
+`script-tests` runs by glob, included), the policies a stage reads by path
+(`.github/zizmor.yml`, `deny.toml`) and the tool pins (`mise.toml`, whose new tool would land on
+the stages' PATH, and `mise.lock`) are hashed in `.config/gate.sha256` (FND-09 added all but the
+recipes and scripts),
 and `.config/nextest.toml` keeps its allowlisted keys (no `default-filter`, no `[scripts]`,
 `retries = 0`). A pin moves only with its line in that file, in the same commit, which review
 reads as a change of the gate (the first FND-05 review found `check: (check-only quick_stages)`
-would have kept every check green). Independently, every cargo of the gate runs with `RUSTFLAGS="-D
+would have kept every check green). Not pinned, each for its reason: `architecture.toml` and the
+`clippy.toml` files change with every new crate and are held to their schema by the
+architecture test itself (`ARCH-policy-schema`, `ARCH-clippy-lists`; widening one needs an ADR,
+§3.5); the checker's own sources are code under its meta-test (`tests/rules.rs`, a negative case
+per rule; `tests/gate_config.rs` fails on a crude edit of `gate.rs`), so a neuter must edit both
+in plain sight; `.gitleaks.toml` is compared byte for byte with the pinned generator's output. Independently, every cargo of the gate runs with `RUSTFLAGS="-D
 warnings"`, empty `RUSTDOCFLAGS`, `RUSTC_WRAPPER` and `RUSTC_WORKSPACE_WRAPPER` (which beat any
 config file), and nextest with `--retries 0 --no-tests fail`. Never export a steering variable for
 the gate. Each refusal has a negative case in `tools/jfl-architecture/tests/gate_negative_cases.rs`.
@@ -550,10 +586,28 @@ There is no event store (ADR 0008). What persists:
   action; container images by `@sha256:` digest. Checked by zizmor (`unpinned-uses` with a
   hash-pin policy, template injection, excessive permissions), pinact and actionlint with
   shellcheck. The `workflows` stage (FND-04, `scripts/workflows-check.sh`) is offline and
-  deterministic: actionlint, zizmor `--offline` with `.github/zizmor.yml`, `pinact run
-  --fix=false --no-api` (every `uses:` is a SHA), and shellcheck over `scripts/*.sh` and
+  deterministic: actionlint with `-config-file /dev/null`, zizmor `--offline` with the pinned
+  `.github/zizmor.yml`, `pinact run --fix=false --no-api` (every `uses:` is a SHA), and
+  shellcheck `--norc` (no tool reads a configuration file the command line does not name;
+  FND-09, §3.6) over `scripts/*.sh` and
   `.claude/hooks/*.sh` (`spikes/e1-parse/*.sh` is excluded: archived evidence for plan §1.7, kept
-  as it ran and outside the workspace); a tree with no workflow file passes with a notice. The comment check,
+  as it ran and outside the workspace); a tree with no workflow file passes with a notice.
+  Inline suppressions are held like `#[allow]` (FND-09, its review's G3): every shellcheck
+  directive comment in a linted shell file or workflow and every `zizmor: ignore` comment must
+  be listed, by file and exact line with its reason, in `allowed_suppressions` of
+  `scripts/workflows-check.sh` (pinned), and a `disable=all` never is. Every `run:` is a block
+  scalar (`|`, `>`) or a plain one-line scalar, never a quoted string or a flow form: actionlint
+  decodes a double-quoted string (`\x23` is `#`) before shellcheck reads it, past the raw-text
+  scan (FND-09 review, I1). And the YAML of every file under `.github/` the stage reads holds a
+  shape where nothing is decoded (J1): outside block scalars no backslash on a line with a double
+  quote (no escape sequence), no `?` complex key, no quoted mapping key, no tag, anchor, alias,
+  merge key or directive; so `"\x72un":` or `? run` cannot become a `run:` key unseen. These are
+  line checks of a subset, a first layer; **the authority is the decoded check**
+  `ARCH-workflow-yaml` (FND-09, §3.3): `yaml-rust2` parses every YAML file under `.github/`,
+  refuses more than one document and any anchor, alias, tag or merge key, walks every mapping,
+  applies the same `allowed_suppressions` (one list, read from the pinned script) to every
+  decoded `run` value, and allows `shell:` only bash or sh. The xtask port keeps the decoded
+  check and may drop the line checks. The comment check,
   `pinact run --check --verify-comment`, asks the GitHub API, so it is the recipe
   `workflows-verify`, outside `check` (like `bench-gate`): `ci.yml`'s security job runs it with a
   token (FND-05). The sandbox refuses the API, which is why it cannot be a stage of `check`.
@@ -577,12 +631,40 @@ There is no event store (ADR 0008). What persists:
   generated from the pinned binary by `scripts/gitleaks-config.sh`; the stage refuses a policy
   that is not byte for byte the generated one, a `.gitleaksignore` in the history, and runs
   gitleaks with `--ignore-gitleaks-allow`, so no inline comment, ignore file, disabled rule or
-  allowlist can wave a finding through. The one global allowlist entry is the policy's own path
-  (`^\.gitleaks\.toml$`), added by the generator: its rule texts trip its own rules once
-  committed, and a token hidden there cannot land because the stage refuses any byte that
-  differs from the generated file. Each rule keeps its own value allowlist (template
-  placeholders and stopwords, which never match a real token). Fixtures build fake secrets at
-  run time if they need any. GitHub secret
+  allowlist can wave a finding through. **The policy holds no secret-shaped literal** (FND-09,
+  after GitHub's secret scanning flagged the public test keys of the default `gcp-api-key`
+  rule's allowlist): the generator scans the policy with its own rules and none of their
+  allowlists, and rewrites every text they match, which must be a regex, into the same regex
+  with one character in a class (`...tJ[F]px...`); the policy then scans clean with itself
+  (`scripts/test-secrets.sh` checks it, and that a key appended at run time is found) and has no
+  allowlist of its own at all, so a token committed in `.gitleaks.toml` and removed in the next
+  commit (the FND-08 re-verification's F2) is found like any other, and no `.gitleaks.toml` may
+  exist anywhere but the root (`ARCH-gate-config`). Each rule keeps its own value allowlist (template
+  placeholders and stopwords, which never match a real token). The stage runs `gitleaks dir` over
+  every blob reachable from a branch, a tag, a remote-tracking ref or HEAD (what is or can be
+  pushed) and over every commit and annotated tag message (pushed and public), and names the
+  commits and paths of a blob with a finding; not `gitleaks git`, since `git log -p` shows
+  nothing of a file git takes for binary (a NUL byte, a `-diff` or `binary` attribute) or of a
+  merge resolution. gitleaks itself sniffs each file's type and
+  silently skips what it takes for binary (an `MZ`, `%PDF-`, ELF or zip header before plain
+  text; the FND-09 review's G1), so each blob is written as text (a leading newline, every byte
+  outside tab, newline and printable ASCII turned into a newline; a token is printable ASCII),
+  the pass fails on any file gitleaks reports skipping, and a blob in one of the common archive
+  and compression formats (zip, gzip, xz, bzip2, zstd, 7z, rar, tar, by magic number), whose
+  content no pass would read, fails the stage: the repository commits none. Commit objects are
+  scanned whole (headers, author, committer, signature and message), and so are annotated tag
+  objects. The only blobs not scanned are listed by exact object id in
+  `scripts/secrets-check.sh` with their reason: history on `main` that cannot change (FND-08's
+  policy, which still carried gitleaks' public test keys). Out of scope by design: a token split by
+  non-printable bytes, or encoded or compressed in any other way (zlib or raw deflate, lz4,
+  brotli, PDF streams, base64 beyond gitleaks' own decoding, UTF-16, encryption), is not
+  decoded or reassembled; and gitleaks' rules stand
+  in for GitHub's own patterns (a key only GitHub recognises is not refused here). Every
+  `.gitattributes` in the history holds only allowlisted attributes (`text`, `text=auto`,
+  `eol=lf`, `eol=crlf`, `linguist-*`), so no `binary`, `-diff`, `-text`, `diff=` or `filter=`
+  changes what git shows of a file. **No token-shaped text is committed whole**, in a fixture,
+  a test or the policy: a test that needs a fake secret assembles it at run time from pieces
+  (`"ghp_""aB3d..."`), so the committed text never forms the token. GitHub secret
   scanning and push protection are on (owner setting).
 - **Private names** (`private-names` stage, FND-04): the names are never committed, only their
   salted hashes. `.private-names.sha256` (committed since BOOT-02) has a `# salt: <hex>` header
@@ -629,7 +711,8 @@ There is no event store (ADR 0008). What persists:
 0. **Bootstrap.** mise and just themselves come from `scripts/bootstrap-tools.sh` (BOOT-02):
    each at a pinned version, verified against a SHA-256 recorded in the script, installed into
    `~/.local/bin`, a no-op when already present; then `mise install --locked` once `mise.toml`
-   exists. The SessionStart hook runs it in cloud sessions; a cloud environment's setup script may
+   exists and `scripts/tool-config-check.sh` has passed the tool configuration, never trusting
+   the repository for mise (FND-09, §3.6). The SessionStart hook runs it in cloud sessions; a cloud environment's setup script may
    call it too (`bash scripts/bootstrap-tools.sh`). Verified in the cloud sandbox on 2026-11-16:
    GitHub release downloads (`github.com/<owner>/<repo>/releases/download/…`) and the static
    crates.io files pass the network proxy, while `api.github.com`, GitHub pages and

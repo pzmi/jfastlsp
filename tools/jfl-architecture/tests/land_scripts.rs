@@ -1190,3 +1190,116 @@ fn should_fail_the_adr_index_check_when_a_status_claims_more_than_the_files_supp
     }
     Ok(())
 }
+
+#[test]
+fn should_refuse_before_any_just_when_the_merged_tree_s_mise_toml_has_a_payload() -> TestResult {
+    // given: the FND-08 re-verification's F3, a lane commit whose mise.toml sources a script
+    // through [env]; land.sh used to run `just` there with the tree trusted for mise, so the
+    // justfile's `mise bin-paths` (or a mise shim of just) ran it before the gate could refuse
+    let lab = Lab::new("land-mise-payload")?;
+    lab.seed(&[])?;
+    let before = lab.origin_head()?;
+    let ran = lab.dir("ran-gate");
+    let sha = lab.lane_commit(
+        "lane",
+        &[
+            (
+                "mise.toml",
+                "[tools]\njust = \"1.59.0\"\n\n[env]\n_.source = \"{{config_root}}/payload.sh\"\n",
+            ),
+            ("payload.sh", "touch ran-payload\n"),
+            ("gate.sh", &format!("touch '{}'\nexit 0\n", ran.display())),
+        ],
+        "T1: tools",
+    )?;
+
+    // when
+    let output = lab.land(&["--allow-unsigned", &sha])?;
+
+    // then: refused by the landing checkout's own check, before any `just` (the stub's gate.sh)
+    let text = printed(&output);
+    assert!(!output.status.success(), "{text}");
+    assert!(text.contains("tool configuration"), "{text}");
+    assert!(text.contains("mise.toml"), "{text}");
+    assert!(
+        !ran.try_exists()?,
+        "the gate ran on the merged tree:\n{text}"
+    );
+    assert_eq!(lab.origin_head()?, before);
+    Ok(())
+}
+
+#[test]
+fn should_refuse_before_cargo_runs_when_a_cherry_pick_brings_a_cargo_config_and_a_lock_conflict()
+-> TestResult {
+    // given: the FND-09 review's G2, a lane commit adding `.cargo/config.toml` with a
+    // rustc-wrapper while both sides change Cargo.lock, so land.sh would resolve the conflict
+    // with `cargo update`, which runs the wrapper, before any check of the tree
+    let lab = Lab::new("land-cargo-config")?;
+    let mut seed = crate_files("a");
+    seed.push((
+        "Cargo.toml".to_owned(),
+        "[workspace]\nmembers = [\"crates/*\"]\nresolver = \"3\"\n".to_owned(),
+    ));
+    lab.seed(&as_refs(&seed))?;
+    succeeded(&lab.run(
+        "cargo",
+        &["generate-lockfile", "--offline"],
+        &lab.dir("work"),
+    )?)?;
+    lab.git("work", &["add", "Cargo.lock"])?;
+    lab.git("work", &["commit", "-q", "-s", "-m", "lock"])?;
+    lab.git("work", &["push", "-q", "origin", "main"])?;
+    let add = |lab: &Lab, repo: &str, name: &str| -> TestResult {
+        lab.write(repo, &as_refs(&crate_files(name)))?;
+        succeeded(&lab.run("cargo", &["generate-lockfile", "--offline"], &lab.dir(repo))?)?;
+        Ok(())
+    };
+    let marker = lab.dir("wrapper-ran");
+    let evil = lab.dir("evil.sh");
+    fs::write(
+        &evil,
+        format!(
+            "#!/usr/bin/env bash\ntouch '{}'\nexec \"$@\"\n",
+            marker.display()
+        ),
+    )?;
+    succeeded(&lab.run("chmod", &["+x", "evil.sh"], &lab.base)?)?;
+    lab.git("work", &["checkout", "-q", "-b", "lane", "main"])?;
+    add(&lab, "work", "b")?;
+    let config = format!("[build]\nrustc-wrapper = \"{}\"\n", evil.display());
+    lab.write("work", &[(".cargo/config.toml", &config)])?;
+    lab.git("work", &["add", "."])?;
+    lab.git("work", &["commit", "-q", "-s", "-m", "T1: add crate b"])?;
+    let sha = lab.git_out("work", &["rev-parse", "HEAD"])?;
+    lab.git("work", &["checkout", "-q", "main"])?;
+    lab.clone_origin("other")?;
+    add(&lab, "other", "c")?;
+    lab.git("other", &["add", "."])?;
+    lab.git("other", &["commit", "-q", "-s", "-m", "other: add crate c"])?;
+    lab.git("other", &["push", "-q", "origin", "main"])?;
+    let before = lab.origin_head()?;
+
+    // when
+    let output = lab.land(&["--allow-unsigned", &sha])?;
+    let ran_through_land = marker.try_exists()?;
+    lab.git("work", &["checkout", "-q", "lane"])?;
+    let control = lab.run(
+        "cargo",
+        &["update", "--workspace", "--offline"],
+        &lab.dir("work"),
+    )?;
+
+    // then: refused before cargo ran; cargo itself, the control, runs the wrapper
+    let text = printed(&output);
+    assert!(!output.status.success(), "{text}");
+    assert!(text.contains(".cargo/config.toml"), "{text}");
+    assert!(!ran_through_land, "the wrapper ran during land.sh:\n{text}");
+    assert_eq!(lab.origin_head()?, before);
+    assert!(
+        marker.try_exists()?,
+        "the control did not run the wrapper, so the case proves nothing:\n{}",
+        printed(&control)
+    );
+    Ok(())
+}

@@ -57,7 +57,11 @@ are the real procedure; this section summarises it.
    commit's CI is green; `just check` on the merged tree; push only on green (ADR 0002, ADR 0030).
    `land.sh` refuses a dirty checkout, resolves only `Cargo.lock` and the ADR index, checks each
    commit's sign-off and signature, and takes `--no-push` for a dry run; any other conflict aborts
-   and names its files.
+   and names its files. Before anything in the merged tree runs, the landing checkout's own
+   `scripts/tool-config-check.sh` checks its tool configuration (FND-09); a commit that widens
+   that check's allowlists is refused by an older checkout, so the orchestrator lands it by hand
+   (cherry-pick onto a clean `origin/main`, review the new allowlist entry, the gate on the merged
+   tree, push only on green), after which `land.sh` has the new check.
 6. **Watch CI.** The orchestrator waits for the run of the pushed commit and reads the
    `Required` result. Without `gh` it uses the GitHub MCP tools. The `linux-arm` and `macos`
    jobs run only after the push (ADR 0002), so a platform failure is found there.

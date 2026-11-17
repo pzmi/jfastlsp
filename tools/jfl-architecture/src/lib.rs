@@ -26,6 +26,7 @@ pub mod manifests;
 pub mod policy;
 pub mod scan;
 pub mod tree;
+pub mod workflow_yaml;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
@@ -36,7 +37,7 @@ use cargo_metadata::{Metadata, MetadataCommand};
 /// Every rule id this crate can report, in fnd §3.3's order. The meta-test in `tests/rules.rs`
 /// compares it with the rows fnd §3.3 assigns to FND-07, FND-05 and FND-08 and with the negative
 /// cases.
-pub const RULES: [&str; 27] = [
+pub const RULES: [&str; 28] = [
     "ARCH-policy-schema",
     "ARCH-metadata",
     "ARCH-missing-member",
@@ -64,6 +65,7 @@ pub const RULES: [&str; 27] = [
     "ARCH-hidden-source",
     "ARCH-ci-lockstep",
     "ARCH-gate-config",
+    "ARCH-workflow-yaml",
 ];
 
 /// The targets of ADR 0006: every edge is evaluated through `cargo metadata --filter-platform`

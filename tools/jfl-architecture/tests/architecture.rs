@@ -2,12 +2,13 @@
 //! `jfl-architecture` over the repository itself, through `cargo metadata --filter-platform` for
 //! each target of ADR 0006, `ARCH-ci-lockstep` over `ci.yml`, the justfile and
 //! `doc/required-checks.md` (fnd §7.2), and `ARCH-gate-config` over the gate's own configuration
-//! (fnd §3.6). A finding prints as `ARCH-<id>: message (at path[:line])`.
+//! (fnd §3.6), and `ARCH-workflow-yaml` over the decoded YAML under `.github/` (fnd §7.3). A
+//! finding prints as `ARCH-<id>: message (at path[:line])`.
 
 use std::path::Path;
 
 use jfl_architecture::tree::DiskTree;
-use jfl_architecture::{Scope, check_repository, ci, gate};
+use jfl_architecture::{Scope, check_repository, ci, gate, workflow_yaml};
 
 #[test]
 fn should_find_nothing_when_the_repository_keeps_the_dependency_law() {
@@ -52,6 +53,24 @@ fn should_find_nothing_when_the_gate_configuration_matches_its_pins() {
 
     // when
     let findings = gate::check(&DiskTree::new(&root));
+
+    // then
+    let report: Vec<String> = findings.iter().map(ToString::to_string).collect();
+    assert!(
+        report.is_empty(),
+        "{} finding(s):\n{}",
+        report.len(),
+        report.join("\n")
+    );
+}
+
+#[test]
+fn should_find_nothing_when_the_github_yaml_decodes_within_its_allowlist() {
+    // given
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+
+    // when
+    let findings = workflow_yaml::check(&DiskTree::new(&root));
 
     // then
     let report: Vec<String> = findings.iter().map(ToString::to_string).collect();

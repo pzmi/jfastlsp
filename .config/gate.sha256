@@ -1,13 +1,20 @@
 # The gate's own configuration, pinned (fnd §3.6, FND-08; ARCH-gate-config in
 # tools/jfl-architecture/src/gate.rs): one SHA-256 per justfile recipe of the gate, the
-# justfile's top-level lines and each script the gate runs. A change to any of them fails the
+# justfile's top-level lines, each script the gate runs (every scripts/test-*.sh included), the
+# policies a stage reads by path (.github/zizmor.yml, deny.toml) and the tool pins (mise.toml,
+# mise.lock), what decides landing (scripts/land.sh, scripts/dco-check.sh) and the session
+# hooks (.claude/hooks/session-start.sh, stop-gate.sh; FND-09). A change to any of them fails the
 # architecture stage until its line here changes in the same commit, so the gate cannot be
 # neutered without a visible edit of this file; review reads every changed line as a change of
 # the gate itself. The failure names the line to write.
-f29ab63ad85facafe3d29fa9c88eba4eb5f56c99e5b2b2f6e69fd7a68f5c6c0c  justfile::(top-level)
-ffdcafa03ac8bbeae0918432858bbe59be8ca593c7c33399a3001784dd8aecd9  justfile::_preflight
+4b89a24d2025e62e8314e78bda859b0fb724690d96e11e2eb7bb48e4e2fb8a82  .claude/hooks/session-start.sh
+216f33f6dea48a8b4727dac023075f6920682b279f1dc3e2dbb719e61fb22bdf  .claude/hooks/stop-gate.sh
+ee32913359192d786a21e7508344cf085983a1d9a5dec6db9a4f02ee93a9976c  .github/zizmor.yml
+f7c21d4da12a8594dceacd5c3df9ca1e46aa99e13bb204b83e7e7de13de4ba32  deny.toml
+34478ea37e6247575843944b7967e1c70ce231f111003aee3f2323d19f0ffc43  justfile::(top-level)
+e867fef97ea6eabae486330a71e5c8c9e26f3ab5e104433cb73bcdf16b74c850  justfile::_preflight
 9dba69f6b0b357b699cc5bf1c69614c5fe3b734f385cc23d2a79f4987c694e6c  justfile::_require
-0d72f547b6425c6cb785f9a18996d64cafed4c396bf03fbdd5964386dccd5c41  justfile::architecture
+75195dc83ae3dab6c0d4f811c76c4f53a5c3ebd36fe781891255f70ba3edb395  justfile::architecture
 7761a8e4405aad0b60c6c88516d3578c3391ab9c21403c164efa28cb784fc123  justfile::check
 0188053f655288610a79e6d192c6146310dbdf6971b75b6e1dddc47507d30a6c  justfile::check-only
 6fc351ec1785ab8da75cd9d2c4dcf45be8ee4eb5e91dc57b2103cc672aaeb936  justfile::ci-parity
@@ -25,11 +32,23 @@ b8bf3b5085067ae5a376c07e29721150a0cd2b2bae88f7e312483e38b1a6b9a9  justfile::scri
 47ab8ada3cf628fa277b9da1c17081962ddcc5be0a6e29c9c11908c8ba33853a  justfile::secrets
 4c95a24085c064793213d39baf29a01304bff3f7579deb974818b893ca41623b  justfile::unit-tests
 de4d8630b3a3617ef52886ff29383145d42f04e5b7cfef2ed576cdfb8f6979f8  justfile::workflows
+20465d1733a28182ef067d7463730f94c96b457029e00f5dc15c9963e6a80e21  mise.lock
+b78ef320b09ca720ac030054c905d39189f151200dee44562e58d653f43f08dc  mise.toml
 d1d095b275741a3a7d99a90678ebab77a06ea0088f0d6e5a4a4a76dc341d0a45  scripts/adr-index.sh
-3a8752bde62b697b0d35a96a623224645215b2b0f2e83c0ff00fa40fbf19c1e4  scripts/bootstrap-tools.sh
+160a82910c40a865b0dcfc6552ac37eb151db7a0c2166d1115ee43e9fc71243a  scripts/bootstrap-tools.sh
 948f24f7356c375c4d37181de24d47fbda594e631c4935ca22ac95b0d58b83f6  scripts/clippy-lists.sh
-14beeb9ec3b3b3e235c3a8775adfb0a4113979e34930b624e1dae4d82e426841  scripts/gitleaks-config.sh
+db120d42fc19cde8c34da5c064a284d7f66b33124b78d3aed961bac8076f86dd  scripts/dco-check.sh
+3e452d3b368160755f88ca58646bfd74f1089b3102a9b25be60056b81d097b03  scripts/gitleaks-config.sh
+bbbf873f40669d5219c3c0dbf03debfeb90f483265f3c9b836aa4326fcb9f1f4  scripts/land.sh
 af2223db8d3d4253e7dc645c53c97b3319acb655e7716f48705bb1e4b038d420  scripts/private-names-check.sh
 4f1e4eef1d49d28c5130b6b9f3ffa7eb75ee911ba8cd7eebeece85dc331b7212  scripts/private-names-fold.pl
-56d0208bdb1f695e697abf8c10a679727cfb6d073305560a63daa8de33894449  scripts/secrets-check.sh
-0968bb67780e9222d6dbb1c346e849b38b028a6043511c51a011f2d26bc5215b  scripts/workflows-check.sh
+b541a0462b00f86ea05a87581303478768099bce4dd3befdf498780bc0d80974  scripts/secrets-check.sh
+62d48e3e202427055b6c7176c73d595863a3b04b222011ba0ed296be962b877d  scripts/test-bench-corpus.sh
+ea950cd1fd5aab4c476a912709b42040373829b7a3145d7a0cc102f188f33779  scripts/test-clippy-lists.sh
+5900be2118423b0eac99a0d3dc0031204ac40e6ba2affc9ab7cbc28ccc73f178  scripts/test-jdtls-fetch.sh
+16af475462d376b3ba20c5b3fc69cf4427f9df153a1ac37c1b56eda983b10f77  scripts/test-private-names.sh
+1f5bd3086859375aa9122fe0d8eeec28f550121381b95ac28d71e06d4323181e  scripts/test-secrets.sh
+b009b13f17e29ec87b0f6fb219612d6348da1642d6ad493ad3c8b8da35022d43  scripts/test-tool-config.sh
+789be32ee285676ca01aaf67f71ccfae548e5d476cfe3d97025c51d20d5e4b27  scripts/test-workflows.sh
+1ed4cceda4f96c98e54d27a293b2ec436683e7eeedc61cf7eb98f990cd78efe1  scripts/tool-config-check.sh
+a9891a86d62965bcf33afbbb371409be5b5668873087a84608fe9ba688786ae9  scripts/workflows-check.sh

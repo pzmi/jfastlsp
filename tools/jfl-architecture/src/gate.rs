@@ -5,12 +5,20 @@
 //! - **the pin manifest** [`PINS`]: one SHA-256 per justfile recipe of the gate's closure (the
 //!   roots [`ROOTS`], every stage of `check_stages` and their header dependencies), one for the
 //!   justfile's top-level lines (settings, exports, variables, aliases), and one per file of
-//!   [`GATE_FILES`]; an entry missing, extra or different fails, naming the line to write. A
-//!   `scripts/...` path named in a pinned recipe must be one of [`GATE_FILES`];
+//!   [`GATE_FILES`] and per `scripts/test-*.sh` (which `script-tests` runs by glob; FND-09); an
+//!   entry missing, extra or different fails, naming the line to write. A `scripts/...` path
+//!   named in a pinned recipe or a top-level line must be pinned;
 //! - **`.config/nextest.toml`**: only the keys of [`nextest_shape`] (no `default-filter`, no
 //!   `[scripts]`, `retries` 0, overrides that set a test group and nothing else);
-//! - **`mise.toml`**: only `[tools]` with string versions (no `[env]`, `[tasks]`, `[hooks]` or
-//!   settings), and no other mise configuration file anywhere in the tree;
+//! - **`mise.toml`**: only `[tools]`, each tool `just` or an `aqua:` or `github:` backend (no
+//!   plugin backend, whose plugin is code) pinned by a plain version string (no `[env]`,
+//!   `[tasks]`, `[hooks]` or settings), and no other mise configuration file anywhere in the tree;
+//! - **`mise.lock`**: [`mise_lock_shape`], one entry per tool of `mise.toml` and nothing else,
+//!   each platform a checksummed GitHub release asset (FND-09);
+//! - **the implicit configuration of the gate's tools** (FND-09): the root's dot-entries and
+//!   `mise*` entries, `.github/`'s entries and `.config/`'s entries are allowlists
+//!   ([`ROOT_ALLOWED`], [`GITHUB_ALLOWED`], [`CONFIG_ALLOWED`]; `scripts/tool-config-check.sh`
+//!   holds the same lists and runs before any tool), and no `rustfmt.toml` may exist;
 //! - **`rust-toolchain.toml`**: only `[toolchain]` with `channel`, `profile`, `components` and
 //!   `targets` (no `path`), and no other toolchain file in the tree;
 //! - **no cargo configuration file** (`.cargo/config`, `.cargo/config.toml`) anywhere in the tree:
@@ -50,17 +58,71 @@ pub const ROOTS: [&str; 5] = [
     "ci-parity",
     "platform-tests",
 ];
-/// The files the gate's recipes run, pinned whole.
-pub const GATE_FILES: [&str; 8] = [
+/// mise's lockfile.
+pub const MISE_LOCK: &str = "mise.lock";
+/// The files the gate's recipes run or read, pinned whole: the scripts, the policies a stage
+/// reads by path (`.github/zizmor.yml`, `deny.toml`) and the tool pins (`mise.toml`, whose new
+/// tool would land on the stages' PATH, and `mise.lock`; FND-09), and what decides landing and
+/// guards a session (`scripts/land.sh`, `scripts/dco-check.sh`, the SessionStart and Stop hooks;
+/// the FND-09 review's G5). Every `scripts/test-*.sh` is
+/// pinned too, found by [`gate_files`]. Not pinned, each for its reason (fnd §3.6):
+/// `architecture.toml` and the `clippy.toml` files change with every new crate and are held to
+/// their schema by the architecture test itself (`ARCH-policy-schema`, `ARCH-clippy-lists`);
+/// this checker's own sources are code under its meta-test (`tests/rules.rs`, one negative case
+/// per rule) and review; `.gitleaks.toml` is compared byte for byte with what the pinned
+/// `scripts/gitleaks-config.sh` generates.
+pub const GATE_FILES: [&str; 17] = [
+    ".claude/hooks/session-start.sh",
+    ".claude/hooks/stop-gate.sh",
+    ".github/zizmor.yml",
+    "deny.toml",
+    "mise.lock",
+    "mise.toml",
     "scripts/adr-index.sh",
     "scripts/bootstrap-tools.sh",
     "scripts/clippy-lists.sh",
+    "scripts/dco-check.sh",
     "scripts/gitleaks-config.sh",
+    "scripts/land.sh",
     "scripts/private-names-check.sh",
     "scripts/private-names-fold.pl",
     "scripts/secrets-check.sh",
+    "scripts/tool-config-check.sh",
     "scripts/workflows-check.sh",
 ];
+/// The entries allowed at the root among the names that start with a dot or with `mise`
+/// (`scripts/tool-config-check.sh` holds the same list): `.shellcheckrc`, `.tool-versions`,
+/// `.mise.toml`, `mise.local.toml`, `.pinact.yaml`, `.yamllint`, `.envrc` and the like are
+/// refused, since a tool of the gate would read them without a command line naming them.
+pub const ROOT_ALLOWED: [&str; 15] = [
+    ".DS_Store",
+    ".claude",
+    ".config",
+    ".editorconfig",
+    ".git",
+    ".gitattributes",
+    ".github",
+    ".gitignore",
+    ".gitleaks.toml",
+    ".idea",
+    ".private-names.sha256",
+    ".vscode",
+    ".work",
+    "mise.lock",
+    "mise.toml",
+];
+/// The entries allowed in `.github/` (no `actionlint.yaml`, `pinact.yaml`, ...).
+pub const GITHUB_ALLOWED: [&str; 7] = [
+    "CODEOWNERS",
+    "ISSUE_TEMPLATE",
+    "actions",
+    "dependabot.yml",
+    "pull_request_template.md",
+    "workflows",
+    "zizmor.yml",
+];
+/// The entries allowed in `.config/` (no `mise/`, `mise.toml`, ...).
+pub const CONFIG_ALLOWED: [&str; 2] = ["gate.sha256", "nextest.toml"];
 /// The manifest's name for the justfile's top-level lines.
 pub const TOP_LEVEL: &str = "justfile::(top-level)";
 
@@ -77,6 +139,12 @@ pub fn check(tree: &dyn Tree) -> Vec<Finding> {
         Some(text) => findings.extend(mise_shape(&text)),
         None => findings.push(Finding::new(RULE, MISE, "the file is missing")),
     }
+    match (tree.read(MISE), tree.read(MISE_LOCK)) {
+        (Some(mise), Some(lock)) => findings.extend(mise_lock_shape(&mise, &lock)),
+        (_, None) => findings.push(Finding::new(RULE, MISE_LOCK, "the file is missing")),
+        (None, Some(_)) => {}
+    }
+    findings.extend(entries(&files));
     match tree.read(TOOLCHAIN) {
         Some(text) => findings.extend(toolchain_shape(&text)),
         None => findings.push(Finding::new(RULE, TOOLCHAIN, "the file is missing")),
@@ -89,6 +157,42 @@ pub fn check(tree: &dyn Tree) -> Vec<Finding> {
     findings
 }
 
+/// The allowlists of [`ROOT_ALLOWED`], [`GITHUB_ALLOWED`] and [`CONFIG_ALLOWED`] over the tree's
+/// files: one finding per entry outside them.
+fn entries(files: &[String]) -> Vec<Finding> {
+    let mut refused = BTreeSet::new();
+    for path in files {
+        let mut parts = path.split('/');
+        let first = parts.next().unwrap_or_default();
+        let second = parts.next();
+        let checked = first.starts_with('.') || first.starts_with("mise");
+        if checked && !ROOT_ALLOWED.contains(&first) {
+            refused.insert((
+                first.to_owned(),
+                "not an allowed entry at the root: its dot-names and mise* names are an allowlist (fnd §3.6; a tool of the gate could read it without being told)",
+            ));
+        }
+        if let Some(entry) = second {
+            if first == ".github" && !GITHUB_ALLOWED.contains(&entry) {
+                refused.insert((
+                    format!(".github/{entry}"),
+                    "not an allowed entry of .github/ (fnd §3.6; actionlint, pinact and others read their configuration there by themselves)",
+                ));
+            }
+            if first == ".config" && !CONFIG_ALLOWED.contains(&entry) {
+                refused.insert((
+                    format!(".config/{entry}"),
+                    "not an allowed entry of .config/ (fnd §3.6; mise, nextest and others read their configuration there by themselves)",
+                ));
+            }
+        }
+    }
+    refused
+        .into_iter()
+        .map(|(at, why)| Finding::new(RULE, at, why))
+        .collect()
+}
+
 /// Why a file may not exist in the tree, if it may not.
 fn stray(path: &str) -> Option<&'static str> {
     let name = path.rsplit('/').next().unwrap_or(path);
@@ -96,8 +200,11 @@ fn stray(path: &str) -> Option<&'static str> {
         .strip_suffix(name)
         .unwrap_or_default()
         .trim_end_matches('/');
-    let in_dir = |dir: &str| parent == dir || parent.ends_with(&format!("/{dir}"));
-    if in_dir(".cargo") && matches!(name, "config" | "config.toml") {
+    // Cargo and toolchain names case-insensitively: a case-insensitive file system (macOS) opens
+    // `.Cargo/Config.toml` as `.cargo/config.toml` (the FND-09 review's H6).
+    let (lower_name, lower_parent) = (name.to_ascii_lowercase(), parent.to_ascii_lowercase());
+    let in_cargo_dir = lower_parent == ".cargo" || lower_parent.ends_with("/.cargo");
+    if in_cargo_dir && matches!(lower_name.as_str(), "config" | "config.toml") {
         return Some(
             "a cargo configuration file: none may be committed (fnd §3.6; it can set a runner, an alias or flags before any check runs)",
         );
@@ -115,7 +222,21 @@ fn stray(path: &str) -> Option<&'static str> {
             "a mise configuration file: only the root mise.toml (shape-checked) may exist (fnd §3.6; another could add [env])",
         );
     }
-    if matches!(name, "rust-toolchain" | "rust-toolchain.toml") && path != TOOLCHAIN {
+    if name == ".gitleaks.toml" && path != ".gitleaks.toml" {
+        return Some(
+            "a gitleaks policy: only the root .gitleaks.toml may exist (fnd §7.4; the secrets stage reads the root one only)",
+        );
+    }
+    if matches!(name, "rustfmt.toml" | ".rustfmt.toml") {
+        return Some(
+            "a rustfmt configuration file: none may exist (fnd §3.6; it would change what fmt-check accepts without the justfile naming it)",
+        );
+    }
+    if matches!(
+        lower_name.as_str(),
+        "rust-toolchain" | "rust-toolchain.toml"
+    ) && path != TOOLCHAIN
+    {
         return Some(
             "a toolchain file: only the root rust-toolchain.toml (shape-checked) may exist (fnd §3.6)",
         );
@@ -164,13 +285,26 @@ pub fn expected_pins(tree: &dyn Tree) -> Result<BTreeMap<String, String>, Findin
                 .cloned(),
         );
     }
-    for file in GATE_FILES {
+    for file in gate_files(tree) {
         let text = tree
-            .read(file)
-            .ok_or_else(|| Finding::new(RULE, file, "a file of the gate is missing"))?;
-        pins.insert(file.to_owned(), sha256(&text));
+            .read(&file)
+            .ok_or_else(|| Finding::new(RULE, file.as_str(), "a file of the gate is missing"))?;
+        pins.insert(file, sha256(&text));
     }
     Ok(pins)
+}
+
+/// [`GATE_FILES`] and every `scripts/test-*.sh` of the tree (the `script-tests` stage runs them
+/// by glob, so a new one is a change of the gate), sorted.
+pub fn gate_files(tree: &dyn Tree) -> Vec<String> {
+    let mut files: BTreeSet<String> = GATE_FILES.iter().map(|f| (*f).to_owned()).collect();
+    for path in tree.files_under("scripts") {
+        let name = path.strip_prefix("scripts/").unwrap_or_default();
+        if name.starts_with("test-") && name.ends_with(".sh") && !name.contains('/') {
+            files.insert(path);
+        }
+    }
+    files.into_iter().collect()
 }
 
 fn pins(tree: &dyn Tree, findings: &mut Vec<Finding>) {
@@ -183,21 +317,21 @@ fn pins(tree: &dyn Tree, findings: &mut Vec<Finding>) {
     };
     let justfile = tree.read(ci::JUSTFILE).unwrap_or_default();
     let parsed = Justfile::parse(&justfile);
-    for (name, recipe) in &parsed.recipes {
-        if !expected.contains_key(&format!("justfile::{name}")) {
-            continue;
-        }
-        for word in recipe
-            .text
-            .split(|c: char| c.is_whitespace() || "\"'(){}".contains(c))
-        {
+    let top = (TOP_LEVEL.to_owned(), parsed.top_level.as_str());
+    let pinned_recipes = parsed
+        .recipes
+        .iter()
+        .filter(|(name, _)| expected.contains_key(&format!("justfile::{name}")))
+        .map(|(name, recipe)| (format!("`{name}`"), recipe.text.as_str()));
+    for (name, text) in std::iter::once(top).chain(pinned_recipes) {
+        for word in text.split(|c: char| c.is_whitespace() || "\"'(){}".contains(c)) {
             if word.starts_with("scripts/") && !word.contains('*') {
                 let file = word.trim_end_matches([';', ',', ')']);
-                if !GATE_FILES.contains(&file) {
+                if !expected.contains_key(file) {
                     findings.push(Finding::new(
                         RULE,
                         ci::JUSTFILE,
-                        format!("the gate recipe `{name}` runs `{file}`, which gate.rs's GATE_FILES does not pin"),
+                        format!("the gate recipe {name} runs `{file}`, which gate.rs's GATE_FILES does not pin"),
                     ));
                 }
             }
@@ -467,7 +601,156 @@ fn nextest_profile(name: &str, body: &Value) -> Vec<String> {
     problems
 }
 
-/// `mise.toml`'s allowlisted shape: `[tools]` with string versions, nothing else.
+/// A tool key mise.toml and mise.lock may hold: `just`, `aqua:<owner>/<repo>[/<name>]` or
+/// `github:<owner>/<repo>`: the backends that install a checksummed release asset, never a
+/// plugin backend (asdf, vfox), whose plugin is code that mise runs.
+pub fn allowed_tool(key: &str) -> bool {
+    let word = |w: &str| {
+        !w.is_empty()
+            && w.chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
+    };
+    if key == "just" {
+        return true;
+    }
+    if let Some(rest) = key.strip_prefix("aqua:") {
+        let parts: Vec<&str> = rest.split('/').collect();
+        return (2..=3).contains(&parts.len()) && parts.iter().all(|p| word(p));
+    }
+    if let Some(rest) = key.strip_prefix("github:") {
+        let parts: Vec<&str> = rest.split('/').collect();
+        return parts.len() == 2 && parts.iter().all(|p| word(p));
+    }
+    false
+}
+
+/// A plain version string: letters, digits, `.`, `_`, `+` and `-` (no template, no range).
+fn plain_version(value: &Value) -> bool {
+    value.as_str().is_some_and(|v| {
+        !v.is_empty()
+            && v.chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '+' | '-'))
+    })
+}
+
+/// `mise.lock`'s allowlisted shape, against `mise.toml`'s tools: `lockfile_version = 3` and one
+/// `[[tools.<key>]]` per tool of `mise.toml`, each with exactly `version`, `backend` (an allowed
+/// tool key), `specifiers` and per-platform tables of linux-x64, linux-arm64 or macos-arm64 that
+/// hold a `sha256:` checksum, a `https://github.com/` url, a `https://api.github.com/repos/`
+/// url_api and optionally `provenance = "github-attestations"`.
+pub fn mise_lock_shape(mise: &str, lock: &str) -> Vec<Finding> {
+    let table = match parse(MISE_LOCK, lock) {
+        Ok(table) => table,
+        Err(finding) => return vec![finding],
+    };
+    let mut problems = Vec::new();
+    for (key, value) in &table {
+        match key.as_str() {
+            "lockfile_version" if value.as_integer() == Some(3) => {}
+            "tools" => {}
+            _ => problems.push(format!(
+                "the top-level key `{key}` is not allowed (only lockfile_version = 3 and tools)"
+            )),
+        }
+    }
+    let locked: BTreeMap<String, Value> = table
+        .get("tools")
+        .and_then(Value::as_table)
+        .map(|t| t.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
+        .unwrap_or_default();
+    for (tool, entries) in &locked {
+        if !allowed_tool(tool) {
+            problems.push(format!(
+                "tool `{tool}` is not `just`, an aqua or a github backend"
+            ));
+        }
+        let Some(entries) = entries.as_array().filter(|a| a.len() == 1) else {
+            problems.push(format!(
+                "tool `{tool}` must have exactly one [[tools.{tool}]] entry"
+            ));
+            continue;
+        };
+        for entry in entries.iter() {
+            let Some(entry) = entry.as_table() else {
+                problems.push(format!("tool `{tool}`: an entry that is not a table"));
+                continue;
+            };
+            if !(entry.contains_key("version") && entry.contains_key("backend")) {
+                problems.push(format!(
+                    "tool `{tool}`: an entry without its version or backend"
+                ));
+            }
+            for (field, v) in entry {
+                let ok = match field.as_str() {
+                    "version" => plain_version(v),
+                    "backend" => v.as_str().is_some_and(|b| b != "just" && allowed_tool(b)),
+                    "specifiers" => v.as_array().is_some_and(|a| a.iter().all(plain_version)),
+                    "platforms.linux-x64" | "platforms.linux-arm64" | "platforms.macos-arm64" => {
+                        lock_platform(v)
+                    }
+                    _ => false,
+                };
+                if !ok {
+                    problems.push(format!("`tools.{tool}.{field}` is not allowed with that value (a checksummed GitHub release asset of an aqua or github tool)"));
+                }
+            }
+        }
+    }
+    if let Ok(mise) = mise.parse::<Table>() {
+        let pinned: BTreeSet<&String> = mise
+            .get("tools")
+            .and_then(Value::as_table)
+            .map(|t| t.keys().collect())
+            .unwrap_or_default();
+        let have: BTreeSet<&String> = locked.keys().collect();
+        for tool in pinned.difference(&have) {
+            problems.push(format!(
+                "tool `{tool}` of mise.toml has no entry: run `mise lock`"
+            ));
+        }
+        for tool in have.difference(&pinned) {
+            problems.push(format!(
+                "tool `{tool}` is not in mise.toml: remove its entry"
+            ));
+        }
+    }
+    problems
+        .into_iter()
+        .map(|p| Finding::new(RULE, MISE_LOCK, p))
+        .collect()
+}
+
+fn lock_platform(value: &Value) -> bool {
+    let url = |v: &Value, prefix: &str| {
+        v.as_str().is_some_and(|u| {
+            u.strip_prefix(prefix).is_some_and(|rest| {
+                !rest.is_empty()
+                    && rest.chars().all(|c| {
+                        c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '/' | '+' | '-')
+                    })
+            })
+        })
+    };
+    value.as_table().is_some_and(|t| {
+        t.get("checksum").is_some()
+            && t.iter().all(|(k, v)| match k.as_str() {
+                "checksum" => v.as_str().is_some_and(|c| {
+                    c.strip_prefix("sha256:").is_some_and(|h| {
+                        h.len() == 64
+                            && h.chars()
+                                .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase())
+                    })
+                }),
+                "url" => url(v, "https://github.com/"),
+                "url_api" => url(v, "https://api.github.com/repos/"),
+                "provenance" => v.as_str() == Some("github-attestations"),
+                _ => false,
+            })
+    })
+}
+
+/// `mise.toml`'s allowlisted shape: `[tools]` of allowed tool keys ([`allowed_tool`]) pinned by
+/// plain version strings, nothing else.
 pub fn mise_shape(text: &str) -> Vec<Finding> {
     let table = match parse(MISE, text) {
         Ok(table) => table,
@@ -484,7 +767,14 @@ pub fn mise_shape(text: &str) -> Vec<Finding> {
             continue;
         }
         for (tool, version) in value.as_table().into_iter().flatten() {
-            if !version.is_str() {
+            if !allowed_tool(tool) {
+                findings.push(Finding::new(
+                    RULE,
+                    MISE,
+                    format!("tool `{tool}` is not `just`, an aqua or a github backend (a plugin backend runs its plugin's code)"),
+                ));
+            }
+            if !plain_version(version) {
                 findings.push(Finding::new(
                     RULE,
                     MISE,
