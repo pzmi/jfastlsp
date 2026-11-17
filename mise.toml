@@ -27,3 +27,16 @@ just = "1.59.0"
 # The benchmark harness's timer and its `rg` floor (BENCH-02, `just bench`).
 "aqua:sharkdp/hyperfine" = "2.0.0"
 "aqua:BurntSushi/ripgrep" = "15.2.0"
+
+# The formal toolchain (FORMAL-01, ver §6, fnd §8): dev-time only, `jfl` never needs them. Node and
+# Quint for the `formal-typecheck` and `formal-test` stages; Quint from npm with its whole
+# dependency graph locked (mise.lock's `aube` entry and .mise/locks/: every package's sha512, and
+# a digest mise checks before it installs), run with its TypeScript backend so nothing is
+# downloaded at run time. Apalache for `formal-verify`: 0.62.4 is the version Quint 0.33.1 names as
+# its own (DEFAULT_APALACHE_VERSION_TAG), though 0.63.0 exists; one platform-independent archive.
+# The Temurin JDK runs Apalache, and later the Java fixtures and the JVM helpers. Node 26 is the
+# Active LTS line. Versions are the current releases on 2026-11-17.
+node = "26.13.1"
+"npm:@informalsystems/quint" = "0.33.1"
+"github:apalache-mc/apalache" = "0.62.4"
+java = "temurin-21.0.13+9.0.LTS"

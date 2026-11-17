@@ -7,8 +7,14 @@
 #
 # Called by .claude/hooks/session-start.sh in cloud sessions, and usable as (or from) a cloud
 # environment's setup script and on a fresh laptop. It never uses sudo and installs into
-# ~/.local/bin (override with the first argument). Exit status: 0 when both tools are present
-# at the pinned versions afterwards, 1 otherwise.
+# ~/.local/bin (override with the argument after the options). Exit status: 0 when both tools are
+# present at the pinned versions afterwards, 1 otherwise.
+#
+#   bash scripts/bootstrap-tools.sh [--formal-verify] [BIN_DIR]
+#
+# The JDK and Apalache (about 400 MB) are installed only with `--formal-verify`: `just
+# formal-verify` alone needs them, and `just doctor` reports them as optional (FORMAL-01). Node
+# and Quint are installed always, since `just check` runs the formal stages.
 #
 # Sources, in order (the first that verifies wins): the GitHub release asset, then mise's own
 # mirror (mise only), then `cargo install --locked` (just only). The checksums below were
@@ -21,6 +27,11 @@ set -euo pipefail
 MISE_VERSION="2026.10.10"
 JUST_VERSION="1.59.0"
 
+formal_verify=0
+if [ "${1:-}" = "--formal-verify" ]; then
+  formal_verify=1
+  shift
+fi
 bin_dir="${1:-$HOME/.local/bin}"
 mkdir -p "$bin_dir"
 case ":$PATH:" in *":$bin_dir:"*) ;; *) export PATH="$bin_dir:$PATH" ;; esac
@@ -118,8 +129,18 @@ if [ -f "$repo_root/mise.toml" ] && command -v mise >/dev/null 2>&1; then
     echo "bootstrap-tools: the tool configuration is outside its allowlist or could not be checked (above); mise was not run" >&2
     status=1
   else
-    if (cd "$repo_root" && mise install --locked); then
-      echo "tools: installed from mise.lock"
+    # mise.toml's tool keys (its shape has just passed: one `key = "version"` per tool line), less
+    # the JVM tools unless asked for.
+    tools=()
+    while IFS= read -r key; do
+      case "$key" in
+        java | github:apalache-mc/apalache) [ "$formal_verify" = 1 ] || continue ;;
+      esac
+      tools+=("$key")
+    done < <(sed -n 's/^"\{0,1\}\([A-Za-z0-9:@._/-]*\)"\{0,1\}[[:space:]]*=.*/\1/p' "$repo_root/mise.toml")
+    if [ "${#tools[@]}" -gt 0 ] && (cd "$repo_root" && mise install --locked "${tools[@]}"); then
+      echo "tools: installed from mise.lock: ${tools[*]}"
+      [ "$formal_verify" = 1 ] || echo "tools: the JDK and Apalache skipped (for just formal-verify: bash scripts/bootstrap-tools.sh --formal-verify)"
     else
       echo "bootstrap-tools: \`mise install --locked\` failed (run \`just doctor\`)" >&2
       status=1

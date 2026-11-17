@@ -37,7 +37,7 @@ jobs:
         with:
           version: 2026.10.10
           sha256: 7d79972e15549b286dcf9e25ef8c4fcef3d9fd7c0332d11cdfbc7d2842c418be # linux-x64
-          install_args: --locked
+          install_args: --locked just aqua:nextest-rs/nextest/cargo-nextest aqua:EmbarkStudios/cargo-deny github:joshrotenberg/adrs aqua:gitleaks/gitleaks aqua:rhysd/actionlint aqua:zizmorcore/zizmor aqua:suzuki-shunsuke/pinact aqua:koalaman/shellcheck aqua:sharkdp/hyperfine aqua:BurntSushi/ripgrep
           cache_save: ${{ github.ref == 'refs/heads/main' }}
           # mise.toml's [env] stays out of the gate's environment (ARCH-ci-lockstep).
           env: false
@@ -64,7 +64,7 @@ jobs:
         with:
           version: 2026.10.10
           sha256: 7d79972e15549b286dcf9e25ef8c4fcef3d9fd7c0332d11cdfbc7d2842c418be # linux-x64
-          install_args: --locked
+          install_args: --locked just aqua:nextest-rs/nextest/cargo-nextest aqua:EmbarkStudios/cargo-deny github:joshrotenberg/adrs aqua:gitleaks/gitleaks aqua:rhysd/actionlint aqua:zizmorcore/zizmor aqua:suzuki-shunsuke/pinact aqua:koalaman/shellcheck aqua:sharkdp/hyperfine aqua:BurntSushi/ripgrep
           cache_save: ${{ github.ref == 'refs/heads/main' }}
           # mise.toml's [env] stays out of the gate's environment (ARCH-ci-lockstep).
           env: false
@@ -83,7 +83,7 @@ jobs:
         with:
           version: 2026.10.10
           sha256: 7d79972e15549b286dcf9e25ef8c4fcef3d9fd7c0332d11cdfbc7d2842c418be # linux-x64
-          install_args: --locked
+          install_args: --locked just aqua:nextest-rs/nextest/cargo-nextest aqua:EmbarkStudios/cargo-deny github:joshrotenberg/adrs aqua:gitleaks/gitleaks aqua:rhysd/actionlint aqua:zizmorcore/zizmor aqua:suzuki-shunsuke/pinact aqua:koalaman/shellcheck aqua:sharkdp/hyperfine aqua:BurntSushi/ripgrep
           cache_save: ${{ github.ref == 'refs/heads/main' }}
           # mise.toml's [env] stays out of the gate's environment (ARCH-ci-lockstep).
           env: false

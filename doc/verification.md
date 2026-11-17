@@ -148,7 +148,13 @@ delete, a worker crash), the fake can be told to fail the same way.
 
 ### 6.1 Models and invariants
 
-The models of plan §7, registered in `formal/models.toml` (the `MODELS` registry, FORMAL-01):
+The models of plan §7, registered in `formal/models.toml` (the `MODELS` registry, FORMAL-01:
+one `[models.<name>]` table per model with `file`, `main` and `steps`, in a pinned line shape that
+xtask reads and `crates/jfl-conformance/tests/models.rs` reads again with a TOML parser, which
+also keeps `formal.yml`'s matrix equal to it). `formal-typecheck` fails on a `.qnt` under
+`formal/` that no entry names; `formal-test` fails on a model without a Quint test. The
+toolchain's own model is `formal/smoke.qnt`, a counter (FORMAL-01; FORMAL-02 proves the harness
+on it). The product's models:
 
 | Model | Invariants | Model task | Driver task |
 |:--|:--|:--|:--|
@@ -188,10 +194,13 @@ replay of committed traces is ours (about 200 lines).
 
 ### 6.3 Apalache verification lane
 
-`just formal-verify [model]` runs Apalache (0.62.1, pinned and checksum-verified by mise) bounded
-verification of each model's `allInvariants` plus a long multi-seed simulation. It runs weekly
-and by hand (`formal.yml`, one job per model), not in `check`. A counterexample becomes a
-regression trace.
+`just formal-verify [model]` runs Apalache (0.62.4, Quint 0.33.1's own pairing, pinned and
+checksum-verified by mise) bounded verification of each model's `allInvariants` for its
+registered `steps` (`init` and `step` as the initial and next actions), on Quint's JSON IR in a
+scratch directory, then a Quint simulation of the same invariant (1000 samples on the TypeScript
+backend, its seed printed). It runs weekly and by hand (`formal.yml`, one job per model), not in
+`check`. On a violation the scratch directory is kept and named, and its counterexample
+(`violation1.itf.json`) becomes a regression trace.
 
 ### 6.4 Property-based state-machine tests
 

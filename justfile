@@ -81,6 +81,22 @@ doctests:
 script-tests:
     bash {{xtask}} check-only script-tests
 
+# Every Quint model of formal/models.toml typechecks, and an unregistered formal/**/*.qnt fails;
+# then every model's Quint tests, on the TypeScript backend (FORMAL-01, ver §6).
+formal-typecheck:
+    bash {{xtask}} check-only formal-typecheck
+
+formal-test:
+    bash {{xtask}} check-only formal-test
+
+# Apalache's bounded verification of each registered model's `allInvariants` (or the one named),
+# then a Quint simulation; not a stage of `check` (a JVM per model): `formal.yml` runs it weekly
+# and by hand, one job per model (FORMAL-01, ver §6.3). `just formal-verify smoke`. The JDK and
+# Apalache come from `bash scripts/bootstrap-tools.sh --formal-verify`.
+[positional-arguments]
+formal-verify *model:
+    bash {{xtask}} formal-verify "$@"
+
 docs:
     bash {{xtask}} check-only docs
 

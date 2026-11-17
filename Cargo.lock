@@ -525,6 +525,7 @@ dependencies = [
  "jfl-domain",
  "jfl-protocol",
  "jfl-testkit",
+ "toml",
 ]
 
 [[package]]

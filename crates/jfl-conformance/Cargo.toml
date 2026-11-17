@@ -19,3 +19,6 @@ jfl-composition = { path = "../jfl-composition" }
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+toml = "1.2.1"

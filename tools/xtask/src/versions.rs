@@ -7,7 +7,8 @@
 //! and a shape refuses what a parser would accept silently (a second `url`, an inline table, a
 //! dotted key, a URL that is not a GitHub release asset). Every download `install-tools` makes
 //! is a URL of this file, so the URL shape is the network rule of fnd §8: a GitHub release asset,
-//! never `api.github.com`. Ported in spirit from mayfly's `tools/xtask/src/tools.rs` (`parse`,
+//! never `api.github.com`, or (FORMAL-01) Node's archive under `https://nodejs.org/dist/`, which
+//! mise's core node backend fetches too. Ported in spirit from mayfly's `tools/xtask/src/tools.rs` (`parse`,
 //! `is_sha256`), whose manifest has no per-platform assets.
 //!
 //! Pinned by the unit tests below (the shape, the repository's files) and
@@ -52,6 +53,19 @@ pub(crate) struct Asset {
     pub(crate) bin: String,
 }
 
+/// How a tool is installed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Kind {
+    /// The archive's one program, alone in `bin/` (the default).
+    Program,
+    /// The whole archive, the directory holding `bin`'s program on PATH: a program that needs its
+    /// siblings (Node's libraries, the JDK, Apalache's jar beside its script; FORMAL-01).
+    Tree,
+    /// An npm package mise installs from its locked graph (`.mise/locks/`): no platform asset, and
+    /// `install-tools` refuses it until XT-08 (FORMAL-01).
+    Npm,
+}
+
 /// One pinned tool.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Tool {
@@ -64,8 +78,17 @@ pub(crate) struct Tool {
     /// The program and arguments that print the installed version; the program is the file name
     /// of every platform's `bin`.
     pub(crate) probe: Vec<String>,
-    /// One asset per platform of [`PLATFORMS`], in that order.
+    /// One asset per platform of [`PLATFORMS`], in that order; none for [`Kind::Npm`].
     pub(crate) assets: Vec<Asset>,
+    /// How it is installed.
+    pub(crate) kind: Kind,
+    /// The word the probe prints for the pinned version, when it is not `version` itself (the
+    /// JDK: mise's `temurin-21.0.13+9.0.LTS` prints as `Temurin-21.0.13+9`).
+    pub(crate) prints: Option<String>,
+    /// The one command that needs the tool, when the gate does not (`only = "formal-verify"`:
+    /// the JDK and Apalache, about 400 MB, installed on request; `doctor` reports them as
+    /// optional; FORMAL-01).
+    pub(crate) only: Option<String>,
 }
 
 impl Tool {
@@ -77,6 +100,11 @@ impl Tool {
     /// The asset of `platform`.
     pub(crate) fn asset(&self, platform: &str) -> Option<&Asset> {
         self.assets.iter().find(|a| a.platform == platform)
+    }
+
+    /// The word the probe must print.
+    pub(crate) fn expected_word(&self) -> &str {
+        self.prints.as_deref().unwrap_or(&self.version)
     }
 }
 
@@ -103,6 +131,8 @@ impl Shape {
         let r = |p: &str| Regex::new(p).map_err(|e| format!("versions.toml: pattern {p}: {e}"));
         let name = "[a-z][a-z0-9-]*";
         let segment = "[A-Za-z0-9._+-]+";
+        let escaped = "([A-Za-z0-9._+-]|%2B)+";
+        let semver = r"[0-9]+\.[0-9]+\.[0-9]+";
         Ok(Self {
             blank: r(r"^[ \t]*(#.*)?$")?,
             tool: r(&format!(r"^\[tools\.({name})\]$"))?,
@@ -112,12 +142,12 @@ impl Shape {
             pair: r(r#"^([a-z0-9]+) = "([^"\\]*)"$"#)?,
             probe: r(r#"^probe = \[("[A-Za-z0-9._-]+"(, "[A-Za-z0-9._-]+")*)\]$"#)?,
             url: r(&format!(
-                "^https://github\\.com/{segment}/{segment}/releases/download/{segment}/{segment}$"
+                "^(https://github\\.com/{segment}/{segment}/releases/download/{escaped}/{escaped}|https://nodejs\\.org/dist/v{semver}/node-v{semver}-(linux-x64|linux-arm64|darwin-arm64)\\.tar\\.(gz|xz))$"
             ))?,
             bin: r(&format!("^{segment}(/{segment})*$"))?,
             version: r(&format!("^{segment}$"))?,
             mise: r(
-                "^(just|aqua:[A-Za-z0-9._-]+/[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)?|github:[A-Za-z0-9._-]+/[A-Za-z0-9._-]+)$",
+                "^(just|node|java|aqua:[A-Za-z0-9._-]+/[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)?|github:[A-Za-z0-9._-]+/[A-Za-z0-9._-]+|npm:@[a-z0-9._-]+/[a-z0-9._-]+)$",
             )?,
         })
     }
@@ -143,8 +173,9 @@ impl Fields {
 }
 
 /// Parses the manifest in its pinned shape: every line a blank, a comment, a table header or one
-/// of the keys of its table; every tool with `version`, `mise` and `probe` and then the three
-/// platforms of [`PLATFORMS`], in that order, each with `url`, `sha256` and `bin`.
+/// of the keys of its table; every tool with `version`, `mise` and `probe` (and optionally `kind`
+/// and `prints`) and then the three platforms of [`PLATFORMS`], in that order, each with `url`,
+/// `sha256` and `bin`; an npm tool with no platform table.
 pub(crate) fn parse(text: &str) -> Result<Vec<Tool>, String> {
     let shape = Shape::new()?;
     let mut tools: Vec<Tool> = Vec::new();
@@ -169,6 +200,9 @@ pub(crate) fn parse(text: &str) -> Result<Vec<Tool>, String> {
                     mise: String::new(),
                     probe: Vec::new(),
                     assets: Vec::new(),
+                    kind: Kind::Program,
+                    prints: None,
+                    only: None,
                 },
                 None,
                 Fields::default(),
@@ -190,6 +224,11 @@ pub(crate) fn parse(text: &str) -> Result<Vec<Tool>, String> {
                 ));
             }
             let tool = close(current, &shape)?;
+            if tool.kind == Kind::Npm {
+                return Err(format!(
+                    "versions.toml:{number}: tools.{name} is an npm tool, which has no platform table"
+                ));
+            }
             let expected = PLATFORMS.get(tool.assets.len()).copied();
             if expected != Some(platform.as_str()) {
                 return Err(format!(
@@ -220,7 +259,7 @@ pub(crate) fn parse(text: &str) -> Result<Vec<Tool>, String> {
         let allowed: &[&str] = if platform.is_some() {
             &["url", "sha256", "bin"]
         } else {
-            &["version", "mise"]
+            &["version", "mise", "kind", "prints", "only"]
         };
         if !allowed.contains(&key) {
             return Err(format!(
@@ -232,7 +271,10 @@ pub(crate) fn parse(text: &str) -> Result<Vec<Tool>, String> {
     if let Some(done) = open.take() {
         tools.push(close(done, &shape)?);
     }
-    if let Some(short) = tools.iter().find(|t| t.assets.len() != PLATFORMS.len()) {
+    if let Some(short) = tools
+        .iter()
+        .find(|t| t.kind != Kind::Npm && t.assets.len() != PLATFORMS.len())
+    {
         return Err(format!(
             "versions.toml: tools.{} pins {} of the platforms {}",
             short.name,
@@ -266,8 +308,37 @@ fn close(open: (Tool, Option<String>, Fields), shape: &Shape) -> Result<Tool, St
             }
             if !shape.mise.is_match(&tool.mise) {
                 return Err(format!(
-                    "versions.toml: {at}.mise is not a mise.toml key (just, aqua:, github:)"
+                    "versions.toml: {at}.mise is not a mise.toml key (just, node, java, aqua:, github:, npm:@)"
                 ));
+            }
+            tool.kind = match fields.0.remove("kind").as_deref() {
+                None => Kind::Program,
+                Some("tree") => Kind::Tree,
+                Some("npm") => Kind::Npm,
+                Some(other) => {
+                    return Err(format!(
+                        "versions.toml: {at}.kind `{other}` is not tree or npm"
+                    ));
+                }
+            };
+            if (tool.kind == Kind::Npm) != tool.mise.starts_with("npm:") {
+                return Err(format!(
+                    "versions.toml: {at}: `kind = \"npm\"` goes with an npm: mise key, and only with one"
+                ));
+            }
+            tool.only = fields.0.remove("only");
+            if tool.only.as_deref().is_some_and(|o| o != "formal-verify") {
+                return Err(format!(
+                    "versions.toml: {at}.only names no command that may own a tool (formal-verify)"
+                ));
+            }
+            tool.prints = fields.0.remove("prints");
+            if tool
+                .prints
+                .as_deref()
+                .is_some_and(|p| !shape.version.is_match(p))
+            {
+                return Err(format!("versions.toml: {at}.prints is not one plain word"));
             }
         }
         Some(platform) => {
@@ -307,14 +378,20 @@ fn close(open: (Tool, Option<String>, Fields), shape: &Shape) -> Result<Tool, St
 /// One platform entry of mise.lock: (version, url, sha256).
 type LockEntry = (String, String, String);
 
-/// mise.lock's entries by (tool key, platform), read after its shape passed
-/// [`tool_config::mise_lock_shape`].
-fn lock_entries(text: &str) -> Result<BTreeMap<(String, String), LockEntry>, String> {
+/// mise.lock's tools: the version of each tool key, and its entries by (tool key, platform).
+type Lock = (
+    BTreeMap<String, String>,
+    BTreeMap<(String, String), LockEntry>,
+);
+
+/// mise.lock's tools, read after its shape passed [`tool_config::mise_lock_shape`].
+fn lock_entries(text: &str) -> Result<Lock, String> {
     if let Some(line) = tool_config::mise_lock_shape(text) {
         return Err(format!("mise.lock: outside its shape at {line}"));
     }
     let unquote = |s: &str| s.trim().trim_matches('"').to_owned();
     let mut out = BTreeMap::new();
+    let mut versions = BTreeMap::new();
     let mut key = String::new();
     let mut version = String::new();
     let mut platform: Option<String> = None;
@@ -352,6 +429,7 @@ fn lock_entries(text: &str) -> Result<BTreeMap<(String, String), LockEntry>, Str
             platform = p;
         } else if let Some(v) = line.strip_prefix("version = ") {
             version = unquote(v);
+            versions.insert(key.clone(), version.clone());
         } else if let Some(v) = line.strip_prefix("url = ") {
             fields.0 = unquote(v);
         } else if let Some(v) = line.strip_prefix("checksum = ") {
@@ -359,7 +437,7 @@ fn lock_entries(text: &str) -> Result<BTreeMap<(String, String), LockEntry>, Str
         }
     }
     flush(&mut platform, &key, &version, &mut fields);
-    Ok(out)
+    Ok((versions, out))
 }
 
 /// mise.toml's tools by key, read after its shape passed [`tool_config::mise_toml_shape`].
@@ -384,10 +462,11 @@ fn mise_toml_entries(text: &str) -> Result<BTreeMap<String, String>, String> {
 /// Every disagreement between the manifest and mise.toml and mise.lock: a tool or a platform one
 /// of them lacks, or a version, URL or SHA-256 that differs. Empty when they agree.
 pub(crate) fn disagreements(tools: &[Tool], mise_toml: &str, mise_lock: &str) -> Vec<String> {
-    let (pins, lock) = match (mise_toml_entries(mise_toml), lock_entries(mise_lock)) {
-        (Ok(pins), Ok(lock)) => (pins, lock),
-        (Err(e), _) | (_, Err(e)) => return vec![e],
-    };
+    let (pins, (lock_versions, lock)) =
+        match (mise_toml_entries(mise_toml), lock_entries(mise_lock)) {
+            (Ok(pins), Ok(lock)) => (pins, lock),
+            (Err(e), _) | (_, Err(e)) => return vec![e],
+        };
     let mut out = Vec::new();
     for tool in tools {
         match pins.get(&tool.mise) {
@@ -397,6 +476,17 @@ pub(crate) fn disagreements(tools: &[Tool], mise_toml: &str, mise_lock: &str) ->
             )),
             Some(v) if *v != tool.version => out.push(format!(
                 "tools.{} is {}, mise.toml pins {v}",
+                tool.name, tool.version
+            )),
+            Some(_) => {}
+        }
+        match lock_versions.get(&tool.mise) {
+            None => out.push(format!(
+                "tools.{}: mise.lock has no entry for {}",
+                tool.name, tool.mise
+            )),
+            Some(v) if *v != tool.version => out.push(format!(
+                "tools.{}: version {}, mise.lock {v}",
                 tool.name, tool.version
             )),
             Some(_) => {}
@@ -520,10 +610,18 @@ url = "https://github.com/o/x/releases/download/v1.2.3/x-mac.tar.gz"
                 "pinact",
                 "shellcheck",
                 "hyperfine",
-                "ripgrep"
+                "ripgrep",
+                "node",
+                "quint",
+                "jdk",
+                "apalache"
             ]
         );
-        assert!(tools.iter().all(|t| t.assets.len() == PLATFORMS.len()));
+        assert!(
+            tools
+                .iter()
+                .all(|t| t.assets.len() == PLATFORMS.len() || t.kind == Kind::Npm)
+        );
     }
 
     #[test]
@@ -637,6 +735,133 @@ url = "https://github.com/o/x/releases/download/v1.2.3/x-mac.tar.gz"
             let refusal = result.as_ref().err().cloned().unwrap_or_default();
             assert!(refusal.contains(why), "{from} -> {to}: {result:?}");
         }
+    }
+
+    /// An npm tool and a tree tool with `prints`, as FORMAL-01 pins Quint and the JDK.
+    const KINDS: &str = r#"[tools.q]
+version = "0.1.0"
+mise = "npm:@o/q"
+probe = ["q", "--version"]
+kind = "npm"
+
+[tools.n]
+version = "1.0.0"
+mise = "node"
+probe = ["node", "--version"]
+kind = "tree"
+prints = "N-1.0.0+1"
+only = "formal-verify"
+
+[tools.n.linux-x64]
+url = "https://nodejs.org/dist/v1.0.0/node-v1.0.0-linux-x64.tar.gz"
+sha256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+bin = "node-v1.0.0-linux-x64/bin/node"
+
+[tools.n.linux-arm64]
+url = "https://github.com/o/n/releases/download/n-1.0.0%2B1/n-arm.tar.gz"
+sha256 = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+bin = "n/bin/node"
+
+[tools.n.macos-arm64]
+url = "https://nodejs.org/dist/v1.0.0/node-v1.0.0-darwin-arm64.tar.xz"
+sha256 = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+bin = "n/Contents/Home/bin/node"
+"#;
+
+    #[test]
+    fn should_read_kinds_and_prints_when_an_npm_and_a_tree_tool_are_pinned() {
+        // given
+        let text = KINDS;
+
+        // when
+        let tools = parse(text).unwrap_or_default();
+
+        // then
+        let kinds: Vec<(Kind, usize, &str, Option<&str>)> = tools
+            .iter()
+            .map(|t| (t.kind, t.assets.len(), t.expected_word(), t.only.as_deref()))
+            .collect();
+        assert_eq!(
+            kinds,
+            [
+                (Kind::Npm, 0, "0.1.0", None),
+                (Kind::Tree, 3, "N-1.0.0+1", Some("formal-verify"))
+            ]
+        );
+    }
+
+    #[test]
+    fn should_refuse_a_kind_or_url_when_it_leaves_the_shape() {
+        // given: each edit of KINDS, and what the refusal names
+        let edits: [(&str, &str, &str); 7] = [
+            (
+                "only = \"formal-verify\"",
+                "only = \"bench\"",
+                "names no command",
+            ),
+            ("kind = \"npm\"", "kind = \"zip\"", "is not tree or npm"),
+            (
+                "mise = \"npm:@o/q\"",
+                "mise = \"aqua:o/q\"",
+                "goes with an npm",
+            ),
+            (
+                "kind = \"npm\"\n",
+                "kind = \"npm\"\n\n[tools.q.linux-x64]\nurl = \"https://github.com/o/q/releases/download/v1/q.tgz\"\n",
+                "no platform table",
+            ),
+            (
+                "https://nodejs.org/dist/v1.0.0/node-v1.0.0-linux-x64.tar.gz",
+                "https://nodejs.org/dist/v1.0.0/../evil.tar.gz",
+                "GitHub release asset",
+            ),
+            (
+                "https://nodejs.org/dist/v1.0.0/node-v1.0.0-linux-x64.tar.gz",
+                "https://nodejs.org.evil.example/dist/v1.0.0/node-v1.0.0-linux-x64.tar.gz",
+                "GitHub release asset",
+            ),
+            ("%2B1", "%2F1", "GitHub release asset"),
+        ];
+
+        // when
+        let results: Vec<_> = edits
+            .iter()
+            .map(|(from, to, _)| parse(&KINDS.replacen(from, to, 1)))
+            .collect();
+
+        // then
+        for ((from, to, why), result) in edits.iter().zip(&results) {
+            let refusal = result.as_ref().err().cloned().unwrap_or_default();
+            assert!(refusal.contains(why), "{from} -> {to}: {result:?}");
+        }
+    }
+
+    #[test]
+    fn should_compare_an_npm_tool_s_version_when_mise_lock_has_no_platform_for_it() {
+        // given: Quint's lock entry carries a version and its graph, no platform table
+        let tools = parse(KINDS)
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|t| t.kind == Kind::Npm)
+            .collect::<Vec<_>>();
+        let toml = "[tools]\n\"npm:@o/q\" = \"0.1.0\"\n";
+        let lock = |version: &str| {
+            format!(
+                "lockfile_version = 3\n\n[[tools.\"npm:@o/q\"]]\nversion = \"{version}\"\naube = {{ path = \".mise/locks/npm-o-q/{version}\", digest = \"sha256:{}\" }}\nbackend = \"npm:@o/q\"\nspecifiers = [\"{version}\"]\n",
+                "d".repeat(64)
+            )
+        };
+
+        // when
+        let agree = disagreements(&tools, toml, &lock("0.1.0"));
+        let moved = disagreements(&tools, toml, &lock("0.2.0"));
+
+        // then
+        assert_eq!(agree, Vec::<String>::new());
+        assert_eq!(
+            moved,
+            ["tools.q: version 0.1.0, mise.lock 0.2.0".to_owned()]
+        );
     }
 
     #[test]

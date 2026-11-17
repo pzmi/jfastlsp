@@ -191,6 +191,26 @@ url = "https://github.com/zizmorcore/zizmor/releases/download/v1.32.0/zizmor-aar
 url_api = "https://api.github.com/repos/zizmorcore/zizmor/releases/assets/703541933"
 provenance = "github-attestations"
 
+[[tools."github:apalache-mc/apalache"]]
+version = "0.62.4"
+backend = "github:apalache-mc/apalache"
+specifiers = ["0.62.4"]
+
+[tools."github:apalache-mc/apalache"."platforms.linux-arm64"]
+checksum = "sha256:8ac8488422c30d552735bae11b92a2d014d8e02e8608702acc08f9a2d8a9abb2"
+url = "https://github.com/apalache-mc/apalache/releases/download/v0.62.4/apalache.tgz"
+url_api = "https://api.github.com/repos/apalache-mc/apalache/releases/assets/633378609"
+
+[tools."github:apalache-mc/apalache"."platforms.linux-x64"]
+checksum = "sha256:8ac8488422c30d552735bae11b92a2d014d8e02e8608702acc08f9a2d8a9abb2"
+url = "https://github.com/apalache-mc/apalache/releases/download/v0.62.4/apalache.tgz"
+url_api = "https://api.github.com/repos/apalache-mc/apalache/releases/assets/633378609"
+
+[tools."github:apalache-mc/apalache"."platforms.macos-arm64"]
+checksum = "sha256:8ac8488422c30d552735bae11b92a2d014d8e02e8608702acc08f9a2d8a9abb2"
+url = "https://github.com/apalache-mc/apalache/releases/download/v0.62.4/apalache.tgz"
+url_api = "https://api.github.com/repos/apalache-mc/apalache/releases/assets/633378609"
+
 [[tools."github:joshrotenberg/adrs"]]
 version = "0.13.0"
 backend = "github:joshrotenberg/adrs"
@@ -211,6 +231,23 @@ checksum = "sha256:16af3d067cfcd4c537c925c80751a318a88261d96d33757700d538791edf9
 url = "https://github.com/joshrotenberg/adrs/releases/download/v0.13.0/adrs-aarch64-apple-darwin.tar.xz"
 url_api = "https://api.github.com/repos/joshrotenberg/adrs/releases/assets/696839408"
 
+[[tools.java]]
+version = "temurin-21.0.13+9.0.LTS"
+backend = "core:java"
+specifiers = ["temurin-21.0.13+9.0.LTS"]
+
+[tools.java."platforms.linux-arm64"]
+checksum = "sha256:e3522e707fc7dbe2a72c30746b1e7068301a0213ecd213d4491f35a14eb55578"
+url = "https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.13%2B9/OpenJDK21U-jdk_aarch64_linux_hotspot_21.0.13_9.tar.gz"
+
+[tools.java."platforms.linux-x64"]
+checksum = "sha256:d7f5d5cf865a2902b70ff549b97586a7d3f234e016f041ab447ea740c7d66d1c"
+url = "https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.13%2B9/OpenJDK21U-jdk_x64_linux_hotspot_21.0.13_9.tar.gz"
+
+[tools.java."platforms.macos-arm64"]
+checksum = "sha256:bf036b35b071bfb2f54f2c0af8ee8d88afa95ee6eb3dce02c0f94cfc2524d04a"
+url = "https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.13%2B9/OpenJDK21U-jdk_aarch64_mac_hotspot_21.0.13_9.tar.gz"
+
 [[tools.just]]
 version = "1.59.0"
 backend = "aqua:casey/just"
@@ -230,3 +267,26 @@ url_api = "https://api.github.com/repos/casey/just/releases/assets/642949555"
 checksum = "sha256:6574cea774ed4cae12e24b6aa11857de33e80dab4667cf628fd5840df96a2a9d"
 url = "https://github.com/casey/just/releases/download/1.59.0/just-1.59.0-aarch64-apple-darwin.tar.gz"
 url_api = "https://api.github.com/repos/casey/just/releases/assets/643129724"
+
+[[tools.node]]
+version = "26.13.1"
+backend = "core:node"
+specifiers = ["26.13.1"]
+
+[tools.node."platforms.linux-arm64"]
+checksum = "sha256:80a330b35415382878df18d41afbd106ea89bfb3be0087d6608e289a14c5cc7d"
+url = "https://nodejs.org/dist/v26.13.1/node-v26.13.1-linux-arm64.tar.gz"
+
+[tools.node."platforms.linux-x64"]
+checksum = "sha256:518674de2b621728a5e4486f5fb3b7d2900bb3cc4aa97969edaa463db99f9778"
+url = "https://nodejs.org/dist/v26.13.1/node-v26.13.1-linux-x64.tar.gz"
+
+[tools.node."platforms.macos-arm64"]
+checksum = "sha256:aec2514ea1ceb2ba52455e9ec65986f6749a06dd759e5db2a72e6889668c9735"
+url = "https://nodejs.org/dist/v26.13.1/node-v26.13.1-darwin-arm64.tar.gz"
+
+[[tools."npm:@informalsystems/quint"]]
+version = "0.33.1"
+aube = { path = ".mise/locks/npm-informalsystems-quint/0.33.1", digest = "sha256:f9509030e6e28aec123ec3365286f818069a4dce51889489d636b5149c335298" }
+backend = "npm:@informalsystems/quint"
+specifiers = ["0.33.1"]

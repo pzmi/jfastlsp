@@ -106,6 +106,9 @@ jfl-bench = { blake3 = ["default"], ignore = ["default"], rayon = ["default"], s
 # xtask (XT-02): toml reads tools/versions.toml, mise.toml and mise.lock in tests/versions.rs, an
 # oracle independent of xtask's own pinned-shape reader; in the graph already (jfl-architecture).
 xtask = { toml = ["default"] }
+# jfl-conformance (FORMAL-01): toml reads the MODELS registry (formal/models.toml) in
+# tests/models.rs, an oracle independent of xtask's pinned-shape reader; in the graph already.
+jfl-conformance = { toml = ["default"] }
 # jfl-domain (IDX-01): proptest (std only: no fork, no timeout, so no tempfile or rusty-fork) for
 # the property tests (ver §2); line-index (rust-analyzer, ADR 0020) as their independent oracle,
 # since it is not no_std and cannot be a normal dependency of a pure crate; divan for the

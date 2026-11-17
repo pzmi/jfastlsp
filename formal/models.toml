@@ -1,0 +1,15 @@
+# The MODELS registry (FORMAL-01, ver §6.1, plan §7): every Quint model of formal/, read by xtask's
+# `formal-typecheck`, `formal-test` and `formal-verify` (tools/xtask/src/formal.rs) and by
+# crates/jfl-conformance/tests/models.rs, which also keeps formal.yml's matrix equal to it. A
+# `.qnt` file under formal/ that no entry names fails `formal-typecheck`.
+#
+# Pinned shape, one table per model: `[models.<name>]` with `file` (formal/<name>.qnt), `main`
+# (the module the stages run) and `steps` (Apalache's `--length`, and the simulation's
+# `--max-steps`, in `formal-verify`). Every model declares `init`, `step` and
+# `val allInvariants`, and at least one Quint test (a `run <name>Test`).
+
+# The toolchain's own check: a counter (FORMAL-01). FORMAL-02 proves the conformance harness on it.
+[models.smoke]
+file = "formal/smoke.qnt"
+main = "smoke"
+steps = 10

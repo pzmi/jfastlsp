@@ -403,15 +403,20 @@ fn should_fail_gate_config_when_a_tool_reads_an_unlisted_configuration_file() ->
 
 #[test]
 fn should_fail_gate_config_when_mise_names_a_plugin_backend_or_a_template() -> TestResult {
-    // given: a backend whose plugin is code, and a version that is a template
+    // given: a backend whose plugin is code, an unscoped npm package (FORMAL-01 admits scoped
+    // ones only), and a version that is a template
     let cases = [
         (
             "\"asdf:someone/plugin\" = \"1.0.0\"\n",
-            "is not `just`, an aqua or a github backend",
+            "is not `just`, `node`, `java`, an aqua, a github or a scoped npm backend",
         ),
         (
             "\"vfox:someone/plugin\" = \"1.0.0\"\n",
-            "is not `just`, an aqua or a github backend",
+            "is not `just`, `node`, `java`, an aqua, a github or a scoped npm backend",
+        ),
+        (
+            "\"npm:left-pad\" = \"1.0.0\"\n",
+            "is not `just`, `node`, `java`, an aqua, a github or a scoped npm backend",
         ),
         (
             "\"aqua:a/b\" = \"{{exec(command='true')}}\"\n",
@@ -436,7 +441,8 @@ fn should_fail_gate_config_when_mise_names_a_plugin_backend_or_a_template() -> T
 #[test]
 fn should_fail_gate_config_when_mise_lock_leaves_its_shape() -> TestResult {
     // given: an asset from elsewhere, a checksum that is not SHA-256, a key mise.lock does not
-    // allow, and an entry for a tool mise.toml does not pin
+    // allow, an entry for a tool mise.toml does not pin, and (FORMAL-01) a core tool on another
+    // backend, a Node archive from a lookalike host, and an npm graph outside `.mise/locks/`
     let lock = repo_file(MISE_LOCK)?;
     let first_url = lock
         .lines()
@@ -459,7 +465,21 @@ fn should_fail_gate_config_when_mise_lock_leaves_its_shape() -> TestResult {
             1,
         ),
         format!("{lock}\n[[tools.\"aqua:a/b\"]]\nversion = \"1.0.0\"\nbackend = \"aqua:a/b\"\n"),
+        lock.replacen(
+            "backend = \"core:node\"",
+            "backend = \"aqua:nodejs/node\"",
+            1,
+        ),
+        lock.replacen(
+            "https://nodejs.org/dist/",
+            "https://nodejs.org.example/dist/",
+            1,
+        ),
+        lock.replacen("path = \".mise/locks/", "path = \"../", 1),
     ];
+    for (case, text) in cases.iter().enumerate().skip(4) {
+        assert_ne!(*text, lock, "case {case} changed nothing");
+    }
 
     // when
     let mut found = Vec::new();
@@ -480,6 +500,7 @@ fn should_fail_gate_config_when_a_test_script_or_a_policy_changes_without_its_pi
     // and (XT-01) a new module of xtask, which composes the gate
     let new_test = baseline()?.with("scripts/test-anything.sh", "exit 0\n");
     let new_module = baseline()?.with("tools/xtask/src/skip.rs", "//! x\n");
+    let new_lock = baseline()?.with(".mise/locks/npm-other/1.0.0/package.json", "{}\n");
     let cases = [
         (
             "scripts/test-secrets.sh",
@@ -504,6 +525,7 @@ fn should_fail_gate_config_when_a_test_script_or_a_policy_changes_without_its_pi
     // when
     let new_found = check(&new_test);
     let module_found = check(&new_module);
+    let lock_found = check(&new_lock);
     let mut found = Vec::new();
     for (path, from, to, reason) in cases {
         found.push((check(&edited(path, from, to)?), reason));
@@ -519,6 +541,11 @@ fn should_fail_gate_config_when_a_test_script_or_a_policy_changes_without_its_pi
         &module_found,
         PINS,
         "`tools/xtask/src/skip.rs` is part of the gate but not pinned",
+    );
+    assert_reported(
+        &lock_found,
+        PINS,
+        "`.mise/locks/npm-other/1.0.0/package.json` is part of the gate but not pinned",
     );
     for (findings, reason) in found {
         assert_reported(&findings, PINS, reason);

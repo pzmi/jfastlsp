@@ -14,13 +14,17 @@
 //!   versions.toml agreeing with mise.lock (XT-02, [`tools`]).
 //! - `install-tools [--archives DIR] [TOOL...]`: the pinned release assets, checksum-verified, into
 //!   the tool cache outside the repository, which the stages' PATH puts first (XT-02).
+//! - `formal-verify [MODEL]`: Apalache's bounded verification and a simulation of each model of
+//!   the `MODELS` registry, or the one named, after the preflight, on the stages' PATH; not a stage
+//!   of `check` (FORMAL-01, [`formal`]).
 //!
 //! `--root DIR` before the command names the checkout whose gate runs (default: the one this
 //! binary was built from). Exit: 0 green, 1 a refusal or a red stage (or the stage's own code), 2
 //! usage. Ported from mayfly's `tools/xtask` (`main`, `cli`): its clap surface is replaced by a
-//! hand parser for these eight commands, so the launcher's first build stays one crate (regex) deep.
+//! hand parser for these nine commands, so the launcher's first build stays one crate (regex) deep.
 
 mod catalog;
+mod formal;
 mod preflight;
 mod process;
 mod stages;
@@ -44,7 +48,8 @@ commands:
   tool-config [ROOT]       check the tool configuration of ROOT (default: the checkout)
   doctor                   every pinned tool present at its version (tools/versions.toml)
   install-tools [--archives DIR] [TOOL...]
-                           install the pinned tools, checksum-verified, into the tool cache";
+                           install the pinned tools, checksum-verified, into the tool cache
+  formal-verify [MODEL]    Apalache and a simulation over the registered Quint models";
 
 /// A parsed command line.
 #[derive(Debug, PartialEq, Eq)]
@@ -62,6 +67,7 @@ enum Command {
         archives: Option<PathBuf>,
         names: Vec<String>,
     },
+    FormalVerify(Option<String>),
 }
 
 /// Parses the arguments after the program name: `[--root DIR] <command> [args]`.
@@ -94,6 +100,10 @@ fn parse(args: &[String]) -> Result<(Option<PathBuf>, Command), String> {
             install_tools(Some(PathBuf::from(dir)), names)?
         }
         [c, names @ ..] if c == "install-tools" => install_tools(None, names)?,
+        [c] if c == "formal-verify" => Command::FormalVerify(None),
+        [c, model] if c == "formal-verify" && !model.starts_with('-') => {
+            Command::FormalVerify(Some(model.clone()))
+        }
         _ => return Err(USAGE.to_owned()),
     };
     Ok((root, command))
@@ -214,7 +224,7 @@ fn run(root: &Path, command: Command) -> i32 {
                 return 2;
             }
         },
-        Command::Preflight => Vec::new(),
+        Command::Preflight | Command::FormalVerify(_) => Vec::new(),
         Command::Doctor => {
             let tools = match tools::manifest(root) {
                 Ok(tools) => tools,
@@ -254,7 +264,7 @@ fn run(root: &Path, command: Command) -> i32 {
         Ok(context) => context,
         Err(code) => return code,
     };
-    if stages.is_empty() {
+    if stages.is_empty() && !matches!(command, Command::FormalVerify(_)) {
         return 0;
     }
     let tools = match tools::manifest(root) {
@@ -266,6 +276,9 @@ fn run(root: &Path, command: Command) -> i32 {
     };
     let dirs = tools::path_dirs(tools::cache_dir().as_deref(), &tools);
     context.path = stage_path(root, &dirs);
+    if let Command::FormalVerify(model) = &command {
+        return formal::verify(&context, &tools, model.as_deref());
+    }
     process::run_stages(&stages, &context)
 }
 
@@ -322,6 +335,11 @@ mod tests {
                 vec!["tool-config", "/t"],
                 Command::ToolConfig(Some(PathBuf::from("/t"))),
             ),
+            (vec!["formal-verify"], Command::FormalVerify(None)),
+            (
+                vec!["formal-verify", "smoke"],
+                Command::FormalVerify(Some("smoke".to_owned())),
+            ),
         ];
 
         // when
@@ -350,6 +368,8 @@ mod tests {
             vec!["doctor", "--json"],
             vec!["install-tools", "--archives"],
             vec!["install-tools", "--force", "x"],
+            vec!["formal-verify", "--all"],
+            vec!["formal-verify", "a", "b"],
         ];
 
         // when

@@ -8,11 +8,16 @@
 # mise.toml, mise.lock and this file in one commit.
 #
 # The shape is pinned, not a TOML subset read loosely: comments, blanks, `[tools.<name>]` with
-# `version`, `mise` and `probe`, then `[tools.<name>.<platform>]` for linux-x64, linux-arm64 and
-# macos-arm64, each with `url` (a GitHub release asset, `https://github.com/<owner>/<repo>/
-# releases/download/<tag>/<asset>`: never api.github.com, which the sandbox's proxy refuses),
-# `sha256` (64 lowercase hex digits) and `bin`. Any other line fails `doctor`, `install-tools` and
-# every gate command.
+# `version`, `mise` and `probe` (and optionally `kind` and `prints`), then
+# `[tools.<name>.<platform>]` for linux-x64, linux-arm64 and macos-arm64, each with `url` (a GitHub
+# release asset, `https://github.com/<owner>/<repo>/releases/download/<tag>/<asset>`, a `+` written
+# `%2B`: never api.github.com, which the sandbox's proxy refuses; or Node's archive under
+# `https://nodejs.org/dist/`), `sha256` (64 lowercase hex digits) and `bin`. `kind` is absent (the
+# archive's one program is kept), `tree` (the whole archive is kept, for a program that needs its
+# siblings) or `npm` (a tool mise installs from its locked npm graph: no platform tables); `prints`
+# is the word the probe prints when it is not `version`; `only = "formal-verify"` marks a tool
+# the gate does not need, installed on request and optional in `doctor` (FORMAL-01). Any other
+# line fails `doctor`, `install-tools` and every gate command.
 
 # The gate runner (FND-01); equals JUST_VERSION in scripts/bootstrap-tools.sh.
 [tools.just]
@@ -244,3 +249,88 @@ bin = "ripgrep-15.2.0-aarch64-unknown-linux-gnu/rg"
 url = "https://github.com/BurntSushi/ripgrep/releases/download/15.2.0/ripgrep-15.2.0-aarch64-apple-darwin.tar.gz"
 sha256 = "3750b2e93f37e0c692657da574d7019a101c0084da05a790c83fd335bad973e4"
 bin = "ripgrep-15.2.0-aarch64-apple-darwin/rg"
+
+# The formal toolchain (FORMAL-01, ver §6): dev-time only. Node runs Quint; `kind = "tree"`
+# installs the whole archive (Node's npm and libraries, the JDK, Apalache's jar beside its script)
+# and puts the directory holding `bin` on the stages' PATH.
+[tools.node]
+version = "26.13.1"
+mise = "node"
+probe = ["node", "--version"]
+kind = "tree"
+
+[tools.node.linux-x64]
+url = "https://nodejs.org/dist/v26.13.1/node-v26.13.1-linux-x64.tar.gz"
+sha256 = "518674de2b621728a5e4486f5fb3b7d2900bb3cc4aa97969edaa463db99f9778"
+bin = "node-v26.13.1-linux-x64/bin/node"
+
+[tools.node.linux-arm64]
+url = "https://nodejs.org/dist/v26.13.1/node-v26.13.1-linux-arm64.tar.gz"
+sha256 = "80a330b35415382878df18d41afbd106ea89bfb3be0087d6608e289a14c5cc7d"
+bin = "node-v26.13.1-linux-arm64/bin/node"
+
+[tools.node.macos-arm64]
+url = "https://nodejs.org/dist/v26.13.1/node-v26.13.1-darwin-arm64.tar.gz"
+sha256 = "aec2514ea1ceb2ba52455e9ec65986f6749a06dd759e5db2a72e6889668c9735"
+bin = "node-v26.13.1-darwin-arm64/bin/node"
+
+# Quint, the `formal-*` stages' model checker front end. `kind = "npm"`: no per-platform asset;
+# mise installs its locked graph (.mise/locks/npm-informalsystems-quint/, every package's sha512)
+# and `install-tools` refuses it, naming `mise install --locked`, until XT-08 gives xtask an npm
+# install of its own.
+[tools.quint]
+version = "0.33.1"
+mise = "npm:@informalsystems/quint"
+probe = ["quint", "--version"]
+kind = "npm"
+
+# The Temurin JDK 21: runs Apalache (later the Java fixtures and the JVM helpers). mise names the
+# release `temurin-21.0.13+9.0.LTS`; `java --version` prints the build as `Temurin-21.0.13+9`,
+# which `prints` names for `doctor`. Only `formal-verify` needs it (`only`), so the bootstrap
+# installs it only with `--formal-verify`.
+[tools.jdk]
+version = "temurin-21.0.13+9.0.LTS"
+mise = "java"
+probe = ["java", "--version"]
+kind = "tree"
+only = "formal-verify"
+prints = "Temurin-21.0.13+9"
+
+[tools.jdk.linux-x64]
+url = "https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.13%2B9/OpenJDK21U-jdk_x64_linux_hotspot_21.0.13_9.tar.gz"
+sha256 = "d7f5d5cf865a2902b70ff549b97586a7d3f234e016f041ab447ea740c7d66d1c"
+bin = "jdk-21.0.13+9/bin/java"
+
+[tools.jdk.linux-arm64]
+url = "https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.13%2B9/OpenJDK21U-jdk_aarch64_linux_hotspot_21.0.13_9.tar.gz"
+sha256 = "e3522e707fc7dbe2a72c30746b1e7068301a0213ecd213d4491f35a14eb55578"
+bin = "jdk-21.0.13+9/bin/java"
+
+[tools.jdk.macos-arm64]
+url = "https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.13%2B9/OpenJDK21U-jdk_aarch64_mac_hotspot_21.0.13_9.tar.gz"
+sha256 = "bf036b35b071bfb2f54f2c0af8ee8d88afa95ee6eb3dce02c0f94cfc2524d04a"
+bin = "jdk-21.0.13+9/Contents/Home/bin/java"
+
+# Apalache, `formal-verify`'s bounded model checker: one platform-independent archive (a script
+# and its jar; runs on the JDK above). Like the JDK, only `formal-verify` needs it.
+[tools.apalache]
+version = "0.62.4"
+mise = "github:apalache-mc/apalache"
+probe = ["apalache-mc", "version"]
+kind = "tree"
+only = "formal-verify"
+
+[tools.apalache.linux-x64]
+url = "https://github.com/apalache-mc/apalache/releases/download/v0.62.4/apalache.tgz"
+sha256 = "8ac8488422c30d552735bae11b92a2d014d8e02e8608702acc08f9a2d8a9abb2"
+bin = "apalache/bin/apalache-mc"
+
+[tools.apalache.linux-arm64]
+url = "https://github.com/apalache-mc/apalache/releases/download/v0.62.4/apalache.tgz"
+sha256 = "8ac8488422c30d552735bae11b92a2d014d8e02e8608702acc08f9a2d8a9abb2"
+bin = "apalache/bin/apalache-mc"
+
+[tools.apalache.macos-arm64]
+url = "https://github.com/apalache-mc/apalache/releases/download/v0.62.4/apalache.tgz"
+sha256 = "8ac8488422c30d552735bae11b92a2d014d8e02e8608702acc08f9a2d8a9abb2"
+bin = "apalache/bin/apalache-mc"

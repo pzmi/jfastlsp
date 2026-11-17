@@ -660,6 +660,11 @@ and Quint, and the others the gate uses today until a card decides. Tool version
   `ARCH-gate-config` read only xtask. `CLAUDE.md`, `README.md`, `CONTRIBUTING.md`, fnd §8 and §9,
   `sdlc.md` and `required-checks.md` name `cargo xtask`; the report lists the hook and allow-list
   changes the orchestrator makes in `.claude/` (SessionStart, Stop, `Bash(just *)`, `Bash(mise *)`).
+- **Quint without mise (added by FORMAL-01, the review's W2):** `install-tools` installs Quint
+  (`kind = "npm"`) itself, from the locked graph in `.mise/locks/` (or its successor), with
+  lifecycle scripts disabled (`protobufjs` declares a `postinstall`), and a test shows Quint's
+  `typecheck`, `test` and `run` work without them; each job installs only the tools it runs, the
+  JDK and Apalache only in `formal.yml`, as `install_args` does now.
 - **Accept:**
   - [ ] every stage of the catalog frozen in XT-01 still runs in `cargo xtask check` and in CI (the catalog test passes)
   - [ ] no workflow, script or doc command table names `just` or `mise`
@@ -828,7 +833,7 @@ before LSP-04.
 
 #### FORMAL-01: Formal toolchain: Quint, Apalache, JDK pins, `MODELS`, formal stages
 - **Depends on:** FND-05. **Model:** standard. **Size:** M. **Parallel with:** EVAL-12, BENCH-04.
-- **Cites:** ver §6.1, §6.3; fnd §8, §9; ADR 0007, ADR 0030.
+- **Cites:** ver §6.1, §6.3; fnd §8, §9; ADR 0007, ADR 0035 (which superseded ADR 0030).
 - Node with Quint 0.33.1 (`npm:@informalsystems/quint`), Apalache 0.62.1 (checksum in
   `mise.lock`) and a Temurin JDK 21 pinned by mise (current releases re-checked); the `MODELS`
   registry as `formal/models.toml` (file, main module, steps budget), read by the recipes and by a
@@ -836,14 +841,48 @@ before LSP-04.
   `.qnt` fails) and `formal-test` (Quint tests; zero tests fails); `just formal-verify [model]`;
   `formal.yml` (weekly and dispatch, one job per registered model, a test keeps the matrix equal
   to the registry); the `formal` CI job; a trivial `formal/smoke.qnt`.
+- **Adapted 2026-11-17 (FORMAL-01), the card predating XT-01, XT-02 and ADR 0035:**
+  - **The gate runner is xtask.** `formal-typecheck` and `formal-test` are rows of xtask's stage
+    catalog (`tools/xtask/src/formal.rs`), stages of `check` after `script-tests` (fnd §9's
+    order), each with its one-line just delegation; `formal-verify [MODEL]` is an xtask command
+    and a recipe, not a stage. The frozen catalog test and ARCH-ci-lockstep's case that used
+    `formal-typecheck` as a non-stage name were updated; no stage was removed. The registry is
+    read by xtask in a pinned line shape and again with a TOML parser in
+    `crates/jfl-conformance/tests/models.rs`, which also checks `formal.yml`'s matrix.
+  - **Pins in both places.** mise.toml and mise.lock pin `node` 26.13.1, `npm:@informalsystems/
+    quint` 0.33.1 (its npm graph locked in `.mise/locks/`, digest in mise.lock), `github:apalache-
+    mc/apalache` 0.62.4 and `java` `temurin-21.0.13+9.0.LTS`; `tools/versions.toml` mirrors them
+    (`kind = "tree"` for the three archives, `kind = "npm"` for Quint, `prints` for the JDK) and
+    `doctor` checks all four. `install-tools` installs Node, the JDK and Apalache; Quint stays
+    mise's until XT-08. The shapes of `tool-config` and ARCH-gate-config admit exactly these
+    backends, Node's `nodejs.org/dist` archives, Temurin's `%2B` and the `.mise/locks/` files,
+    which are pinned in `.config/gate.sha256`.
+  - **Versions re-checked:** Apalache 0.62.4, not 0.62.1 (Quint 0.33.1's own pairing; 0.63.0 is
+    newer); Node 26.13.1 (Active LTS); Temurin 21.0.13+9.
+  - **ADR 0007 as amended needs Quint models and `proptest-state-machine` tests.** This card sets
+    up the Quint side only; the state-machine tests need no toolchain and arrive with the
+    components they test (ver §6.4).
+  - **Each job installs what it runs (review round 2, W1).** mise-action's `install_args` is
+    `--locked` followed by tool names from ARCH-ci-lockstep's `CI_TOOLS` (no flag, no bare
+    `--locked`, never the JDK or Apalache in ci.yml): the gate's eleven tools in every job, plus
+    Node and Quint in `formal`, which also runs `doctor` now (the only job with every tool
+    `doctor` requires); `formal.yml` installs just, Node, Quint, the JDK and Apalache. The
+    bootstrap installs the JDK and Apalache only with `--formal-verify`; `doctor` reports them
+    as optional (`only = "formal-verify"` in versions.toml), and `formal-verify` probes all four
+    at their pinned versions before it runs, in a fresh private scratch directory (W3).
+  - **What `just check` runs now:** fmt-check, architecture, clippy, nostd, docs, unit-tests,
+    integration-tests, doctests, script-tests, formal-typecheck, formal-test, deny, secrets,
+    workflows. `formal-verify` (Apalache, a JVM per model) is outside it: the `formal.yml`
+    workflow, weekly and by hand, one job per model; the `formal` job of ci.yml runs the two
+    stages.
 - **Reuse considered:** mise's npm, java and github backends for Node, Quint, the JDK and Apalache
   (replaces mayfly's `formal.rs` and `apalache.rs` downloads and digests); Quint's TypeScript
   backend, never a run-time download.
 - **Accept:**
-  - [ ] the stages are green with `smoke.qnt` and fail closed (with the install command) when Node or Quint is missing
-  - [ ] an unregistered `.qnt` fails `formal-typecheck`
-  - [ ] `just formal-verify smoke` passes locally with the pinned Apalache
-  - [ ] `just doctor` reports Node, Quint, Apalache and the JDK
+  - [x] the stages are green with `smoke.qnt` and fail closed (with the install command) when Node or Quint is missing
+  - [x] an unregistered `.qnt` fails `formal-typecheck`
+  - [x] `just formal-verify smoke` passes locally with the pinned Apalache
+  - [x] `just doctor` reports Node, Quint, Apalache and the JDK
 - **Impact:** none (tooling).
 
 #### FORMAL-02: Conformance harness: quint-connect drivers, committed-trace replay, negative controls

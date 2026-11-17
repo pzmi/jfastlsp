@@ -1,0 +1,59 @@
+# Apalache's bounded verification and a Quint simulation of every model of formal/models.toml
+# (FORMAL-01, ver §6.3, ADR 0007): one job per model, weekly and by hand. A JVM per model, so it is
+# outside `check` and `Required`; the `formal` job of ci.yml typechecks and tests the models on
+# every push. crates/jfl-conformance/tests/models.rs keeps the matrix equal to the registry. A red
+# run is reported to the owner and fixed as a task; its counterexample becomes a regression trace.
+name: Formal verification
+
+on:
+  schedule:
+    - cron: "41 4 * * 2"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: formal-${{ github.ref }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  verify:
+    name: Apalache (${{ matrix.model }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        model: [smoke]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: mise and the tools of mise.lock
+        uses: jdx/mise-action@236a21c3b91f5db6d4e174b348674a0f0caac06d # v5.2.9
+        with:
+          version: 2026.10.10
+          sha256: 7d79972e15549b286dcf9e25ef8c4fcef3d9fd7c0332d11cdfbc7d2842c418be # linux-x64
+          install_args: --locked just node npm:@informalsystems/quint java github:apalache-mc/apalache
+          cache_save: ${{ github.ref == 'refs/heads/main' }}
+          # mise.toml's [env] stays out of the gate's environment (ARCH-ci-lockstep).
+          env: false
+      - name: Rust toolchain of rust-toolchain.toml
+        run: rustup toolchain install
+      - name: Cargo cache
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          key: mise-${{ hashFiles('mise.lock') }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Verify the model
+        env:
+          MODEL: ${{ matrix.model }}
+        run: just formal-verify "$MODEL"

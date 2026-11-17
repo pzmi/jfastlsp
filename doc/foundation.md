@@ -387,8 +387,13 @@ it (an ancestor of the working directory, `CARGO_HOME`) a file passes only when 
 comment, a blank, a header of `[net]`, `[http]`, `[term]`, `[build]` or `[registries.crates-io]`,
 or a bare key that table allows with a plain value (`plain_config` in the preflight), so any other
 TOML form fails closed. mise is held the same way: `mise.toml` is only `[tools]`, each tool
-`just` or an `aqua:` or `github:` backend (a plugin backend's plugin is code) pinned by a plain
-version string, `mise.lock` holds only checksummed GitHub release assets, no other mise
+`just`, `node`, `java` or an `aqua:`, `github:` or scoped `npm:` backend (a plugin backend's
+plugin is code) pinned by a plain version string, `mise.lock` holds only checksummed GitHub
+release assets, Node's archives from `nodejs.org/dist` and an npm tool's locked graph, whose
+directory `.mise/locks/npm-<name>/<version>/` holds exactly mise's one-dependency `package.json`
+(no `scripts`) and an `aube-lock.yaml` whose every package is an exact version with a `sha512`
+integrity, never a tarball, git or file source (FORMAL-01; mise checks the lock's digest in
+`mise.lock` before it installs, and refused a tampered one in the sandbox), no other mise
 configuration file inside the repository may load (`mise config ls`, failing closed when mise
 cannot read its configuration), and the stages run the pinned tools from their install
 directories (xtask's tool cache first, then `mise bin-paths`; XT-02, §8) rather than through shims, so no mise `[env]` reaches a tool
@@ -444,7 +449,8 @@ catalog and their dependencies, the justfile's top-level lines, the xtask compos
 manifest and every file of `tools/xtask/src`, with the launcher `scripts/xtask.sh`; XT-01), the scripts the stages run (every `scripts/test-*.sh`, which
 `script-tests` runs by glob, included), the policies a stage reads by path
 (`.github/zizmor.yml`, `deny.toml`) and the tool pins (`mise.toml`, whose new tool would land on
-the stages' PATH, `mise.lock` and `tools/versions.toml`, XT-02) are hashed in `.config/gate.sha256` (FND-09 added all but the
+the stages' PATH, `mise.lock` and `tools/versions.toml`, XT-02, and every file under `.mise/`,
+FORMAL-01) are hashed in `.config/gate.sha256` (FND-09 added all but the
 recipes and scripts),
 and `.config/nextest.toml` keeps its allowlisted keys (no `default-filter`, no `[scripts]`,
 `retries = 0`). A pin moves only with its line in that file, in the same commit, which review
@@ -732,7 +738,8 @@ There is no event store (ADR 0008). What persists:
    `~/.local/bin`, a no-op when already present; then `mise install --locked` once `mise.toml`
    exists and xtask's `tool-config` (`scripts/xtask.sh`, which needs cargo and the pinned Rust
    toolchain) has passed the tool configuration, never trusting
-   the repository for mise (FND-09, §3.6). The SessionStart hook runs it in cloud sessions; a cloud environment's setup script may
+   the repository for mise (FND-09, §3.6). The JDK and Apalache, which only `just formal-verify`
+   needs, are installed only with `bash scripts/bootstrap-tools.sh --formal-verify` (FORMAL-01). The SessionStart hook runs it in cloud sessions; a cloud environment's setup script may
    call it too (`bash scripts/bootstrap-tools.sh`). Verified in the cloud sandbox on 2026-11-16:
    GitHub release downloads (`github.com/<owner>/<repo>/releases/download/…`) and the static
    crates.io files pass the network proxy, while `api.github.com`, GitHub pages and
@@ -755,8 +762,12 @@ There is no event store (ADR 0008). What persists:
    cargo-mutants; `cargo:` only for a tool with no prebuilt release (release-plz if so,
    cargo-fuzz); `github:` for adrs, which has no aqua entry but ships dist release archives
    (`mise.lock` records each archive's URL and the SHA-256 of the release's `sha256.sum`; mise
-   installs it with `--locked` in the sandbox, where the GitHub API is refused); `pipx:` for diff-cover; `npm:@informalsystems/quint` (with Node); `java` for a
-   Temurin JDK; `github:`/`ubi:` for Apalache. Entries arrive with the stage that needs them,
+   installs it with `--locked` in the sandbox, where the GitHub API is refused); `pipx:` for diff-cover; `npm:@informalsystems/quint`
+   with mise's core `node` (FORMAL-01: mise.lock's `aube` entry and `.mise/locks/` lock Quint's
+   whole npm graph, 79 packages each with its `sha512`, and mise checks the lock's digest before
+   it installs; `mise lock` worked in the sandbox for all four formal tools on 2026-11-17); mise's
+   core `java` for the Temurin JDK (the release asset on GitHub, checksummed); `github:` for
+   Apalache (one platform-independent `apalache.tgz`). Entries arrive with the stage that needs them,
    each with a comment naming it: just and cargo-nextest (FND-01), cargo-deny (FND-02), adrs
    (FND-03), gitleaks, actionlint, shellcheck, zizmor, pinact (FND-04), cargo-llvm-cov,
    diff-cover, cargo-mutants (FND-06), hyperfine and ripgrep (BENCH-02; `rg` is the floor arm, so
@@ -768,13 +779,26 @@ There is no event store (ADR 0008). What persists:
    cargo-llvm-cov 0.9.1, diff-cover 11.0.2, cargo-mutants 27.1.0, gitleaks 8.30.1, actionlint
    1.7.12, zizmor 1.32.0, pinact 5.0.2, adrs 0.13.0, Quint 0.33.1, Apalache 0.62.1 (Quint 0.33.x
    is validated against it, not 0.63.0), cargo-fuzz 0.13.2, dist 0.34.0, release-plz 0.4.3.
+   Re-checked by FORMAL-01 on 2026-11-17 and pinned: Node 26.13.1 (the Active LTS line),
+   Quint 0.33.1 (still the latest), Apalache 0.62.4 (Quint 0.33.1's own
+   `DEFAULT_APALACHE_VERSION_TAG`; 0.63.0 is newer), Temurin JDK 21.0.13+9 (mise's
+   `temurin-21.0.13+9.0.LTS`).
 3. **`tools/versions.toml` and xtask** (XT-02, ADR 0035): every tool `mise.toml` pins, with its
    version, the `mise.toml` key it stands for, the command that prints its version, and per
    platform of ADR 0006 the release asset's URL, its SHA-256 and the program's path in the
    archive (mise.lock's URL and checksum). The file has a pinned line shape (`tools/xtask/src/
    versions.rs`): a URL is a GitHub release asset (`https://github.com/<owner>/<repo>/releases/
-   download/<tag>/<asset>`), never `api.github.com`, so every download xtask makes passes the
-   sandbox's proxy. `just install-tools [TOOL...]` (`bash scripts/xtask.sh install-tools`)
+   download/<tag>/<asset>`, a `+` written `%2B`) or Node's archive under
+   `https://nodejs.org/dist/` (FORMAL-01), never `api.github.com`, so every download xtask makes
+   passes the sandbox's proxy. A tool's optional `kind` is `tree` (the whole archive is kept and
+   the directory holding its program goes on PATH: Node, the JDK, Apalache) or `npm` (no
+   platform asset: Quint, which `install-tools` refuses, naming `mise install --locked`, until
+   XT-08); `prints` names the word the probe prints when it is not the version (the JDK's
+   `Temurin-21.0.13+9`); `only = "formal-verify"` (the JDK, Apalache) makes a tool optional in
+   `doctor`, which reports it as `absent` without failing, and `formal-verify` probes it at its
+   pinned version before it runs. In CI each job's mise-action names the tools it installs
+   (`install_args`, held by ARCH-ci-lockstep to `--locked` and tools of `CI_TOOLS`); only
+   `formal.yml` installs the JDK and Apalache. `just install-tools [TOOL...]` (`bash scripts/xtask.sh install-tools`)
    downloads each asset with `curl --proto =https` (from `/usr/bin:/bin`, as `tar`), checks its
    SHA-256 in process and refuses a mismatch, installing nothing, then moves the one program into
    `$XDG_CACHE_HOME/jfastlsp/tools/<tool>/<version>/<platform>/bin` (else `~/.cache/...`; a cache
@@ -791,8 +815,12 @@ There is no event store (ADR 0008). What persists:
 4. **Fail closed.** A recipe whose tool is missing fails with the install hint (`install-tools`,
    or `mise install --locked`). A stage is
    never reported as skipped-but-green. When local and CI disagree, run `just doctor` first.
-5. Quint runs from mise's pinned npm package and never downloads an evaluator at run time;
-   Apalache's archive is verified against its checksum in `mise.lock`.
+5. Quint runs from mise's pinned npm package and never downloads an evaluator at run time: the
+   formal stages pass `--backend typescript`, since Quint's default `rust` backend fetches its
+   evaluator from GitHub on first use, and `formal-verify` runs Apalache directly on Quint's JSON
+   IR rather than through `quint verify`, which downloads Apalache unless told otherwise and talks
+   to it over a TCP port. Apalache's archive is verified against its checksum in `mise.lock`.
+   Node and the JDK are development-time only: `jfl` never needs them (FORMAL-01).
 6. A version bump is its own commit, with the gate green. In CI, `jdx/mise-action` (pinned by
    SHA) installs from `mise.lock`.
 
@@ -810,7 +838,7 @@ needs one becomes a recipe parameter (`just conformance seed=42`).
 
 | Command | What it does | Task |
 |:--|:--|:--|
-| `bash scripts/bootstrap-tools.sh` | install the pinned mise and just (checksum-verified), then `mise install --locked` | BOOT-02 |
+| `bash scripts/bootstrap-tools.sh [--formal-verify]` | install the pinned mise and just (checksum-verified), then `mise install --locked` of every tool but the JDK and Apalache, which `--formal-verify` adds | BOOT-02, FORMAL-01 |
 | `mise install --locked` | install every pinned tool from `mise.lock` | FND-01 |
 | `just quick` | fmt-check, architecture (from FND-07), clippy, unit tests, script tests: the inner loop | FND-02 |
 | `just check` | the full blocking gate: every stage, in order, stopping at none silently | FND-02 |
@@ -832,7 +860,7 @@ needs one becomes a recipe parameter (`just conformance seed=42`).
 | `just bench-corpus` | fetch the pinned corpus of `doc/bench-corpus.md` into the cache directory | BENCH-01 |
 | `just bench [suite] [corpus=small]` | the benchmark suites with machine facts, JSON results; reports, never gates | BENCH-02 |
 | `just bench-gate` | compare a run with the history of the same runner class; `bench.yml` only | BENCH-04 |
-| `just formal-typecheck`, `just formal-test`, `just formal-verify [model]` | Quint typecheck and tests; Apalache bounded verification | FORMAL-01 |
+| `just formal-typecheck`, `just formal-test`, `just formal-verify [model]` | the stages `formal-typecheck` (every model of `formal/models.toml` typechecks; an unregistered `formal/**/*.qnt` fails) and `formal-test` (each model's Quint tests on the TypeScript backend; a model without a test fails); `formal-verify` (`bash scripts/xtask.sh formal-verify [MODEL]`) is Apalache's bounded verification of `allInvariants` for the model's `steps` plus a 1000-sample Quint simulation, outside `check` (a JVM per model; `formal.yml`, weekly and by hand). Every one fails closed, naming `mise install --locked`, when Node or Quint (or Java or Apalache) is missing | FORMAL-01 |
 | `just conformance [model] [seed] [traces] [steps]` | `quint-connect` runs plus committed-trace replay | FORMAL-02 |
 | `just java-fixtures` | compile the golden Java corpus with the pinned JDK | EVAL-07 |
 | `cargo run --locked -p jfl-eval -- <subcommand>` | the evaluation harness (E0 adapter, reports, E1, E3, E4) | EVAL-01 |

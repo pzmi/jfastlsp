@@ -12,11 +12,13 @@
 //!   named in a pinned recipe or a top-level line must be pinned;
 //! - **`.config/nextest.toml`**: only the keys of [`nextest_shape`] (no `default-filter`, no
 //!   `[scripts]`, `retries` 0, overrides that set a test group and nothing else);
-//! - **`mise.toml`**: only `[tools]`, each tool `just` or an `aqua:` or `github:` backend (no
-//!   plugin backend, whose plugin is code) pinned by a plain version string (no `[env]`,
+//! - **`mise.toml`**: only `[tools]`, each tool `just`, `node`, `java` or an `aqua:`, `github:`
+//!   or scoped `npm:` backend (no plugin backend, whose plugin is code; FORMAL-01) pinned by a
+//!   plain version string (no `[env]`,
 //!   `[tasks]`, `[hooks]` or settings), and no other mise configuration file anywhere in the tree;
 //! - **`mise.lock`**: [`mise_lock_shape`], one entry per tool of `mise.toml` and nothing else,
-//!   each platform a checksummed GitHub release asset (FND-09);
+//!   each platform a checksummed GitHub release asset or Node archive (FND-09, FORMAL-01), an npm
+//!   tool's graph in `.mise/locks/` named with its digest; every file under `.mise/` is pinned;
 //! - **the implicit configuration of the gate's tools** (FND-09): the root's dot-entries and
 //!   `mise*` entries, `.github/`'s entries and `.config/`'s entries are allowlists
 //!   ([`ROOT_ALLOWED`], [`GITHUB_ALLOWED`], [`CONFIG_ALLOWED`]; xtask's `tool-config`,
@@ -71,8 +73,8 @@ pub const MISE_LOCK: &str = "mise.lock";
 /// guards a session (`scripts/land.sh`, `scripts/dco-check.sh`, the SessionStart and Stop hooks;
 /// the FND-09 review's G5), the launcher that builds and runs xtask (`scripts/xtask.sh`,
 /// XT-01) and xtask's tool pins (`tools/versions.toml`, whose URLs and digests `install-tools`
-/// trusts and whose tools lead the stages' PATH; XT-02). Every `scripts/test-*.sh` and every xtask composition source ([`XTASK_SOURCES`]) is
-/// pinned too, found by [`gate_files`]. Not pinned, each for its reason (fnd §3.6):
+/// trusts and whose tools lead the stages' PATH; XT-02). Every `scripts/test-*.sh`, every xtask composition source ([`XTASK_SOURCES`]) and
+/// every file under [`MISE_LOCKS`] is pinned too, found by [`gate_files`]. Not pinned, each for its reason (fnd §3.6):
 /// `architecture.toml` and the `clippy.toml` files change with every new crate and are held to
 /// their schema by the architecture test itself (`ARCH-policy-schema`, `ARCH-clippy-lists`);
 /// this checker's own sources are code under its meta-test (`tests/rules.rs`, one negative case
@@ -100,11 +102,15 @@ pub const GATE_FILES: [&str; 16] = [
 /// stage catalog, each stage's command, the preflight and the tool configuration check), pinned
 /// whole by [`gate_files`]; its tests are code under review, like this checker's.
 pub const XTASK_SOURCES: (&str, &str) = ("tools/xtask/Cargo.toml", "tools/xtask/src");
+/// mise's lock directories of npm tools (FORMAL-01): each tool's `package.json` and
+/// `aube-lock.yaml`, the dependency graph `mise install --locked` installs (mise.lock names its
+/// digest), pinned whole by [`gate_files`] like the other tool pins.
+pub const MISE_LOCKS: &str = ".mise";
 /// The entries allowed at the root among the names that start with a dot or with `mise`
 /// (tools/xtask/src/tool_config.rs holds the same list): `.shellcheckrc`, `.tool-versions`,
 /// `.mise.toml`, `mise.local.toml`, `.pinact.yaml`, `.yamllint`, `.envrc` and the like are
 /// refused, since a tool of the gate would read them without a command line naming them.
-pub const ROOT_ALLOWED: [&str; 14] = [
+pub const ROOT_ALLOWED: [&str; 15] = [
     ".DS_Store",
     ".claude",
     ".config",
@@ -115,6 +121,7 @@ pub const ROOT_ALLOWED: [&str; 14] = [
     ".gitignore",
     ".gitleaks.toml",
     ".idea",
+    ".mise",
     ".vscode",
     ".work",
     "mise.lock",
@@ -311,6 +318,7 @@ pub fn gate_files(tree: &dyn Tree) -> Vec<String> {
     let mut files: BTreeSet<String> = GATE_FILES.iter().map(|f| (*f).to_owned()).collect();
     files.insert(XTASK_SOURCES.0.to_owned());
     files.extend(tree.files_under(XTASK_SOURCES.1));
+    files.extend(tree.files_under(MISE_LOCKS));
     for path in tree.files_under("scripts") {
         let name = path.strip_prefix("scripts/").unwrap_or_default();
         if name.starts_with("test-") && name.ends_with(".sh") && !name.contains('/') {
@@ -614,8 +622,10 @@ fn nextest_profile(name: &str, body: &Value) -> Vec<String> {
     problems
 }
 
-/// A tool key mise.toml and mise.lock may hold: `just`, `aqua:<owner>/<repo>[/<name>]` or
-/// `github:<owner>/<repo>`: the backends that install a checksummed release asset, never a
+/// A tool key mise.toml and mise.lock may hold: `just`, `node`, `java` (mise's core backends,
+/// which download a checksummed archive of Node or Temurin), `aqua:<owner>/<repo>[/<name>]`,
+/// `github:<owner>/<repo>` (the backends that install a checksummed release asset) or
+/// `npm:@<scope>/<name>` (an npm package whose whole graph mise.lock locks; FORMAL-01), never a
 /// plugin backend (asdf, vfox), whose plugin is code that mise runs.
 pub fn allowed_tool(key: &str) -> bool {
     let word = |w: &str| {
@@ -623,8 +633,15 @@ pub fn allowed_tool(key: &str) -> bool {
             && w.chars()
                 .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
     };
-    if key == "just" {
+    if matches!(key, "just" | "node" | "java") {
         return true;
+    }
+    if let Some(rest) = key.strip_prefix("npm:@") {
+        let parts: Vec<&str> = rest.split('/').collect();
+        return parts.len() == 2
+            && parts
+                .iter()
+                .all(|p| word(p) && !p.chars().any(|c| c.is_ascii_uppercase()));
     }
     if let Some(rest) = key.strip_prefix("aqua:") {
         let parts: Vec<&str> = rest.split('/').collect();
@@ -648,9 +665,11 @@ fn plain_version(value: &Value) -> bool {
 
 /// `mise.lock`'s allowlisted shape, against `mise.toml`'s tools: `lockfile_version = 3` and one
 /// `[[tools.<key>]]` per tool of `mise.toml`, each with exactly `version`, `backend` (an allowed
-/// tool key), `specifiers` and per-platform tables of linux-x64, linux-arm64 or macos-arm64 that
-/// hold a `sha256:` checksum, a `https://github.com/` url, a `https://api.github.com/repos/`
-/// url_api and optionally `provenance = "github-attestations"`.
+/// tool key; `core:node` and `core:java` for `node` and `java`), `specifiers`, for an npm tool
+/// `aube` (its lock directory `.mise/locks/npm-<name>/<version>` and a `sha256:` digest), and
+/// per-platform tables of linux-x64, linux-arm64 or macos-arm64 that hold a `sha256:` checksum, a
+/// `https://github.com/` url (`%2B` allowed for a `+`) or a `https://nodejs.org/dist/` one, a
+/// `https://api.github.com/repos/` url_api and optionally `provenance = "github-attestations"`.
 pub fn mise_lock_shape(mise: &str, lock: &str) -> Vec<Finding> {
     let table = match parse(MISE_LOCK, lock) {
         Ok(table) => table,
@@ -674,7 +693,7 @@ pub fn mise_lock_shape(mise: &str, lock: &str) -> Vec<Finding> {
     for (tool, entries) in &locked {
         if !allowed_tool(tool) {
             problems.push(format!(
-                "tool `{tool}` is not `just`, an aqua or a github backend"
+                "tool `{tool}` is not `just`, `node`, `java`, an aqua, a github or a scoped npm backend"
             ));
         }
         let Some(entries) = entries.as_array().filter(|a| a.len() == 1) else {
@@ -696,7 +715,11 @@ pub fn mise_lock_shape(mise: &str, lock: &str) -> Vec<Finding> {
             for (field, v) in entry {
                 let ok = match field.as_str() {
                     "version" => plain_version(v),
-                    "backend" => v.as_str().is_some_and(|b| b != "just" && allowed_tool(b)),
+                    "backend" => v.as_str().is_some_and(|b| match tool.as_str() {
+                        "node" | "java" => b == format!("core:{tool}"),
+                        _ => !matches!(b, "just" | "node" | "java") && allowed_tool(b),
+                    }),
+                    "aube" => tool.starts_with("npm:") && aube_entry(v),
                     "specifiers" => v.as_array().is_some_and(|a| a.iter().all(plain_version)),
                     "platforms.linux-x64" | "platforms.linux-arm64" | "platforms.macos-arm64" => {
                         lock_platform(v)
@@ -704,7 +727,7 @@ pub fn mise_lock_shape(mise: &str, lock: &str) -> Vec<Finding> {
                     _ => false,
                 };
                 if !ok {
-                    problems.push(format!("`tools.{tool}.{field}` is not allowed with that value (a checksummed GitHub release asset of an aqua or github tool)"));
+                    problems.push(format!("`tools.{tool}.{field}` is not allowed with that value (a checksummed GitHub release asset or Node archive, an npm tool's locked graph)"));
                 }
             }
         }
@@ -733,10 +756,66 @@ pub fn mise_lock_shape(mise: &str, lock: &str) -> Vec<Finding> {
         .collect()
 }
 
+/// A lowercase `sha256:` digest of 64 hex digits.
+fn sha256_digest(value: &Value) -> bool {
+    value.as_str().is_some_and(|c| {
+        c.strip_prefix("sha256:").is_some_and(|h| {
+            h.len() == 64
+                && h.chars()
+                    .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase())
+        })
+    })
+}
+
+/// An npm tool's `aube` entry: exactly its lock directory under `.mise/locks/` and its digest.
+fn aube_entry(value: &Value) -> bool {
+    let plain = |s: &str| {
+        !s.is_empty()
+            && s.chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '+' | '-'))
+    };
+    value.as_table().is_some_and(|t| {
+        t.len() == 2
+            && t.get("digest").is_some_and(sha256_digest)
+            && t.get("path").and_then(Value::as_str).is_some_and(|p| {
+                p.strip_prefix(".mise/locks/npm-")
+                    .and_then(|rest| rest.split_once('/'))
+                    .is_some_and(|(name, version)| {
+                        plain(name)
+                            && plain(version)
+                            && version.starts_with(|c: char| c.is_ascii_digit())
+                    })
+            })
+    })
+}
+
+/// Node's release archive for a platform of ADR 0006, as mise's core node backend downloads it.
+fn node_url(url: &str) -> bool {
+    let Some(rest) = url.strip_prefix("https://nodejs.org/dist/v") else {
+        return false;
+    };
+    let Some((version, file)) = rest.split_once('/') else {
+        return false;
+    };
+    let semver = |v: &str| {
+        let parts: Vec<&str> = v.split('.').collect();
+        parts.len() == 3
+            && parts
+                .iter()
+                .all(|p| !p.is_empty() && p.chars().all(|c| c.is_ascii_digit()))
+    };
+    semver(version)
+        && ["linux-x64", "linux-arm64", "darwin-arm64"]
+            .iter()
+            .flat_map(|p| [".tar.gz", ".tar.xz"].map(|ext| format!("node-v{version}-{p}{ext}")))
+            .any(|name| name == file)
+}
+
 fn lock_platform(value: &Value) -> bool {
     let url = |v: &Value, prefix: &str| {
         v.as_str().is_some_and(|u| {
             u.strip_prefix(prefix).is_some_and(|rest| {
+                let rest = rest.replace("%2B", "+");
                 !rest.is_empty()
                     && rest.chars().all(|c| {
                         c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '/' | '+' | '-')
@@ -747,14 +826,8 @@ fn lock_platform(value: &Value) -> bool {
     value.as_table().is_some_and(|t| {
         t.get("checksum").is_some()
             && t.iter().all(|(k, v)| match k.as_str() {
-                "checksum" => v.as_str().is_some_and(|c| {
-                    c.strip_prefix("sha256:").is_some_and(|h| {
-                        h.len() == 64
-                            && h.chars()
-                                .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase())
-                    })
-                }),
-                "url" => url(v, "https://github.com/"),
+                "checksum" => sha256_digest(v),
+                "url" => url(v, "https://github.com/") || v.as_str().is_some_and(node_url),
                 "url_api" => url(v, "https://api.github.com/repos/"),
                 "provenance" => v.as_str() == Some("github-attestations"),
                 _ => false,
@@ -784,7 +857,7 @@ pub fn mise_shape(text: &str) -> Vec<Finding> {
                 findings.push(Finding::new(
                     RULE,
                     MISE,
-                    format!("tool `{tool}` is not `just`, an aqua or a github backend (a plugin backend runs its plugin's code)"),
+                    format!("tool `{tool}` is not `just`, `node`, `java`, an aqua, a github or a scoped npm backend (a plugin backend runs its plugin's code)"),
                 ));
             }
             if !plain_version(version) {

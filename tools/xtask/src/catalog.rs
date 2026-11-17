@@ -10,6 +10,7 @@
 
 use std::fmt::Write as _;
 
+use crate::formal;
 use crate::process::{Call, Stage};
 use crate::stages;
 
@@ -153,6 +154,16 @@ pub(crate) fn rows() -> Vec<Row> {
         row(
             Stage::in_process("script-tests", stages::SCRIPT_TESTS, stages::script_tests),
             true,
+        ),
+        // Every Quint model of the MODELS registry typechecks, and none is unregistered (FORMAL-01).
+        row(
+            Stage::in_process("formal-typecheck", formal::TYPECHECK, formal::typecheck),
+            false,
+        ),
+        // Every model's Quint tests pass, on the TypeScript backend; a model without one fails.
+        row(
+            Stage::in_process("formal-test", formal::TEST, formal::test),
+            false,
         ),
         // Advisories, licences, sources and bans (fnd §2.5, §7.4).
         row(

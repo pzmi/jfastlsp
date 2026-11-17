@@ -347,3 +347,105 @@ fn should_refuse_doctor_and_install_when_versions_toml_leaves_its_shape() -> Tes
     }
     Ok(())
 }
+
+#[test]
+fn should_install_the_whole_archive_when_the_tool_is_a_tree() -> TestResult {
+    // given: `kind = "tree"` and a program that reads a file beside it, as Node, the JDK and
+    // Apalache do (FORMAL-01), so the archive's one program alone would not run
+    let world = World::new("tree", None)?;
+    let top = world.dir.join("tree-archive/faketool-1.2.3");
+    fs::create_dir_all(top.join("share"))?;
+    fs::write(top.join("share/version"), "1.2.3\n")?;
+    fs::create_dir_all(top.join("bin"))?;
+    fs::write(
+        top.join("bin/faketool"),
+        "#!/bin/sh\necho \"faketool $(cat \"$(dirname \"$0\")/../share/version\")\"\n",
+    )?;
+    chmod_x(&top.join("bin/faketool"))?;
+    let archive = world.archives.join("faketool.tar.gz");
+    let tar = Command::new("tar")
+        .arg("-czf")
+        .arg(&archive)
+        .arg("-C")
+        .arg(world.dir.join("tree-archive"))
+        .arg("faketool-1.2.3")
+        .output()?;
+    assert!(tar.status.success(), "{}", printed(&tar));
+    let sha = Sha256::digest(fs::read(&archive)?)
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect::<String>();
+    let versions = world.repo.join("tools/versions.toml");
+    let text = fs::read_to_string(&versions)?;
+    let old = text
+        .split("sha256 = \"")
+        .nth(1)
+        .and_then(|rest| rest.get(..64))
+        .ok_or("no sha256 in versions.toml")?
+        .to_owned();
+    let text = text
+        .replace(&old, &sha)
+        .replace(
+            "bin = \"faketool-1.2.3/faketool\"",
+            "bin = \"faketool-1.2.3/bin/faketool\"",
+        )
+        .replace(
+            "probe = [\"faketool\", \"--version\"]\n",
+            "probe = [\"faketool\", \"--version\"]\nkind = \"tree\"\n",
+        );
+    fs::write(&versions, text)?;
+    let lock = world.repo.join("mise.lock");
+    fs::write(&lock, fs::read_to_string(&lock)?.replace(&old, &sha))?;
+
+    // when
+    let installed = world.install()?;
+    let doctor = world.xtask(&["doctor"])?;
+
+    // then
+    assert!(installed.status.success(), "{}", printed(&installed));
+    let program = world
+        .cache
+        .join("jfastlsp/tools/faketool/1.2.3")
+        .join(HOST)
+        .join("tree/faketool-1.2.3/bin/faketool");
+    assert!(program.is_file());
+    let text = printed(&doctor);
+    assert!(doctor.status.success(), "{text}");
+    assert!(
+        text.contains(&format!("ok      faketool 1.2.3 ({})", program.display())),
+        "{text}"
+    );
+    Ok(())
+}
+
+#[test]
+fn should_report_a_tool_as_optional_and_pass_doctor_when_only_one_command_needs_it() -> TestResult {
+    // given: `only = "formal-verify"`, as the JDK and Apalache carry (FORMAL-01), and the tool
+    // absent from both install paths; then another version in mise's install directory
+    let world = World::new("optional", None)?;
+    let versions = world.repo.join("tools/versions.toml");
+    let text = fs::read_to_string(&versions)?.replacen(
+        "probe = [\"faketool\", \"--version\"]\n",
+        "probe = [\"faketool\", \"--version\"]\nonly = \"formal-verify\"\n",
+        1,
+    );
+    fs::write(&versions, text)?;
+
+    // when
+    let absent = world.xtask(&["doctor"])?;
+    program(&world.mise_bins.join("faketool"), "9.9.9")?;
+    let wrong = world.xtask(&["doctor"])?;
+
+    // then
+    for output in [&absent, &wrong] {
+        let text = printed(output);
+        assert!(output.status.success(), "{text}");
+        assert!(
+            text.contains("absent  faketool 1.2.3 (optional: only `formal-verify` needs it"),
+            "{text}"
+        );
+        assert!(text.contains("--formal-verify"), "{text}");
+    }
+    assert!(printed(&wrong).contains("says 'faketool 9.9.9'"));
+    Ok(())
+}

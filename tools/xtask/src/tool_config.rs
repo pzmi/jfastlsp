@@ -9,13 +9,21 @@
 //! preflight of every gate command. XT-01 ported it from `scripts/tool-config-check.sh` (bash and
 //! awk), keeping its patterns. Every check is an allowlist or a pinned shape (fnd §3):
 //!
-//! - ROOT/mise.toml: only `[tools]`, each key `just` or a quoted `aqua:<owner>/<repo>[/<name>]`
-//!   or `github:<owner>/<repo>` (the backends that install a checksummed release asset; no plugin
-//!   backend, whose plugin is code), each value a plain version string;
+//! - ROOT/mise.toml: only `[tools]`, each key `just`, `node`, `java` or a quoted
+//!   `aqua:<owner>/<repo>[/<name>]`, `github:<owner>/<repo>` or `npm:@<scope>/<name>` (the
+//!   backends that install a checksummed release asset, or an npm package whose whole graph is
+//!   locked; no plugin backend, whose plugin is code), each value a plain version string;
 //! - ROOT/mise.lock: only `lockfile_version = 3`, `[[tools.<key>]]` with `version`, `backend`
-//!   (aqua or github) and `specifiers`, and per-platform tables of linux-x64, linux-arm64 or
-//!   macos-arm64 with a `sha256:` checksum, a `https://github.com/` url, a
-//!   `https://api.github.com/repos/` url_api and an optional `github-attestations` provenance;
+//!   (aqua, github, `core:node`, `core:java` or a scoped npm package), `specifiers` and an npm
+//!   tool's `aube` (its lock directory under `.mise/locks/` and the digest mise checks before it
+//!   installs), and per-platform tables of linux-x64, linux-arm64 or macos-arm64 with a `sha256:`
+//!   checksum, a `https://github.com/` url (a `+` written `%2B` allowed: Temurin's tags) or a
+//!   `https://nodejs.org/dist/` archive of Node, a `https://api.github.com/repos/` url_api and an
+//!   optional `github-attestations` provenance (FORMAL-01);
+//! - ROOT/.mise holds only `locks/npm-<name>/<version>/` with exactly `package.json` (mise's own
+//!   one-dependency manifest, no `scripts`) and `aube-lock.yaml` (the npm graph: every package
+//!   pinned by version and `sha512` integrity, never a tarball URL, a git or a file source); mise
+//!   reads a `.mise/config.toml` or `.mise/conf.d/`, which this refuses (FORMAL-01);
 //! - no cargo configuration file (`.cargo/config`, `.cargo/config.toml`, in any letter case) at any
 //!   depth of ROOT, and no toolchain file but ROOT/rust-toolchain.toml, which holds only
 //!   `[toolchain]` with plain `channel`, `profile`, `components` and `targets` (a `path` swaps the
@@ -37,7 +45,7 @@ use regex::Regex;
 
 /// The entries allowed at the root among the dot-names and the mise names. A new one is added
 /// here, in the commit that needs it, with ARCH-gate-config's `ROOT_ALLOWED`.
-pub(crate) const ROOT_ALLOWED: [&str; 14] = [
+pub(crate) const ROOT_ALLOWED: [&str; 15] = [
     ".claude",
     ".config",
     ".DS_Store",
@@ -48,6 +56,7 @@ pub(crate) const ROOT_ALLOWED: [&str; 14] = [
     ".gitignore",
     ".gitleaks.toml",
     ".idea",
+    ".mise",
     ".vscode",
     ".work",
     "mise.lock",
@@ -68,14 +77,22 @@ pub(crate) const GITHUB_ALLOWED: [&str; 7] = [
 /// The entries allowed under `.config/` (ARCH-gate-config's `CONFIG_ALLOWED`).
 pub(crate) const CONFIG_ALLOWED: [&str; 2] = ["gate.sha256", "nextest.toml"];
 
-/// A tool key of mise.toml or mise.lock: `just`, or a quoted aqua or github identifier.
-const KEY: &str = r#"(just|"aqua:[A-Za-z0-9._-]+/[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)?"|"github:[A-Za-z0-9._-]+/[A-Za-z0-9._-]+")"#;
+/// A tool key of mise.toml or mise.lock: `just`, `node`, `java`, or a quoted aqua, github or
+/// scoped npm identifier.
+const KEY: &str = r#"(just|node|java|"aqua:[A-Za-z0-9._-]+/[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)?"|"github:[A-Za-z0-9._-]+/[A-Za-z0-9._-]+"|"npm:@[a-z0-9._-]+/[a-z0-9._-]+")"#;
 /// A plain version string.
 const VERSION: &str = r#""[A-Za-z0-9._+-]+""#;
 /// The end of an accepted line: spaces and an optional comment.
 const TAIL: &str = r"[[:space:]]*(#.*)?$";
 /// A line that is blank or a comment.
 const BLANK: &str = r"^[[:space:]]*(#.*)?$";
+/// Node's release archive for a platform of ADR 0006 (`nodejs.org/dist`, which mise's core node
+/// backend downloads; FORMAL-01).
+const NODE_URL: &str = r"https://nodejs\.org/dist/v[0-9]+\.[0-9]+\.[0-9]+/node-v[0-9]+\.[0-9]+\.[0-9]+-(linux-x64|linux-arm64|darwin-arm64)\.tar\.(gz|xz)";
+/// An npm package name, scoped or not.
+const NPM_NAME: &str = r"(@[a-z0-9._-]+/)?[a-z0-9._-]+";
+/// An exact npm version.
+const NPM_VERSION: &str = r"[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.]+)?";
 
 /// Every refusal for the tree at `root`, one message each, empty when the tree passes.
 pub(crate) fn check(root: &Path) -> Vec<String> {
@@ -145,10 +162,161 @@ pub(crate) fn check(root: &Path) -> Vec<String> {
     shaped(
         &root.join("mise.lock"),
         mise_lock_shape,
-        "outside the shape (checksummed GitHub release assets of aqua or github tools only)",
+        "outside the shape (checksummed GitHub release assets of aqua or github tools, Node's archives, and locked npm graphs only)",
         &mut refused,
     );
+    mise_locks(root, &mut refused);
     refused
+}
+
+/// `ROOT/.mise`, when it exists: only `locks/npm-<name>/<version>/` holding exactly
+/// `package.json` and `aube-lock.yaml`, each a regular file in its shape. Anything else (a
+/// `config.toml`, a `conf.d/`, a symlink, a third file) is refused, since mise reads
+/// configuration from `.mise/` and installs an npm tool from its lock directory.
+fn mise_locks(root: &Path, refused: &mut Vec<String>) {
+    let dir = root.join(".mise");
+    let Ok(meta) = std::fs::symlink_metadata(&dir) else {
+        return;
+    };
+    let bad = |refused: &mut Vec<String>, path: &Path, why: &str| {
+        refused.push(format!("{}: {why}", path.display()));
+    };
+    if !meta.is_dir() {
+        bad(refused, &dir, "not a directory");
+        return;
+    }
+    let (Some(npm), Some(version)) = (
+        regex(r"^npm-[a-z0-9._-]+$"),
+        regex(r"^[0-9][A-Za-z0-9._+-]*$"),
+    ) else {
+        bad(refused, &dir, "(the shape's patterns do not compile)");
+        return;
+    };
+    for name in entries(&dir) {
+        if name != "locks" {
+            bad(
+                refused,
+                &dir.join(&name),
+                "not an allowed entry of .mise/ (only locks/)",
+            );
+        }
+    }
+    let locks = dir.join("locks");
+    for tool in entries(&locks) {
+        let tool_dir = locks.join(&tool);
+        if !npm.is_match(&tool) || !is_real_dir(&tool_dir) {
+            bad(
+                refused,
+                &tool_dir,
+                "not an npm-<name> directory of .mise/locks/",
+            );
+            continue;
+        }
+        for ver in entries(&tool_dir) {
+            let ver_dir = tool_dir.join(&ver);
+            if !version.is_match(&ver) || !is_real_dir(&ver_dir) {
+                bad(
+                    refused,
+                    &ver_dir,
+                    "not a <version> directory of .mise/locks/npm-<name>/",
+                );
+                continue;
+            }
+            for file in entries(&ver_dir) {
+                if file != "package.json" && file != "aube-lock.yaml" {
+                    bad(
+                        refused,
+                        &ver_dir.join(&file),
+                        "not package.json or aube-lock.yaml (an npm lock directory holds those two)",
+                    );
+                }
+            }
+            shaped(
+                &ver_dir.join("package.json"),
+                npm_manifest_shape,
+                "outside the shape (mise's manifest: one exact dependency, no scripts)",
+                refused,
+            );
+            shaped(
+                &ver_dir.join("aube-lock.yaml"),
+                aube_lock_shape,
+                "outside the shape (packages by exact version and sha512 integrity only)",
+                refused,
+            );
+        }
+    }
+}
+
+fn is_real_dir(path: &Path) -> bool {
+    std::fs::symlink_metadata(path).is_ok_and(|m| m.is_dir())
+}
+
+/// `<number>: <line>` of the first line of `text` outside the `package.json` mise writes for an
+/// npm tool: its fixed name, `private`, and one dependency at an exact version, nothing else (no
+/// `scripts`, no other source).
+pub(crate) fn npm_manifest_shape(text: &str) -> Option<String> {
+    let Some(dependency) = regex(&format!(r#"^    "{NPM_NAME}": "{NPM_VERSION}"$"#)) else {
+        return Some("0: (the shape's patterns do not compile)".to_owned());
+    };
+    let fixed = [
+        "{",
+        r#"  "name": "mise-npm-install","#,
+        r#"  "private": true,"#,
+        r#"  "dependencies": {"#,
+        "",
+        "  }",
+        "}",
+    ];
+    let body: Vec<(usize, &str)> = numbered(text).collect();
+    if body.len() != fixed.len() {
+        let (number, line) = body.last().copied().unwrap_or((0, ""));
+        return Some(format!(
+            "{number}: {line} (not the 7 lines of mise's manifest)"
+        ));
+    }
+    for (&(number, line), want) in body.iter().zip(fixed) {
+        let ok = if want.is_empty() {
+            dependency.is_match(line)
+        } else {
+            line == want
+        };
+        if !ok {
+            return Some(format!("{number}: {line}"));
+        }
+    }
+    None
+}
+
+/// `<number>: <line>` of the first line of `text` outside the shape of an `aube-lock.yaml` (pnpm's
+/// lockfile 9.0 as mise writes it): the settings, the importer's dependencies, and per package its
+/// `resolution: {integrity: sha512-...}`, `engines` and `hasBin`, and its snapshot's exact
+/// dependencies. A `tarball`, `directory`, `git` or `file:` source is outside it, so every
+/// package comes from the registry by version and is checked against its integrity.
+pub(crate) fn aube_lock_shape(text: &str) -> Option<String> {
+    let name = format!("('{NPM_NAME}'|{NPM_NAME})");
+    let package = format!("('{NPM_NAME}@{NPM_VERSION}'|{NPM_NAME}@{NPM_VERSION})");
+    let patterns = [
+        r"^$".to_owned(),
+        r"^lockfileVersion: '9\.0'$".to_owned(),
+        r"^(settings|importers|packages|snapshots):$".to_owned(),
+        r"^  (autoInstallPeers|excludeLinksFromLockfile): (true|false)$".to_owned(),
+        r"^  \.:$".to_owned(),
+        r"^    (dependencies|optionalDependencies):$".to_owned(),
+        format!(r"^      {name}:$"),
+        format!(r"^        (specifier|version): {NPM_VERSION}$"),
+        format!(r"^  {package}:( \{{\}})?$"),
+        r"^    resolution: \{integrity: sha512-[A-Za-z0-9+/]+={0,2}\}$".to_owned(),
+        r"^    engines: \{node: [^{}]*\}$".to_owned(),
+        r"^    hasBin: true$".to_owned(),
+        format!(r"^      {name}: {NPM_VERSION}$"),
+    ];
+    let compiled: Vec<Regex> = patterns.iter().filter_map(|p| regex(p)).collect();
+    if compiled.len() != patterns.len() {
+        return Some("0: (the shape's patterns do not compile)".to_owned());
+    }
+    numbered(text)
+        .find(|(_, line)| !compiled.iter().any(|r| r.is_match(line)))
+        .map(|(number, line)| format!("{number}: {line}"))
 }
 
 /// Checks `file` against `shape` when it exists: a symlink or a non-file is refused outright; a
@@ -308,7 +476,7 @@ pub(crate) fn mise_toml_shape(text: &str) -> Option<String> {
 
 /// `<number>: <line>` (or the reason) of the first line of `text` outside mise.lock's shape.
 pub(crate) fn mise_lock_shape(text: &str) -> Option<String> {
-    let backend = r"(aqua:[A-Za-z0-9._-]+/[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)?|github:[A-Za-z0-9._-]+/[A-Za-z0-9._-]+)";
+    let backend = r"(aqua:[A-Za-z0-9._-]+/[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)?|github:[A-Za-z0-9._-]+/[A-Za-z0-9._-]+|core:node|core:java|npm:@[a-z0-9._-]+/[a-z0-9._-]+)";
     let patterns = [
         BLANK.to_owned(),
         format!("^lockfile_version = 3{TAIL}"),
@@ -318,9 +486,12 @@ pub(crate) fn mise_lock_shape(text: &str) -> Option<String> {
         format!(r#"^backend = "{backend}"{TAIL}"#),
         format!(r"^specifiers = \[{VERSION}\]{TAIL}"),
         format!(r#"^checksum = "sha256:[0-9a-f]+"{TAIL}"#),
-        format!(r#"^url = "https://github\.com/[A-Za-z0-9._/+-]+"{TAIL}"#),
+        format!(r#"^url = "(https://github\.com/([A-Za-z0-9._/+-]|%2B)+|{NODE_URL})"{TAIL}"#),
         format!(r#"^url_api = "https://api\.github\.com/repos/[A-Za-z0-9._/+-]+"{TAIL}"#),
         format!(r#"^provenance = "github-attestations"{TAIL}"#),
+        format!(
+            r#"^aube = \{{ path = "\.mise/locks/npm-[a-z0-9._-]+/[0-9][A-Za-z0-9._+-]*", digest = "sha256:[0-9a-f]{{64}}" \}}{TAIL}"#
+        ),
     ];
     let compiled: Vec<Regex> = patterns.iter().filter_map(|p| regex(p)).collect();
     let [
@@ -335,6 +506,7 @@ pub(crate) fn mise_lock_shape(text: &str) -> Option<String> {
         url,
         url_api,
         provenance,
+        aube,
     ] = compiled.as_slice()
     else {
         return Some("0: (the shape's patterns do not compile)".to_owned());
@@ -371,7 +543,10 @@ pub(crate) fn mise_lock_shape(text: &str) -> Option<String> {
         }
         let ok = match table {
             Table::Tool => {
-                version.is_match(line) || backend.is_match(line) || specifiers.is_match(line)
+                version.is_match(line)
+                    || backend.is_match(line)
+                    || specifiers.is_match(line)
+                    || aube.is_match(line)
             }
             Table::Platform => {
                 // awk's `length($3) == 73`: the quoted `sha256:` and 64 hex digits, no more.
@@ -447,6 +622,147 @@ mod tests {
 
         // then
         assert_eq!(found.as_deref(), Some("2: checksum = \"sha256:0123\""));
+    }
+
+    #[test]
+    fn should_accept_the_repository_s_npm_lock_when_its_files_are_read() {
+        // given
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let mut refused = Vec::new();
+
+        // when
+        mise_locks(&root, &mut refused);
+
+        // then
+        assert_eq!(refused, Vec::<String>::new());
+        assert!(root.join(".mise/locks").is_dir());
+    }
+
+    #[test]
+    fn should_refuse_a_lock_line_when_it_leaves_the_formal_tools_shapes() {
+        // given: each line outside mise.lock's shape (the first two inside it, as controls)
+        let head = "[[tools.node]]\nversion = \"26.13.1\"\n\n[tools.node.\"platforms.linux-x64\"]\nchecksum = \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"\n";
+        let lines = [
+            (
+                "url = \"https://nodejs.org/dist/v26.13.1/node-v26.13.1-linux-x64.tar.gz\"",
+                true,
+            ),
+            (
+                "url = \"https://github.com/a/b/releases/download/jdk-21%2B9/x.tar.gz\"",
+                true,
+            ),
+            (
+                "url = \"https://nodejs.org/dist/v26.13.1/../x.tar.gz\"",
+                false,
+            ),
+            (
+                "url = \"https://nodejs.org.evil.example/dist/v1.0.0/node-v1.0.0-linux-x64.tar.gz\"",
+                false,
+            ),
+            (
+                "url = \"https://github.com/a/b/releases/download/x%2Fy/z\"",
+                false,
+            ),
+            (
+                "url = \"https://registry.npmjs.org/x/-/x-1.0.0.tgz\"",
+                false,
+            ),
+        ];
+
+        // when
+        let found: Vec<bool> = lines
+            .iter()
+            .map(|(line, _)| mise_lock_shape(&format!("{head}{line}\n")).is_none())
+            .collect();
+
+        // then
+        let expected: Vec<bool> = lines.iter().map(|(_, ok)| *ok).collect();
+        assert_eq!(found, expected);
+        let aube = "[[tools.\"npm:@o/q\"]]\nversion = \"1.0.0\"\naube = { path = \".mise/locks/npm-o-q/1.0.0\", digest = \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\" }\nbackend = \"npm:@o/q\"\n";
+        assert_eq!(mise_lock_shape(aube), None);
+        let elsewhere = aube.replace(".mise/locks/", "../elsewhere/");
+        assert!(mise_lock_shape(&elsewhere).is_some_and(|l| l.starts_with("3: aube")));
+        let up = aube.replace("npm-o-q/1.0.0", "npm-o-q/..");
+        assert!(mise_lock_shape(&up).is_some_and(|l| l.starts_with("3: aube")));
+        assert_eq!(
+            mise_toml_shape("[tools]\nnode = \"1\"\n\"npm:@o/q\" = \"1.0.0\"\n"),
+            None
+        );
+        assert!(mise_toml_shape("[tools]\n\"npm:left-pad\" = \"1.0.0\"\n").is_some());
+    }
+
+    #[test]
+    fn should_refuse_an_npm_manifest_when_it_carries_scripts() {
+        // given
+        let manifest = "{\n  \"name\": \"mise-npm-install\",\n  \"private\": true,\n  \"dependencies\": {\n    \"@o/q\": \"1.0.0\"\n  }\n}\n";
+        let scripted = manifest.replace(
+            "  \"private\": true,\n",
+            "  \"private\": true,\n  \"scripts\": { \"preinstall\": \"x\" },\n",
+        );
+        let ranged = manifest.replace("\"1.0.0\"", "\"^1.0.0\"");
+
+        // when
+        let found = (
+            npm_manifest_shape(manifest),
+            npm_manifest_shape(&scripted),
+            npm_manifest_shape(&ranged),
+        );
+
+        // then
+        assert_eq!(found.0, None);
+        assert!(found.1.is_some(), "{found:?}");
+        assert_eq!(found.2.as_deref(), Some("5:     \"@o/q\": \"^1.0.0\""));
+    }
+
+    #[test]
+    fn should_refuse_an_aube_lock_line_when_a_package_has_another_source() {
+        // given: a package resolved from a tarball URL, from git, and from a file
+        let lock = "lockfileVersion: '9.0'\n\npackages:\n\n  x@1.0.0:\n    resolution: {integrity: sha512-AAAA==}\n";
+        let others = [
+            "    resolution: {tarball: https://evil.example/x.tgz}",
+            "    resolution: {type: git, repo: https://evil.example/x, commit: abc}",
+            "    resolution: {directory: ../x, type: directory}",
+            "      x: file:../x",
+        ];
+
+        // when
+        let found: Vec<Option<String>> = others
+            .iter()
+            .map(|line| aube_lock_shape(&format!("{lock}{line}\n")))
+            .collect();
+
+        // then
+        assert_eq!(aube_lock_shape(lock), None);
+        for (line, refusal) in others.iter().zip(&found) {
+            assert_eq!(refusal.as_deref(), Some(format!("7: {line}").as_str()));
+        }
+    }
+
+    #[test]
+    fn should_refuse_mise_s_configuration_when_it_is_put_under_dot_mise() {
+        // given: a scratch tree with a .mise/config.toml and a third file in a lock directory
+        let root = std::env::temp_dir().join(format!("xtask-mise-locks-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let lock = root.join(".mise/locks/npm-o-q/1.0.0");
+        let _ = std::fs::create_dir_all(&lock);
+        let _ = std::fs::write(root.join(".mise/config.toml"), "[env]\n");
+        let _ = std::fs::write(lock.join("extra.js"), "");
+        let mut refused = Vec::new();
+
+        // when
+        mise_locks(&root, &mut refused);
+        let _ = std::fs::remove_dir_all(&root);
+
+        // then
+        let all = refused.join("\n");
+        assert!(
+            all.contains(".mise/config.toml: not an allowed entry"),
+            "{all}"
+        );
+        assert!(
+            all.contains("extra.js: not package.json or aube-lock.yaml"),
+            "{all}"
+        );
     }
 
     #[test]

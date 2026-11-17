@@ -143,19 +143,20 @@ fn should_fail_lockstep_when_a_stage_runs_in_no_job() -> TestResult {
 
 #[test]
 fn should_fail_lockstep_when_a_check_only_argument_is_not_a_stage() -> TestResult {
-    // given
+    // given: a name no stage will ever have (`formal-typecheck`, the name used here before, became
+    // a stage in FORMAL-01)
     let mut files = baseline()?;
     edit(
         &mut files.workflow,
         "just check-only architecture deny",
-        "just check-only architecture deny formal-typecheck",
+        "just check-only architecture deny no-such-stage",
     )?;
 
     // when
     let found = findings(&files);
 
     // then
-    assert_reported(&found, WORKFLOW, "`formal-typecheck` to check-only");
+    assert_reported(&found, WORKFLOW, "`no-such-stage` to check-only");
     Ok(())
 }
 
@@ -251,7 +252,7 @@ fn should_fail_lockstep_when_a_run_is_not_a_single_just_command() -> TestResult 
         assert!(
             found.iter().any(|f| f.rule == RULE
                 && f.at == WORKFLOW
-                && f.message.contains("job `static`")
+                && f.message.contains("job `formal`")
                 && f.message
                     .contains("must be exactly one line `just <recipe> [args]`")),
             "{probe}: {found:?}"
@@ -306,9 +307,31 @@ fn should_fail_lockstep_when_an_action_or_its_input_is_not_allowed() -> TestResu
             "input `env` must be `false`",
         ),
         (
-            "          install_args: --locked\n",
-            "          install_args: just\n",
-            "input `install_args` must be `--locked`",
+            "          install_args: --locked just ",
+            "          install_args: just ",
+            "input `install_args` must start with `--locked`",
+        ),
+        // FORMAL-01: install_args names allowlisted tools only, never a flag, never the JVM
+        // tools (formal.yml's alone), never nothing (a bare `--locked` installs every tool).
+        (
+            "          install_args: --locked just ",
+            "          install_args: --locked aqua:someone/anything just ",
+            "names `aqua:someone/anything`, which is not a tool of ci.rs's CI_TOOLS",
+        ),
+        (
+            "          install_args: --locked just ",
+            "          install_args: --locked --yes just ",
+            "names `--yes`, which is not a tool of ci.rs's CI_TOOLS",
+        ),
+        (
+            "          install_args: --locked just ",
+            "          install_args: --locked java just ",
+            "names `java`, which is not a tool of ci.rs's CI_TOOLS",
+        ),
+        (
+            "          install_args: --locked just ",
+            "          install_args: --locked just just ",
+            "names `just` twice",
         ),
         (
             "          persist-credentials: false\n",
@@ -762,4 +785,27 @@ fn should_read_each_just_command_when_a_script_chains_them() {
 
     // then
     assert_eq!(invocations, vec!["check-only a b", "dco", "doctor"]);
+}
+
+#[test]
+fn should_refuse_install_args_when_it_names_no_tool_or_leaves_its_shape() {
+    // given: a bare `--locked` (every tool of mise.toml, the JDK and Apalache included), a double
+    // space, and the controls: the gate's tools, and the formal job's Node and Quint on top
+    let cases = [
+        ("--locked", false),
+        ("--locked  just", false),
+        ("--locked just aqua:rhysd/actionlint", true),
+        ("--locked just node npm:@informalsystems/quint", true),
+        ("--locked github:apalache-mc/apalache", false),
+    ];
+
+    // when
+    let accepted: Vec<bool> = cases
+        .iter()
+        .map(|(value, _)| jfl_architecture::ci::install_args_problem(value).is_none())
+        .collect();
+
+    // then
+    let expected: Vec<bool> = cases.iter().map(|(_, ok)| *ok).collect();
+    assert_eq!(accepted, expected);
 }

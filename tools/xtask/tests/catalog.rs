@@ -4,6 +4,8 @@
 //! A stage added later adds its row here in the commit that adds it; a stage is never dropped
 //! (ADR 0035, the XT lane's rule "nothing stops running") except by the owner's order:
 //! `private-names` was removed on 2026-11-17 (FND-11). XT-08 reruns this test after just goes.
+//! Added since: `formal-typecheck` and `formal-test` (FORMAL-01), after `script-tests` (fnd §9's
+//! order).
 
 use std::error::Error;
 use std::process::{Command, Output};
@@ -11,8 +13,8 @@ use std::process::{Command, Output};
 type TestResult = Result<(), Box<dyn Error>>;
 
 /// The justfile's `check_stages` before XT-01 (commit 201a4cc), word for word, less the
-/// `private-names` stage the owner had removed (FND-11).
-const CHECK_STAGES: &str = "fmt-check architecture clippy nostd docs unit-tests integration-tests doctests script-tests deny secrets workflows";
+/// `private-names` stage the owner had removed (FND-11), plus the stages added since (FORMAL-01).
+const CHECK_STAGES: &str = "fmt-check architecture clippy nostd docs unit-tests integration-tests doctests script-tests formal-typecheck formal-test deny secrets workflows";
 
 /// The justfile's `quick_stages` before XT-01, word for word.
 const QUICK_STAGES: &str = "fmt-check architecture clippy unit-tests script-tests";
@@ -30,6 +32,8 @@ const FROZEN: &str = r#"[
   {"id": "integration-tests", "command": "cargo nextest run --workspace --locked --retries 0 --no-tests fail --test *", "quick": false, "check": true},
   {"id": "doctests", "command": "cargo test --workspace --locked --doc", "quick": false, "check": true},
   {"id": "script-tests", "command": "bash scripts/test-*.sh, each in name order", "quick": true, "check": true},
+  {"id": "formal-typecheck", "command": "quint typecheck <each model of formal/models.toml> (an unregistered formal/**/*.qnt fails)", "quick": false, "check": true},
+  {"id": "formal-test", "command": "quint test --backend typescript --main <main> <each model of formal/models.toml> (a model without a test fails)", "quick": false, "check": true},
   {"id": "deny", "command": "cargo deny --locked check", "quick": false, "check": true},
   {"id": "secrets", "command": "bash scripts/secrets-check.sh", "quick": false, "check": true},
   {"id": "workflows", "command": "bash scripts/workflows-check.sh workflows, then bash scripts/workflows-check.sh shell", "quick": false, "check": true}

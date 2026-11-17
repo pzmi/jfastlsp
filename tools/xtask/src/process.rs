@@ -48,6 +48,8 @@ pub(crate) struct Call {
     pub(crate) env: Vec<(String, String)>,
     /// Stderr text that fails the call even when it exits 0, with the message printed then.
     pub(crate) deny_stderr: Option<(&'static str, &'static str)>,
+    /// The working directory, when not the current one (Apalache writes beside where it runs).
+    pub(crate) dir: Option<PathBuf>,
 }
 
 /// What every stage of one run shares: the repository root (where the gate's own scripts are) and
@@ -70,7 +72,43 @@ impl Call {
             args: args.iter().map(|a| (*a).to_owned()).collect(),
             env: Vec::new(),
             deny_stderr: None,
+            dir: None,
         }
+    }
+
+    /// Runs the call in `dir`.
+    #[must_use]
+    pub(crate) fn in_dir(mut self, dir: &Path) -> Self {
+        self.dir = Some(dir.to_path_buf());
+        self
+    }
+
+    /// The command with its arguments, the context's environment and the call's directory.
+    fn command(&self, context: &Context) -> Command {
+        let mut command = Command::new(&self.program);
+        command.args(&self.args);
+        for name in &context.removed {
+            command.env_remove(name);
+        }
+        if let Some(path) = &context.path {
+            command.env("PATH", path);
+        }
+        command.envs(self.env.iter().map(|(k, v)| (k, v)));
+        if let Some(dir) = &self.dir {
+            command.current_dir(dir);
+        }
+        command
+    }
+
+    /// Runs the call and returns its exit code (1 when it ended by a signal) with its stdout,
+    /// which is not echoed; stderr streams through. `Err` when it could not start.
+    pub(crate) fn output(&self, context: &Context) -> Result<(i32, Vec<u8>), String> {
+        let mut command = self.command(context);
+        command.stdin(Stdio::null()).stderr(Stdio::inherit());
+        let output = command
+            .output()
+            .map_err(|err| format!("xtask: cannot run {}: {err}", self.program))?;
+        Ok((output.status.code().unwrap_or(1), output.stdout))
     }
 
     /// Sets a variable for this child only.
@@ -91,15 +129,7 @@ impl Call {
     /// Runs the call in the current directory and returns its exit code (1 when it could not
     /// start or ended by a signal).
     pub(crate) fn run(&self, context: &Context) -> i32 {
-        let mut command = Command::new(&self.program);
-        command.args(&self.args);
-        for name in &context.removed {
-            command.env_remove(name);
-        }
-        if let Some(path) = &context.path {
-            command.env("PATH", path);
-        }
-        command.envs(self.env.iter().map(|(k, v)| (k, v)));
+        let mut command = self.command(context);
         let Some((needle, message)) = self.deny_stderr else {
             return match command.status() {
                 Ok(status) => status.code().unwrap_or(1),

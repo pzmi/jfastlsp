@@ -97,7 +97,11 @@ fn should_pin_the_assets_of_mise_lock_when_versions_toml_is_read_with_a_toml_par
     let mise = mise_keys(&read("mise.toml")?);
 
     // then: every tool, platform, version, URL and SHA-256 the same, and nothing extra
-    assert_eq!(pins.len(), 33, "11 tools on 3 platforms");
+    assert_eq!(
+        pins.len(),
+        42,
+        "14 tools on 3 platforms, and Quint, an npm tool, on none"
+    );
     assert_eq!(pins, lock);
     assert_eq!(keys, mise);
     Ok(())

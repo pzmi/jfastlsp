@@ -4,9 +4,12 @@ The CI result that must be green on `main` is the `Required` job (id `required`)
 [`.github/workflows/ci.yml`](../.github/workflows/ci.yml). It is an aggregate: it runs
 `if: always()`, needs every other job of the workflow, and fails unless every one of them ended in
 `success`, so a job cannot drop out of the gate by failing, being cancelled or being skipped
-(fnd §7.2). Each job installs the pinned tools (mise at the version `scripts/bootstrap-tools.sh`
-pins, checksum-verified, then `mise install --locked`; the toolchain of `rust-toolchain.toml`) and
-runs `just` recipes, so the same recipes run on a laptop with `just check`.
+(fnd §7.2). Each job installs the pinned tools it runs (mise at the version
+`scripts/bootstrap-tools.sh` pins, checksum-verified, then `mise install --locked` of the tools
+mise-action's `install_args` names: the gate's tools, plus Node and Quint in the `formal` job,
+which also runs `doctor` since it holds every tool `doctor` requires; the toolchain of
+`rust-toolchain.toml`) and runs `just` recipes, so the same recipes run on a laptop with `just
+check`. The JDK and Apalache are installed only by `formal.yml` (FORMAL-01).
 
 `ci.yml` runs on every push to `main`, on pull requests (outside contributors and Dependabot) and
 by hand (`workflow_dispatch`). Integration is direct on `main` (ADR 0002), so the run that matters
@@ -33,10 +36,11 @@ without a row, a row without a job, or any difference fails the `architecture` s
 | Job id | Display name | Runner | Runs (`just ...`) |
 |:--|:--|:--|:--|
 | `architecture` | Architecture and policy | `ubuntu-24.04` | `check-only architecture deny` |
-| `static` | Static quality | `ubuntu-24.04` | `doctor`, then `check-only fmt-check clippy nostd docs` |
+| `static` | Static quality | `ubuntu-24.04` | `check-only fmt-check clippy nostd docs` |
 | `tests` | Tests (Linux x86-64) | `ubuntu-24.04` | `check-only unit-tests integration-tests doctests script-tests` |
 | `linux-arm` | Linux (arm64) | `ubuntu-24.04-arm` | `platform-tests` |
 | `macos` | macOS (arm64) | `macos-15` | `platform-tests` |
+| `formal` | Formal models (Quint) | `ubuntu-24.04` | `doctor`, then `check-only formal-typecheck formal-test` |
 | `security` | Security | `ubuntu-24.04` | `check-only secrets workflows`, then `workflows-verify` |
 | `dco` | DCO | `ubuntu-24.04` | `dco-event` over the commits the event brought (a push's before..after; a pull request's base..head; the commit itself on a manual run; a push from the all-zero commit or a force-push fails) |
 | `required` | Required | `ubuntu-24.04` | the aggregate of every other job's result |
@@ -52,7 +56,9 @@ word or `"$VAR"` of the step's own `env:` (so no `||`, `&&`, `&`, `;`, `set`, re
 to `$GITHUB_ENV` or `$GITHUB_PATH` can appear), except `required`'s one step, which must equal the
 text in `ci.rs` byte for byte; every `uses:` is actions/checkout, jdx/mise-action or
 Swatinem/rust-cache with only the inputs `ci.rs` lists (mise-action with `env: false`, so mise's
-`[env]` never reaches the gate); and it fails on an `if:` anywhere but `required`, on
+`[env]` never reaches the gate, and an `install_args` of `--locked` followed by distinct tools of
+`CI_TOOLS`, never a flag, the JDK or Apalache, nor a bare `--locked`, which installs every tool);
+and it fails on an `if:` anywhere but `required`, on
 `continue-on-error`, on a `working-directory`, on a shell other than `bash`, on a job with
 `container:` or `services:`, on a `just` command whose first word is not a recipe of the justfile
 (a variable override such as `cargo=true`, or a flag), on an allowed action that omits a required
@@ -81,7 +87,7 @@ to `required`'s `needs` in one commit.
 | Job id | Display name | Runs | Arrives with |
 |:--|:--|:--|:--|
 | `coverage` | Coverage | `check-only coverage changed-lines`, then `just mutants-diff` (full history; diff base `git merge-base HEAD origin/main`, 20-minute cap) | FND-06 |
-| `formal` | Formal models (Quint) | `check-only formal-typecheck formal-test formal-freshness conformance-replay` | FORMAL-01, FORMAL-02 |
+| `formal` (its other stages) | Formal models (Quint) | `check-only formal-typecheck formal-test formal-freshness conformance-replay`: FORMAL-01 added the job with the first two | FORMAL-02 |
 | `fixtures` | Java fixtures | `check-only java-fixtures` (pinned JDK) | EVAL-07 |
 | `e2e` | End to end | `check-only e2e-tests lsp-conformance` | IDX-13, LSP-01 |
 
@@ -95,11 +101,11 @@ Not in `required`:
 | `codeql.yml` | push to `main`, pull request, weekly, dispatch | CodeQL for Rust and Actions (`build-mode: none`), results in code scanning |
 | `scorecard.yml` | push to `main`, weekly, dispatch | OpenSSF Scorecard, SARIF to code scanning, results published |
 | `.github/dependabot.yml` | weekly | cargo and github-actions, minor and patch grouped, a 7-day cooldown |
+| `formal.yml` | weekly, dispatch | `just formal-verify <model>`, one job per model of `formal/models.toml` (Apalache's bounded verification and a Quint simulation; a JVM per model, so outside `check`); `crates/jfl-conformance/tests/models.rs` keeps the matrix equal to the registry (FORMAL-01) |
 
 Planned: `bench.yml` (the corpus suites on one fixed runner class, history upload, and its
 `bench-gate` job, which blocks `main` from LSP-06, the M1 gate (ADR 0034): red there is fixed like red CI; it is kept out
-of `ci.yml` because wall times are comparable only on one runner class, fnd §9), `formal.yml`
-(Apalache, weekly and by hand), `fuzz.yml` (nightly), `mutation.yml` (weekly), `release.yml`
+of `ci.yml` because wall times are comparable only on one runner class, fnd §9), `fuzz.yml` (nightly), `mutation.yml` (weekly), `release.yml`
 (tags). A red run of any of them is reported to the owner and fixed as a task (fnd §7.1).
 
 ## When a check goes red

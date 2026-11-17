@@ -17,7 +17,10 @@
 //!   redirections and writes to `$GITHUB_ENV` or `$GITHUB_PATH` cannot appear); the aggregate's
 //!   one step differing from [`AGGREGATE_ENV`] and [`AGGREGATE_RUN`];
 //! - a `uses:` outside [`ALLOWED_ACTIONS`], or an input of it outside its list (mise-action's
-//!   `mise_toml` or `env: true` could export variables the `env:` check never sees);
+//!   `mise_toml` or `env: true` could export variables the `env:` check never sees); a
+//!   mise-action `install_args` that is not `--locked` followed by distinct tools of
+//!   [`CI_TOOLS`] (FORMAL-01: each job installs what it runs, and the JVM tools only in
+//!   `formal.yml`);
 //! - a `working-directory` on a step, a job's or the workflow's defaults;
 //! - a shell other than `bash`, or a workflow whose `defaults.run.shell` is not `bash` (only an
 //!   explicit `bash` runs with `-o pipefail`);
@@ -130,7 +133,7 @@ pub const ALLOWED_ACTIONS: [(&str, &[Input]); 3] = [
         &[
             ("version", None),
             ("sha256", None),
-            ("install_args", Some("--locked")),
+            ("install_args", None),
             ("cache_save", Some("${{ github.ref == 'refs/heads/main' }}")),
             ("env", Some("false")),
         ],
@@ -145,11 +148,62 @@ pub const ALLOWED_ACTIONS: [(&str, &[Input]); 3] = [
 ];
 
 /// Inputs an allowed action must set: mise-action's `env` defaults to true, which would export
-/// mise.toml's `[env]`; checkout's `persist-credentials` defaults to true.
-pub const REQUIRED_INPUTS: [(&str, &str); 2] = [
+/// mise.toml's `[env]`; checkout's `persist-credentials` defaults to true; without
+/// `install_args`, mise-action installs every tool of mise.toml without `--locked`.
+pub const REQUIRED_INPUTS: [(&str, &str); 3] = [
     ("jdx/mise-action@", "env"),
+    ("jdx/mise-action@", "install_args"),
     ("actions/checkout@", "persist-credentials"),
 ];
+
+/// The mise.toml tools a job of `ci.yml` may install, by name after `--locked` in mise-action's
+/// `install_args` (FORMAL-01): the gate's tools, and Node and Quint for the `formal` job. The
+/// JDK and Apalache are absent on purpose: only `formal.yml` installs them (about 400 MB a job),
+/// so a bare `--locked`, which would install every tool, is refused too.
+pub const CI_TOOLS: [&str; 13] = [
+    "just",
+    "aqua:nextest-rs/nextest/cargo-nextest",
+    "aqua:EmbarkStudios/cargo-deny",
+    "github:joshrotenberg/adrs",
+    "aqua:gitleaks/gitleaks",
+    "aqua:rhysd/actionlint",
+    "aqua:zizmorcore/zizmor",
+    "aqua:suzuki-shunsuke/pinact",
+    "aqua:koalaman/shellcheck",
+    "aqua:sharkdp/hyperfine",
+    "aqua:BurntSushi/ripgrep",
+    "node",
+    "npm:@informalsystems/quint",
+];
+
+/// The problem with a mise-action `install_args`, if any: it must be `--locked` and then one or
+/// more distinct tools of [`CI_TOOLS`], separated by single spaces (no other flag).
+pub fn install_args_problem(value: &str) -> Option<String> {
+    let mut words = value.split(' ');
+    if words.next() != Some("--locked") {
+        return Some(format!(
+            "input `install_args` must start with `--locked`, not `{value}`"
+        ));
+    }
+    let mut seen: Vec<&str> = Vec::new();
+    for word in words {
+        if !CI_TOOLS.contains(&word) {
+            return Some(format!(
+                "input `install_args` names `{word}`, which is not a tool of ci.rs's CI_TOOLS (no flag, no JDK or Apalache in ci.yml)"
+            ));
+        }
+        if seen.contains(&word) {
+            return Some(format!("input `install_args` names `{word}` twice"));
+        }
+        seen.push(word);
+    }
+    if seen.is_empty() {
+        return Some(
+            "input `install_args` must name the tools the job installs after `--locked` (a bare `--locked` installs every tool, the JDK and Apalache included)".to_owned(),
+        );
+    }
+    None
+}
 
 /// `ci.yml`'s `on:`, exactly (FND-08): every push to `main` runs, with no path or branch filter,
 /// and every pull request and manual dispatch, unfiltered.
@@ -600,6 +654,9 @@ fn check_action(uses: &str, with: Option<&Value>) -> Vec<String> {
         return problems;
     };
     problems.extend(entries(map).filter_map(|(key, value)| {
+        if uses.starts_with("jdx/mise-action@") && key == "install_args" {
+            return install_args_problem(&value).map(|p| format!("`{uses}` {p}"));
+        }
         match inputs.iter().find(|(k, _)| *k == key) {
             Some((_, None)) => None,
             Some((_, Some(only))) if *only == value => None,

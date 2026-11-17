@@ -62,3 +62,17 @@ Every component with a Quint driver (IDX-09, IDX-12, LSP-04) also gets a state-m
 any other stateful component (the javac worker pool, the summary and library stores, the frame
 decoder) gets one where its state outlives a call. Neither replaces the other: a model change
 still comes first (model first), and a state-machine test never stands in for a missing driver.
+
+## Amended 2026-11-17 (FORMAL-01): the toolchain as pinned, and Apalache without its server
+
+The toolchain lands with Quint 0.33.1 (from npm, its whole dependency graph locked by mise),
+Node 26.13.1 to run it, Apalache **0.62.4** rather than 0.62.1 (the version Quint 0.33.1 names as
+its own, `DEFAULT_APALACHE_VERSION_TAG`; 0.63.0 is newer and not Quint's pairing) and the Temurin
+JDK 21.0.13+9 to run Apalache, pinned through mise and `tools/versions.toml` (ADR 0035, which
+superseded ADR 0030). The `formal-typecheck` and `formal-test` stages gate every push (the
+`formal` job of `ci.yml`); `formal-verify` runs Apalache directly on Quint's JSON IR (`quint
+compile --target json`, then `apalache-mc check`), not through `quint verify`, which would
+download Apalache at run time and drive it as a server on a TCP port. Quint's tests and
+simulations run on its TypeScript backend, since the default Rust backend downloads an evaluator
+at run time. This ADR's second half, the `proptest-state-machine` tests, needs no toolchain: they
+arrive with the components they test (ver §6.4).

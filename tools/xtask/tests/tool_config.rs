@@ -442,6 +442,11 @@ impl Bootstrap {
     }
 
     fn run(&self) -> Result<Output, Box<dyn Error>> {
+        self.run_with(&[])
+    }
+
+    /// The bootstrap with `options` before its bin directory argument.
+    fn run_with(&self, options: &[&str]) -> Result<Output, Box<dyn Error>> {
         fs::write(&self.calls, "")?;
         let mut path = std::ffi::OsString::from(&self.bin);
         if let Some(rest) = std::env::var_os("PATH") {
@@ -450,6 +455,7 @@ impl Bootstrap {
         }
         Ok(Command::new("bash")
             .arg(self.repo.join("scripts/bootstrap-tools.sh"))
+            .args(options)
             .arg(&self.bin)
             .env("PATH", path)
             .env("RUSTUP_HOME", &self.rustup)
@@ -475,12 +481,39 @@ fn should_install_from_mise_lock_and_never_trust_the_tree_when_the_bootstrap_mee
     // when
     let output = bootstrap.run()?;
     let calls = bootstrap.calls()?;
+    let jvm = bootstrap.run_with(&["--formal-verify"])?;
+    let jvm_calls = bootstrap.calls()?;
 
-    // then
+    // then: every tool of mise.toml but the JDK and Apalache, which only `--formal-verify` adds
+    // (FORMAL-01)
     assert!(output.status.success(), "{}", printed(&output));
+    let install = calls
+        .iter()
+        .find(|c| c.starts_with("mise install --locked "))
+        .ok_or_else(|| format!("no mise install: {calls:?}"))?;
+    let words: Vec<&str> = install.split(' ').skip(3).collect();
+    for tool in [
+        "just",
+        "aqua:rhysd/actionlint",
+        "node",
+        "npm:@informalsystems/quint",
+    ] {
+        assert!(words.contains(&tool), "{tool} not installed: {install}");
+    }
+    for tool in ["java", "github:apalache-mc/apalache"] {
+        assert!(
+            !words.contains(&tool),
+            "{tool} installed unasked: {install}"
+        );
+    }
+    assert!(jvm.status.success(), "{}", printed(&jvm));
+    let jvm_install = jvm_calls
+        .iter()
+        .find(|c| c.starts_with("mise install --locked "))
+        .ok_or_else(|| format!("no mise install: {jvm_calls:?}"))?;
     assert!(
-        calls.iter().any(|c| c == "mise install --locked"),
-        "no mise install: {calls:?}"
+        jvm_install.ends_with(" github:apalache-mc/apalache java"),
+        "{jvm_install}"
     );
     assert!(
         !calls
