@@ -708,35 +708,13 @@ There is no event store (ADR 0008). What persists:
   a test or the policy: a test that needs a fake secret assembles it at run time from pieces
   (`"ghp_""aB3d..."`), so the committed text never forms the token. GitHub secret
   scanning and push protection are on (owner setting).
-- **Private names** (`private-names` stage, FND-04): the names are never committed, only their
-  salted hashes. `.private-names.sha256` (committed since BOOT-02) has a `# salt: <hex>` header
-  and one `sha256("<salt>:<name>")` per line, the name lower-cased with everything but ASCII
-  letters and digits removed. The check tokenises the changed text (the diff against
-  `git merge-base HEAD origin/main` plus the working tree, and the commit messages in that
-  range): it folds the text to ASCII (NFKD, combining marks dropped, ł ø đ ß æ œ and the like
-  mapped, `scripts/private-names-fold.pl`, shared with the add script), lower-cases it, splits on
-  anything that is not a letter or digit, and hashes every token and every run of 2 or 3 adjacent
-  tokens joined (also after splitting camelCase), so `Foo Bar`, `foo-bar`, `FooBar` and an
-  accented name in NFC, NFD or plain ASCII match one entry; the add script refuses a name of more
-  than 3 words, which no run could match. The scope also covers the names of added and untracked
-  files, the author and committer of each commit in the range, the current branch name, files
-  git treats as binary (`--text`) and UTF-16 files with a byte-order mark; a change that removes
-  an entry from the list or alters its salt fails. A match fails with the path and line, never
-  the name (a path that holds the name is masked). **Limits, accepted under the accidental-leak
-  model:** there is no substring matching (`myquillmarrow` and `quillmarrows` miss), no
-  homoglyph or letter-swap matching, no reading of Windows-1250 or other legacy encodings, of
-  UTF-16 without a byte-order mark, of URL-encoded joins (`quill%20marrow`), of a name split
-  across a line break (`quill` at the end of one line, `marrow` at the start of the next: each
-  line is tokenised alone), or of files that contain a NUL byte in their first 8 KiB in `--all`
-  mode (CI on `main`; the diff mode of a lane and of `land.sh` reads them with `--text`), and a
-  name of more than 3 words is covered only by its distinctive part (the FND-05 checkpoint's
-  N8, accepted as limits). It needs no secret, so
-  it is a stage of `check` and runs in CI, on fork pull requests and in `land.sh`. A missing or
-  empty hash file fails closed in CI (`CI=true`) and in `land.sh`, and only warns elsewhere (a
-  downstream fork may not have one). The owner adds a name with `scripts/private-name-add.sh`,
-  which writes only its hash. The salt is public, so a dictionary guess of a short name is
-  possible: the file keeps names out of plain sight and out of every grep, not out of reach of a
-  determined guesser.
+- **Private names** (ADR 0004, amended 2026-11-17): no private project is named or alluded to
+  anywhere in the repository, and the names are not written down in any form. Review enforces
+  it: the orchestrator's review of every commit before landing and the `/review` skill's
+  "Public repository" check, which read code, docs, fixtures and commit messages. FND-04's hashed
+  check (a salted SHA-256 list and a stage over the diff) was removed by FND-11 on the owner's
+  order: a salted hash of a short name is reversed by guessing in seconds, so the list confirmed
+  what it meant to hide.
 - **DCO:** `scripts/dco-check.sh` (`just dco [range]`, FND-03) checks that every commit of a range
   carries a `Signed-off-by` matching its author, read as a trailer (a quoted line does not count);
   a step of `ci.yml` runs it over the pushed commits, and `land.sh` over the ones it lands.
@@ -847,7 +825,7 @@ needs one becomes a recipe parameter (`just conformance seed=42`).
 | `scripts/land.sh <sha>… [--no-push]` | cherry-pick onto a fresh `origin/main` worktree, check sign-offs and signatures, `just check`, push only on green | FND-03 |
 | `just coverage`, `just changed-lines` | llvm-cov vs `coverage-floor.toml`; diff-cover on the lines changed since `git merge-base HEAD origin/main` (plus the working tree) | FND-06 |
 | `just mutants-diff [base]` | cargo-mutants `--in-diff` over the same diff, with a time cap; outside `check` (below) | FND-06 |
-| `just secrets`, `just workflows`, `just private-names` | gitleaks over the history; actionlint, zizmor, pinact (offline) and shellcheck; the hashed private-name check of §7.4 (`scripts/private-names-check.sh [--all]`) | FND-04 |
+| `just secrets`, `just workflows` | gitleaks over the history; actionlint, zizmor, pinact (offline) and shellcheck | FND-04 |
 | `just workflows-verify` | pinact's version-comment check; needs the GitHub API, so outside `check` (§7.3) | FND-04 |
 | `just workflows-online` | zizmor with its online audits over the workflows and `dependabot.yml`; needs the GitHub API (`GH_TOKEN`), so outside `check`; `security.yml` runs it | FND-05 |
 | `just ci-parity` | the cargo stages with CI's environment: the target directory inside the checkout and `ci.yml`'s workflow `env:` (`CARGO_TERM_COLOR=always`, `NEXTEST_PROFILE=ci`); outside `check` (a second build), run before landing a change to tests that start cargo, nextest or a scratch workspace | FND-05 |
@@ -871,7 +849,7 @@ Stages of `check` in order (each a stage of xtask's catalog and a recipe that ru
 (§2.3), `docs` (the ADR index matches the files), `unit-tests`, `integration-tests`, `doctests`,
 `script-tests` (the offline self-tests `scripts/test-*.sh`), `e2e-tests`, `lsp-conformance`, `formal-typecheck`, `formal-test`, `formal-freshness`,
 `conformance-replay`, `java-fixtures`, `coverage`, `changed-lines`, `deny`, `secrets`,
-`workflows`, `private-names`. A stage enters `check` in the commit of the task that introduces
+`workflows`. A stage enters `check` in the commit of the task that introduces
 it, together with its `ci.yml` job entry.
 
 Two recipes are deliberately **outside** `check`:
@@ -887,7 +865,7 @@ Two recipes are deliberately **outside** `check`:
   from `gungraun` or cachegrind) where available and report wall time. `just bench` on a laptop
   or in the sandbox reports and never gates, and neither `check` nor `land.sh` runs it.
 
-The diff base of `changed-lines`, `mutants-diff` and `private-names` is
+The diff base of `changed-lines` and `mutants-diff` is
 `git merge-base HEAD origin/main` plus the working tree: the same set of lines for a lane's
 uncommitted tree, its commit, and `land.sh`'s cherry-picked tree.
 
@@ -917,7 +895,7 @@ uncommitted tree, its commit, and `land.sh`'s cherry-picked tree.
 
 Integration is directly on `main` (ADR 0002): the orchestrator reviews each task's commit, then
 lands it with `scripts/land.sh` (ADR 0030), which fetches, creates a worktree at `origin/main`,
-cherry-picks, runs `just check` (with `private-names` failing closed) on the merged tree, and
+cherry-picks, runs `just check` on the merged tree, and
 pushes only on green, retrying once after a fetch on a non-fast-forward. Conflicts are auto-resolved only in `Cargo.lock` (take integration's
 side, then `cargo update -w`) and in the ADR index (both sides' rows kept and sorted, then
 `just adr-index` in the gate); anything

@@ -38,6 +38,7 @@ CLI carrier), **SEM-07** (M4),
 | DEC-07 | (owner) Confirm the Proposed defaults | FND-05 | light | S |  | DEC-08 |
 | DEC-08 | (owner) Shared skills plugin or repo-local skills | FND-05 | light | S |  | DEC-07 |
 | FND-10 | Toolchain 1.99.1 | FND-08 | standard | S |  | XT-01 |
+| FND-11 | Remove the private-names hashes and check | FND-04, XT-02 | standard | S |  | EVAL lane |
 | XT-01 | Scaffold `tools/xtask` and port the gate composition | FND-08, FND-09 | deep | M |  | FND-10, EVAL lane |
 | XT-02 | Tool pins: `tools/versions.toml`, `cargo xtask doctor`, `install-tools` | XT-01 | standard | M |  | EVAL lane |
 | XT-03 | Security and workflow stages into xtask | XT-02 | standard | M |  | EVAL lane |
@@ -251,12 +252,14 @@ foundation piece by piece (ADR 0035).
   860 lines); the gitleaks binary rather than `gitleaks-action` (a licence key for organisation
   accounts); trufflehog (AGPL), `cargo-audit` (redundant with cargo-deny) and `cargo-vet` (heavy
   for one maintainer; optional later) were weighed.
+- **Later removed (FND-11, 2026-11-17, the owner's order):** the `private-names` stage, the hash
+  file and its scripts; the card stays as the record of what was built.
 - **Accept:**
   - [x] the stages, `private-names` included, are in `check` and green on the tree
   - [x] each fixture fails its stage with the offending file named
   - [x] `just private-names` finds the planted name written as `Foo Bar`, `foo-bar` and `FooBar` in a changed line and in a commit message, naming the path and line but never printing the name; a missing hash file fails under `CI=true` and in `land.sh` and only warns otherwise
   - [x] `just doctor` lists the five tools
-  - [ ] (owner) further private names added with `scripts/private-name-add.sh` and committed (only hashes)
+  - [ ] (owner) further private names added with `scripts/private-name-add.sh` and committed (only hashes) (withdrawn: FND-11 removed the list)
 - **Impact:** none (tooling).
 
 #### FND-05: ⛳ CI workflows and required checks
@@ -456,6 +459,25 @@ foundation piece by piece (ADR 0035).
   - [ ] `grep -rn '1\.97'` finds only history (landed cards, superseded ADRs, the E1 spike)
 - **Impact:** toolchain.
 
+#### FND-11: Remove the private-names hashes and check
+- **Depends on:** FND-04, XT-02. **Model:** standard. **Size:** S. **Parallel with:** the EVAL lane.
+- **Cites:** fnd §7.4, §9, §10.2; ADR 0004 (amended 2026-11-17), ADR 0035; [`required-checks.md`](required-checks.md).
+- The owner's order of 2026-11-17: the salted hashes of `.private-names.sha256` are reversed by
+  guessing short names in seconds, so the list confirmed what it meant to hide. Removed whole:
+  the hash file, `scripts/private-names-check.sh`, `scripts/private-name-add.sh`,
+  `scripts/private-names-fold.pl` and `scripts/test-private-names.sh`; the `private-names` stage
+  from xtask's catalog (and the frozen catalog test), its recipe, the justfile's `check_stages`
+  (read only by `land.sh`'s hook), `ci.yml`'s security step and its `required-checks.md` row;
+  `land.sh`'s hook and its three `land_scripts.rs` cases; the pins and `GATE_FILES` entries, and
+  the hash file's place in the root allowlists of `tool-config` and `ARCH-gate-config`. The rule
+  of ADR 0004 stays; review enforces it (ADR 0004, amended). Removing a gate stage is allowed
+  here only because the owner ordered it; every other negative test stays.
+- **Reuse considered:** none needed: a removal.
+- **Accept:**
+  - [x] no file, recipe, stage, CI step, pin or doc of the mechanism is left (`git grep -i private-name` finds only history: landed cards, the ADR amendment, superseded ADR 0030)
+  - [x] `just check` and `just ci-parity` are green; `ARCH-ci-lockstep` and the frozen catalog test agree on the stages without `private-names`
+- **Impact:** gate (one stage removed, on the owner's order); CI (the security job's step).
+
 ### Lane XT: port mayfly's `xtask`, piece by piece
 
 ADR 0035 (the owner, 2026-11-17) supersedes ADR 0030: `tools/xtask` with a `cargo xtask` surface
@@ -529,16 +551,18 @@ and Quint, and the others the gate uses today until a card decides. Tool version
 #### XT-03: Security and workflow stages into xtask
 - **Depends on:** XT-02. **Model:** standard. **Size:** M. **Parallel with:** the EVAL lane.
 - **Cites:** fnd §7.3, §7.4; ADR 0004, ADR 0035; mayfly `tools/xtask` (`security`, `action_pins`).
-- `secrets`, the generated `.gitleaks.toml` check, `workflows` and `private-names` (with
-  `private-name-add` and the fold) become xtask stages and subcommands that run gitleaks,
-  actionlint, shellcheck, zizmor and pinact; `scripts/secrets-check.sh`,
-  `scripts/gitleaks-config.sh`, `scripts/workflows-check.sh`, `scripts/private-names-check.sh`,
-  `scripts/private-names-fold.pl` and `scripts/private-name-add.sh` are removed with their pins
-  moved. `SECURITY.md` names the new command.
+- `secrets`, the generated `.gitleaks.toml` check and `workflows` become xtask stages and
+  subcommands that run gitleaks, actionlint, shellcheck, zizmor and pinact;
+  `scripts/secrets-check.sh`, `scripts/gitleaks-config.sh` and `scripts/workflows-check.sh` are
+  removed with their pins moved. `SECURITY.md` names the new command. (`private-names` is not
+  ported: FND-11 removed it on the owner's order.)
 - **Accept:**
-  - [ ] every case of `scripts/test-secrets.sh`, `scripts/test-workflows.sh` and `scripts/test-private-names.sh` is a Rust test and passes; FND-04's fixtures and FND-08's N5 and N8 cases still fail their stages
+  - [ ] every case of `scripts/test-secrets.sh` and `scripts/test-workflows.sh` is a Rust test and passes; FND-04's fixtures and FND-08's N5 case still fail their stages
   - [ ] FND-09's negative tests for these stages pass against xtask
-  - [ ] the planted private name is found in a changed line and a commit message without being printed
+  - [ ] the XT-02 review's findings, carried here (these stages are the first to run more tools from xtask's cache):
+    - **Z1:** a tool on the stages' PATH is the pinned one: either the preflight refuses a non-default `MISE_DATA_DIR`, `XDG_DATA_HOME` or `XDG_CACHE_HOME`, or xtask verifies each cached tool's SHA-256 against `tools/versions.toml` before it puts the cache on the stages' PATH; a planted fake `cargo-nextest` in the cache (which made three stages pass in the review) fails a test
+    - **Z2:** the `land-xtask` cache (`$XDG_CACHE_HOME/jfastlsp/land-xtask`) stays writable by code the gate runs as the same user: XT-02 keeps it apart from the gate's target directory, which does not close that hole, and this card does not claim it closed (XT-05, which moves landing into xtask, takes it up)
+    - **Z3:** `install-tools` re-verifies an existing install by its digest instead of trusting that it is there; a tampered installed binary is reinstalled or refused (test)
   - [ ] the LOWs of FND-09's adversarial review, carried into the port:
     - **M1:** the suppression allowlist has one source: one data file that both the workflows stage and `ARCH-workflow-yaml` read, or a single `allowed_suppressions` definition whose opener is enforced to occur exactly once; a decoy list fails (test)
     - **L1:** the gitleaks policy generator's regex-rewrite structural check has committed tests (the implementer's probes plus a rewrite inside `\Q…\E`, inside `(?…)` and inside `\p`/`\x` escape arguments), and the `\Q…\E` refusal is kept

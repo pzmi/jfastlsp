@@ -202,6 +202,4 @@ anywhere (code, docs, ADRs, fixtures, evaluation reports, commit messages), and 
 design came from an unnamed elsewhere (ADR 0004). The public repositories site-preview and mayfly
 may be cited where a design is borrowed. Nothing from a private target Java repository enters this
 repository: harnesses and runbooks here, runs on the owner's machine, aggregates only. Fixtures are
-synthetic. Names that must never appear are kept only as salted hashes in `.private-names.sha256`
-(fnd §7.4); the owner adds one with `scripts/private-name-add.sh`, and nobody writes the names
-themselves anywhere, this file and commit messages included.
+synthetic.

@@ -11,8 +11,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - The product and architecture plan, the engineering foundation, the verification strategy, the
   development process, the ADRs (0001–0031) and the task breakdown.
-- `scripts/bootstrap-tools.sh` (pinned, checksum-verified mise and just), the hashed private-name
-  list and its `scripts/private-name-add.sh`, and the archived E1 parse spike (`spikes/e1-parse/`).
+- `scripts/bootstrap-tools.sh` (pinned, checksum-verified mise and just) and the archived E1 parse
+  spike (`spikes/e1-parse/`).
 - `tools/jfl-bench` (BENCH-02): the benchmark harness. `jfl-bench run <suite> [size]` runs the `rg-floor`
   suite (hyperfine, queries picked by seed) and the `e1` parse suite (the archived spike, in process)
   on a fetched corpus checkout and writes JSON with the machine's facts, in the format

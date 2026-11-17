@@ -1,7 +1,7 @@
 # The gate in CI (fnd §7.2, doc/required-checks.md): every job sets up the pinned tools and runs
 # the same `just` recipes as a laptop; `Required` aggregates them. The architecture test's
-# ARCH-ci-lockstep (tools/jfl-architecture/src/ci.rs) fails when this file, the justfile's
-# check_stages and doc/required-checks.md disagree, or when a job could fail without failing
+# ARCH-ci-lockstep (tools/jfl-architecture/src/ci.rs) fails when this file, xtask's stage
+# catalog (`list --json`) and doc/required-checks.md disagree, or when a job could fail without failing
 # `Required`: no `if:` but the aggregate's, no `continue-on-error`, no swallowed exit status, no
 # environment that steers the build.
 #
@@ -176,9 +176,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
-      # The full history: gitleaks refuses a shallow clone. private-names diffs against
-      # origin/main on a pull request; on a push to main (HEAD is origin/main, so the diff is
-      # empty) it scans the whole tree and history instead (CI=true, scripts/private-names-check.sh).
+      # The full history: gitleaks refuses a shallow clone.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
@@ -192,7 +190,7 @@ jobs:
           cache_save: ${{ github.ref == 'refs/heads/main' }}
           # mise.toml's [env] stays out of the gate's environment (ARCH-ci-lockstep).
           env: false
-      - run: just check-only secrets workflows private-names
+      - run: just check-only secrets workflows
       # pinact's version-comment check asks the GitHub API (fnd §7.3); the job's read-only token
       # lifts the rate limit.
       - run: just workflows-verify

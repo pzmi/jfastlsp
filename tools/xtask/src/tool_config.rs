@@ -37,7 +37,7 @@ use regex::Regex;
 
 /// The entries allowed at the root among the dot-names and the mise names. A new one is added
 /// here, in the commit that needs it, with ARCH-gate-config's `ROOT_ALLOWED`.
-pub(crate) const ROOT_ALLOWED: [&str; 15] = [
+pub(crate) const ROOT_ALLOWED: [&str; 14] = [
     ".claude",
     ".config",
     ".DS_Store",
@@ -48,7 +48,6 @@ pub(crate) const ROOT_ALLOWED: [&str; 15] = [
     ".gitignore",
     ".gitleaks.toml",
     ".idea",
-    ".private-names.sha256",
     ".vscode",
     ".work",
     "mise.lock",

@@ -169,14 +169,6 @@ pub(crate) fn rows() -> Vec<Row> {
             Stage::in_process("workflows", stages::WORKFLOWS, stages::workflows),
             false,
         ),
-        // No private name in this change (FND-04, fnd §7.4).
-        row(
-            Stage::call(
-                "private-names",
-                Call::new("bash", &["scripts/private-names-check.sh"]),
-            ),
-            false,
-        ),
     ]
 }
 

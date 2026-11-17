@@ -43,9 +43,7 @@ GitHub Actions run or job URL (a failure to fix), or nothing (the next ready tas
    `scripts/bootstrap-tools.sh` (mise and just, checksum-verified, then `mise install --locked`).
    If it reported a failure or a missing tool the gate needs (just, cargo-nextest, cargo-deny,
    cargo-llvm-cov, quint, the pinned JDK), run `bash scripts/bootstrap-tools.sh` once now
-   (`just doctor` says what is missing or wrong), not per agent. `.private-names.sha256` must
-   exist (`land.sh` and CI fail closed without it); if it is missing, stop and ask the owner one
-   question.
+   (`just doctor` says what is missing or wrong), not per agent.
 5. Resources: the sandbox has 4 CPUs and about 15 GB RAM. **At most two lanes run at once**,
    each with `CARGO_BUILD_JOBS=2` and `CARGO_INCREMENTAL=0`. `df -h /` and `free -g` before every
    dispatch round; start fewer lanes, or delete finished lanes' target dirs, rather than fill the
@@ -151,8 +149,8 @@ resetting the worktree"; never discard its uncommitted change without reading it
    `jfl-application`, run `just mutants-diff` in its worktree once FND-06 has landed (20-minute
    cap; fnd §9). Then: `scripts/land.sh <sha>` (`--no-push` for a dry run). It refuses a dirty
    checkout, fetches, works in a temporary worktree at `origin/main`, cherry-picks, resolves only
-   `Cargo.lock` and the ADR index, aborts on any other conflict, runs `just check` (with
-   `private-names` failing closed) on the merged tree and pushes only when it is green. It is the
+   `Cargo.lock` and the ADR index, aborts on any other conflict, runs `just check` on the
+   merged tree and pushes only when it is green. It is the
    only way anything reaches `origin`: `.claude/settings.json` denies the common forms of
    `git push` (ADR 0018, amended), and no agent or orchestrator pushes by any other means, even
    after a failed land.

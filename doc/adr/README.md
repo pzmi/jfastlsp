@@ -59,7 +59,7 @@ for the owner's decisions.
 | [0001](0001-record-architecture-decisions.md) | Record architecture decisions | Accepted (owner, 2026-11-16); amended 2026-11-16 (accepted 2026-11-17) and 2026-11-17 |
 | [0002](0002-integrate-on-main-one-signed-off-commit-per-task.md) | Integrate on main: one signed-off commit per task, landed by the orchestrator | Accepted (owner, 2026-11-16); amended 2026-11-16 (accepted 2026-11-17) |
 | [0003](0003-commit-identity-subject-and-trailer-order.md) | Commit identity, subject and trailer order | Accepted (owner, 2026-11-16) |
-| [0004](0004-public-repository-no-private-projects.md) | Public repository: no private projects named or alluded to | Accepted (owner, 2026-11-16) |
+| [0004](0004-public-repository-no-private-projects.md) | Public repository: no private projects named or alluded to | Accepted (owner, 2026-11-16); amended 2026-11-17 |
 | [0005](0005-dual-licence-mit-or-apache-2-0.md) | Dual licence MIT OR Apache-2.0 | Superseded by 0033 |
 | [0006](0006-platforms-linux-x86-64-and-arm64-macos-arm64.md) | Platforms: Linux x86-64 and arm64, macOS arm64; Windows out of scope | Accepted (owner, 2026-11-17) |
 | [0007](0007-formal-methods-required-quint-with-itf-conformance.md) | Formal methods required: Quint models with ITF conformance against the real code | Accepted (owner, 2026-11-17); amended 2026-11-16 and 2026-11-17 |

@@ -27,10 +27,6 @@ export PATH := if mise_bins == "" { mise_shims + ":" + env("PATH") } else { mise
 # stages set the same in xtask (tools/xtask/src/catalog.rs, CARGO_ENV).
 cargo := "env RUSTFLAGS='-D warnings' RUSTDOCFLAGS= RUSTC_WRAPPER= RUSTC_WORKSPACE_WRAPPER= cargo"
 
-# The stages of `check`, in order, from xtask's catalog: what scripts/land.sh reads with
-# `just --evaluate check_stages` (its private-names hook) until XT-05 ports it.
-check_stages := shell('bash "$1/scripts/xtask.sh" list | paste -s -d " " -', justfile_directory())
-
 # The inner loop: fmt-check, architecture, clippy, unit tests and the scripts' self-tests. Not the
 # gate.
 quick:
@@ -129,10 +125,6 @@ ci-parity:
 # outside `check`; security.yml runs it weekly (fnd §7.1).
 workflows-online:
     bash scripts/workflows-check.sh online
-
-# The hash file is required under CI=true; add a name with scripts/private-name-add.sh (owner).
-private-names:
-    bash {{xtask}} check-only private-names
 
 # Fetch the pinned benchmark corpus of doc/bench-corpus.md into its cache (BENCH-01).
 bench-corpus size="small" cache="":

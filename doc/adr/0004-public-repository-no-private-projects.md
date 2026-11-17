@@ -4,7 +4,7 @@ Date: 2026-11-16
 
 ## Status
 
-Accepted (owner, 2026-11-16).
+Accepted (owner, 2026-11-16); amended 2026-11-17 (owner: enforcement by review).
 
 ## Context
 
@@ -30,3 +30,12 @@ private too. Its design borrows from the owner's public repositories site-previe
 Reviews flag any such mention as HIGH (review skill, "Public repository"). Fixtures for
 Lombok, multi-module builds and nested worktrees are written from scratch. Some evaluation detail
 stays outside the repository by design.
+
+## Amended 2026-11-17 (owner, FND-11): enforcement is by review
+
+The rule stands unchanged. What enforced it changes: FND-04's `private-names` stage (a salted
+SHA-256 list of the names, checked against every changed line and commit message) is removed by
+FND-11 on the owner's order. A salted hash of a short name, with the salt published beside it, is
+reversed by guessing in seconds, so the list confirmed the names it meant to hide. The names are
+now written nowhere, in any form; the orchestrator's review of every commit before landing and
+the review skill's "Public repository" check enforce the rule, and a mention is still HIGH.

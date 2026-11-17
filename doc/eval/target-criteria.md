@@ -82,8 +82,8 @@ This section applies only if the chosen target is private (ADR 0004, `doc/sdlc.m
   construct, module and file counts, timings, and resident memory. Tasks appear by anonymous
   number only.
 - **Enforced by a test:** the `jfl-eval` report never contains a prompt, path or source line from
-  its input (EVAL-01 acceptance; a test plants one and checks it is absent). The hashed
-  private-name check (fnd §7.4, `.private-names.sha256`) guards names in committed text.
+  its input (EVAL-01 acceptance; a test plants one and checks it is absent). Review keeps
+  private names out of committed text (ADR 0004, fnd §7.4).
 
 If the target is public, task definitions (commit ids, prompts, test commands) may be committed,
 and golden cases taken from it are positions and symbol names only, from Apache-2.0 repositories

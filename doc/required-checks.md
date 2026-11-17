@@ -37,7 +37,7 @@ without a row, a row without a job, or any difference fails the `architecture` s
 | `tests` | Tests (Linux x86-64) | `ubuntu-24.04` | `check-only unit-tests integration-tests doctests script-tests` |
 | `linux-arm` | Linux (arm64) | `ubuntu-24.04-arm` | `platform-tests` |
 | `macos` | macOS (arm64) | `macos-15` | `platform-tests` |
-| `security` | Security | `ubuntu-24.04` | `check-only secrets workflows private-names`, then `workflows-verify` |
+| `security` | Security | `ubuntu-24.04` | `check-only secrets workflows`, then `workflows-verify` |
 | `dco` | DCO | `ubuntu-24.04` | `dco-event` over the commits the event brought (a push's before..after; a pull request's base..head; the commit itself on a manual run; a push from the all-zero commit or a force-push fails) |
 | `required` | Required | `ubuntu-24.04` | the aggregate of every other job's result |
 
@@ -61,10 +61,6 @@ input (mise-action's `env`, checkout's `persist-credentials`), and on any `env:`
 and `NEXTEST_PROFILE=ci` for the workflow, and the job token and event fields the `security`,
 `dco` and `required` steps pass on (so `BASH_ENV`, `PATH`, `CI`, `JUST_*` and the build's own
 variables are refused by construction).
-
-`private-names` diffs against `origin/main` on a pull request. On a push to `main` the checkout's
-HEAD is `origin/main`, so that diff is empty: under `CI=true` the script then scans every file and
-every commit message of the history instead (a superset of the pushed range).
 
 Runs on `main` are never cancelled or replaced by a newer push: each commit there has its own
 concurrency group. A pull request's older run is cancelled by its newer one. Caches (mise's and

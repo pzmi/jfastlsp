@@ -188,13 +188,13 @@ fn should_not_apply_the_working_directory_s_cargo_config_when_the_launcher_build
     // of xtask, which is why the launcher builds and execs.
     let text = printed(&listed);
     assert!(listed.status.success(), "{text}");
-    assert!(text.lines().any(|l| l == "private-names"), "{text}");
+    assert!(text.lines().any(|l| l == "script-tests"), "{text}");
     let refusal = printed(&refused);
     assert!(!refused.status.success(), "{refusal}");
     assert!(refusal.contains(".cargo/config.toml"), "{refusal}");
     assert_eq!(ran_through_the_launcher, (false, false), "{text}{refusal}");
     assert!(
-        runner_ran.try_exists()? && !printed(&control).contains("private-names"),
+        runner_ran.try_exists()? && !printed(&control).contains("script-tests"),
         "the control did not run the runner, so the case proves nothing:\n{}",
         printed(&control)
     );
@@ -335,7 +335,7 @@ fn should_build_with_the_pinned_toolchain_when_programs_are_planted_on_path() ->
     // then: the real xtask listed the stages, and nothing planted ran
     let text = printed(&output);
     assert!(output.status.success(), "{text}");
-    assert!(text.lines().any(|l| l == "private-names"), "{text}");
+    assert!(text.lines().any(|l| l == "script-tests"), "{text}");
     let ran: Vec<&str> = planted
         .iter()
         .zip(&marks)
@@ -556,7 +556,7 @@ fn should_refuse_to_build_when_the_cargo_home_config_sets_a_linker() -> TestResu
     assert_refused_before_build(&refused, &home.join("config.toml"));
     assert!(!linker_ran.try_exists()?, "{}", printed(&refused));
     assert!(accepted.status.success(), "{}", printed(&accepted));
-    assert!(printed(&accepted).lines().any(|l| l == "private-names"));
+    assert!(printed(&accepted).lines().any(|l| l == "script-tests"));
     Ok(())
 }
 

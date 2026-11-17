@@ -78,7 +78,7 @@ pub const MISE_LOCK: &str = "mise.lock";
 /// this checker's own sources are code under its meta-test (`tests/rules.rs`, one negative case
 /// per rule) and review; `.gitleaks.toml` is compared byte for byte with what the pinned
 /// `scripts/gitleaks-config.sh` generates.
-pub const GATE_FILES: [&str; 18] = [
+pub const GATE_FILES: [&str; 16] = [
     ".claude/hooks/session-start.sh",
     ".claude/hooks/stop-gate.sh",
     ".github/zizmor.yml",
@@ -91,8 +91,6 @@ pub const GATE_FILES: [&str; 18] = [
     "scripts/dco-check.sh",
     "scripts/gitleaks-config.sh",
     "scripts/land.sh",
-    "scripts/private-names-check.sh",
-    "scripts/private-names-fold.pl",
     "scripts/secrets-check.sh",
     "scripts/workflows-check.sh",
     "scripts/xtask.sh",
@@ -106,7 +104,7 @@ pub const XTASK_SOURCES: (&str, &str) = ("tools/xtask/Cargo.toml", "tools/xtask/
 /// (tools/xtask/src/tool_config.rs holds the same list): `.shellcheckrc`, `.tool-versions`,
 /// `.mise.toml`, `mise.local.toml`, `.pinact.yaml`, `.yamllint`, `.envrc` and the like are
 /// refused, since a tool of the gate would read them without a command line naming them.
-pub const ROOT_ALLOWED: [&str; 15] = [
+pub const ROOT_ALLOWED: [&str; 14] = [
     ".DS_Store",
     ".claude",
     ".config",
@@ -117,7 +115,6 @@ pub const ROOT_ALLOWED: [&str; 15] = [
     ".gitignore",
     ".gitleaks.toml",
     ".idea",
-    ".private-names.sha256",
     ".vscode",
     ".work",
     "mise.lock",

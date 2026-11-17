@@ -2,15 +2,17 @@
 //! the justfile's `check` ran before XT-01 (its `check_stages`), in the same order, with
 //! `quick`'s stages (its `quick_stages`) marked, and each stage's command the one its recipe ran.
 //! A stage added later adds its row here in the commit that adds it; a stage is never dropped
-//! (ADR 0035, the XT lane's rule "nothing stops running"). XT-08 reruns this test after just goes.
+//! (ADR 0035, the XT lane's rule "nothing stops running") except by the owner's order:
+//! `private-names` was removed on 2026-11-17 (FND-11). XT-08 reruns this test after just goes.
 
 use std::error::Error;
 use std::process::{Command, Output};
 
 type TestResult = Result<(), Box<dyn Error>>;
 
-/// The justfile's `check_stages` before XT-01 (commit 201a4cc), word for word.
-const CHECK_STAGES: &str = "fmt-check architecture clippy nostd docs unit-tests integration-tests doctests script-tests deny secrets workflows private-names";
+/// The justfile's `check_stages` before XT-01 (commit 201a4cc), word for word, less the
+/// `private-names` stage the owner had removed (FND-11).
+const CHECK_STAGES: &str = "fmt-check architecture clippy nostd docs unit-tests integration-tests doctests script-tests deny secrets workflows";
 
 /// The justfile's `quick_stages` before XT-01, word for word.
 const QUICK_STAGES: &str = "fmt-check architecture clippy unit-tests script-tests";
@@ -30,8 +32,7 @@ const FROZEN: &str = r#"[
   {"id": "script-tests", "command": "bash scripts/test-*.sh, each in name order", "quick": true, "check": true},
   {"id": "deny", "command": "cargo deny --locked check", "quick": false, "check": true},
   {"id": "secrets", "command": "bash scripts/secrets-check.sh", "quick": false, "check": true},
-  {"id": "workflows", "command": "bash scripts/workflows-check.sh workflows, then bash scripts/workflows-check.sh shell", "quick": false, "check": true},
-  {"id": "private-names", "command": "bash scripts/private-names-check.sh", "quick": false, "check": true}
+  {"id": "workflows", "command": "bash scripts/workflows-check.sh workflows, then bash scripts/workflows-check.sh shell", "quick": false, "check": true}
 ]
 "#;
 

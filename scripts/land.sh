@@ -29,10 +29,8 @@
 #      check's allowlists lands only once this checkout has it (land it by hand, doc/sdlc.md);
 #      then run `just check` on the merged tree. The gate is not a sandbox: it compiles and runs
 #      the tree's build scripts, proc-macros and tests with this user's privileges, so review
-#      before landing is the control for code (fnd §3.6). A missing or
-#      empty `.private-names.sha256` aborts here when the justfile has the `private-names` stage
-#      (fnd §7.4); a tree whose justfile names the stage but leaves it out of `check` aborts too;
-#      so does a gate that left the tree changed (what was gated must be what is pushed);
+#      before landing is the control for code (fnd §3.6). A gate that left the tree changed
+#      aborts (what was gated must be what is pushed);
 #   6. push the result to <remote> <branch>, never forced; on a non-fast-forward fetch and redo
 #      everything (cherry-pick and gate included) once.
 #
@@ -162,19 +160,6 @@ resolve_conflicts() {
   GIT_EDITOR=true git -C "$tree" cherry-pick --continue >/dev/null 2>&1 || die "could not continue the cherry-pick of $2"
 }
 
-# The private-names hook (fnd §7.4): until FND-04 the recipe does not exist and nothing is
-# required; from then on the stage must be part of `check` and its hash file present and non-empty.
-require_private_names() {
-  local tree="$1" recipes stages
-  recipes="$(cd "$tree" && just --summary)"
-  grep -qx private-names < <(tr ' ' '\n' <<<"$recipes") || return 0
-  stages="$(cd "$tree" && just --evaluate check_stages)"
-  grep -qx private-names < <(tr ' ' '\n' <<<"$stages") ||
-    die "the justfile has a private-names recipe but \`check\` does not run it"
-  grep -qvE '^[[:space:]]*(#|$)' "$tree/.private-names.sha256" 2>/dev/null ||
-    die ".private-names.sha256 is missing or has no entry; the private-names stage fails closed (fnd §7.4)"
-}
-
 # One try: 0 landed, 10 the push lost a race (fetch and retry), anything else aborted. Called in a
 # `||` list, where `set -e` is off, so every command that can fail carries its own `|| die`.
 attempt() {
@@ -202,7 +187,6 @@ attempt() {
       die "$(git -C "$tree" log -1 --format=%h "$sha") is not signed (the environment signs; --allow-unsigned waives this)"
     fi
   done
-  require_private_names "$tree"
   echo "land: just check on the merged tree ($(git -C "$tree" rev-parse --short "$head"))" >&2
   (cd "$tree" && just check) || die "just check failed; nothing was pushed"
   changed="$(git -C "$tree" status --porcelain)" || die "cannot read the gated tree's status"

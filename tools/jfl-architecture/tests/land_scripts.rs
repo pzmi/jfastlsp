@@ -49,13 +49,9 @@ struct Lab {
     base: PathBuf,
 }
 
-/// The stub gate: `just check` runs `./gate.sh`; `--summary` and `--evaluate check_stages` read
-/// `./recipes.txt` and `./stages.txt` when the scratch repository has them (the private-names
-/// hook), and print nothing otherwise.
+/// The stub gate: `just check` runs `./gate.sh`; anything else is an unexpected call.
 const STUB_JUST: &str = r#"#!/usr/bin/env bash
 case "$1" in
-  --summary) cat ./recipes.txt 2>/dev/null || true ;;
-  --evaluate) cat ./stages.txt 2>/dev/null || true ;;
   check) exec bash ./gate.sh ;;
   *) echo "stub just: unexpected $*" >&2; exit 2 ;;
 esac
@@ -545,69 +541,6 @@ fn should_keep_both_index_rows_in_order_when_two_lanes_append_an_adr() -> TestRe
         assert!(row.starts_with(&format!("| [{number}]")), "{index}");
     }
     assert!(index.contains("More prose."), "{index}");
-    Ok(())
-}
-
-#[test]
-fn should_abort_when_private_names_is_in_check_but_its_hash_file_is_missing() -> TestResult {
-    // given: the tree has the private-names stage in `check` but no hash file
-    let lab = Lab::new("land-private-missing")?;
-    lab.seed(&[
-        ("recipes.txt", "check private-names\n"),
-        ("stages.txt", "fmt private-names\n"),
-    ])?;
-    let sha = lab.lane_commit("lane", &[("b.txt", "b\n")], "T1: add b")?;
-    let before = lab.origin_head()?;
-
-    // when
-    let output = lab.land(&["--allow-unsigned", &sha])?;
-
-    // then
-    let text = printed(&output);
-    assert!(!output.status.success(), "{text}");
-    assert!(text.contains(".private-names.sha256"), "{text}");
-    assert_eq!(lab.origin_head()?, before);
-    Ok(())
-}
-
-#[test]
-fn should_land_when_the_private_names_hash_file_has_an_entry() -> TestResult {
-    // given
-    let lab = Lab::new("land-private-present")?;
-    lab.seed(&[
-        ("recipes.txt", "check private-names\n"),
-        ("stages.txt", "fmt private-names\n"),
-        (".private-names.sha256", "# salt: 00\n0123456789abcdef\n"),
-    ])?;
-    let sha = lab.lane_commit("lane", &[("b.txt", "b\n")], "T1: add b")?;
-
-    // when
-    let output = lab.land(&["--allow-unsigned", &sha])?;
-
-    // then
-    let text = succeeded(&output)?;
-    assert!(text.contains("landed"), "{text}");
-    Ok(())
-}
-
-#[test]
-fn should_abort_when_private_names_is_a_recipe_but_not_a_stage_of_check() -> TestResult {
-    // given
-    let lab = Lab::new("land-private-stage")?;
-    lab.seed(&[
-        ("recipes.txt", "check private-names\n"),
-        ("stages.txt", "fmt\n"),
-        (".private-names.sha256", "# salt: 00\n0123456789abcdef\n"),
-    ])?;
-    let sha = lab.lane_commit("lane", &[("b.txt", "b\n")], "T1: add b")?;
-
-    // when
-    let output = lab.land(&["--allow-unsigned", &sha])?;
-
-    // then
-    let text = printed(&output);
-    assert!(!output.status.success(), "{text}");
-    assert!(text.contains("does not run it"), "{text}");
     Ok(())
 }
 
