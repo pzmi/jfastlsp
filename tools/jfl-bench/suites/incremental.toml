@@ -1,0 +1,19 @@
+# The incremental suite (BENCH-03, plan §1.7's incremental rows): syntax-tier proxies for an
+# index kept fresh, before the index exists. Every series is named `.../proxy/...`; the full
+# metrics arrive with IDX-09, IDX-11, SEM-01 and SEM-02 (doc/bench/baseline.md). The rebase and
+# switch cases need the corpus's commit pairs: `scripts/bench-corpus.sh fetch-pairs SIZE`.
+name = "incremental"
+description = "Proxies for keeping an index fresh: one edit, a rebase and a branch switch, a widely used type's fan-out, a warm reopen."
+kind = "incremental"
+
+[run]
+warmup = 1
+runs = 5
+cold_runs = 3
+seed = 1
+
+[incremental]
+threads = 4
+edits = 20
+fanout = 3
+roles = ["rebase", "switch"]

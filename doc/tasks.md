@@ -700,8 +700,8 @@ dispatch jobs or `(owner)` items.
 - **Reuse considered:** kmp-lsp as shipped; jdtls's own sharing options (`sharedIndexLocation`,
   the syntax server).
 - **Accept:**
-  - [ ] the baseline report committed; an arm that cannot run is recorded with the reason, never dropped
-  - [ ] the incremental suite runs on medium and lombok, each row marked "proxy" or "full", with the pinned commit pairs (branch switch, rebase) and the widely used types chosen named in `doc/bench/baseline.md`; its proxy numbers go into DEC-02's inputs
+  - [x] the baseline report committed; an arm that cannot run is recorded with the reason, never dropped
+  - [x] the incremental suite runs on medium and lombok, each row marked "proxy" or "full", with the pinned commit pairs (branch switch, rebase) and the widely used types chosen named in `doc/bench/baseline.md`; its proxy numbers go into DEC-02's inputs
   - [ ] (owner) the jdtls arm on the medium corpus (or BENCH-04's dispatch job) and the large corpus run on the reference machine, named in the report
 - **Impact:** none.
 

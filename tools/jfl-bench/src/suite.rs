@@ -15,6 +15,9 @@ use crate::error::{BenchError, Context, Result};
 pub const BUILTIN: &[(&str, &str)] = &[
     ("rg-floor", include_str!("../suites/rg-floor.toml")),
     ("e1", include_str!("../suites/e1.toml")),
+    ("incremental", include_str!("../suites/incremental.toml")),
+    ("kmp-lsp", include_str!("../suites/kmp-lsp.toml")),
+    ("jdtls", include_str!("../suites/jdtls.toml")),
 ];
 
 /// What a suite does.
@@ -25,6 +28,12 @@ pub enum Kind {
     RgFloor,
     /// The E1 parse pipeline in process, stage by stage.
     E1,
+    /// The incremental proxies: an edit, a rebase and a switch, a widely used type, a reopen.
+    Incremental,
+    /// The kmp-lsp arm through hyperfine: its index, cached index, `refs` and `find`.
+    KmpLsp,
+    /// The jdtls arm behind `jfl-jdtls`, over LSP.
+    Jdtls,
 }
 
 /// Repetition knobs shared by every suite.
@@ -98,6 +107,43 @@ pub struct E1 {
     pub cold_stages: Vec<Stage>,
 }
 
+/// The `incremental` suite's knobs.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Incremental {
+    /// Worker threads for re-parsing a changed set and re-hashing a worktree.
+    pub threads: usize,
+    /// Files the `edit` case edits, picked by seed.
+    pub edits: usize,
+    /// Widely used types the `fanout` case measures.
+    pub fanout: usize,
+    /// Commit-pair roles to measure (`rebase`, `switch`), from `scripts/bench-corpus.sh pairs`.
+    #[serde(default)]
+    pub roles: Vec<String>,
+}
+
+/// The `kmp-lsp` arm's knobs.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Kmp {
+    /// Names picked by seed for `refs` and `find` (the same picks as `rg-floor`'s).
+    pub picked: usize,
+    /// Runs of the empty-cache index (each a full index, so fewer than the other series).
+    pub index_runs: u32,
+}
+
+/// The `jdtls` arm's knobs.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Jdtls {
+    /// Types picked by seed; each is queried at a use in another file.
+    pub sites: usize,
+    /// jdtls's heap cap (`-Xmx`, MiB).
+    pub heap_mib: u32,
+    /// The whole session's deadline (`timeout`), seconds.
+    pub deadline_secs: u64,
+}
+
 /// One suite.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -115,6 +161,12 @@ pub struct Suite {
     pub queries: Option<Queries>,
     /// `e1` only.
     pub e1: Option<E1>,
+    /// `incremental` only.
+    pub incremental: Option<Incremental>,
+    /// `kmp-lsp` only.
+    pub kmp: Option<Kmp>,
+    /// `jdtls` only.
+    pub jdtls: Option<Jdtls>,
 }
 
 impl Suite {
@@ -140,27 +192,73 @@ impl Suite {
         if self.run.runs == 0 {
             return Err(BenchError::new("suite: run.runs must be at least 1"));
         }
+        let sections = [
+            ("[queries]", self.queries.is_some(), Kind::RgFloor),
+            ("[e1]", self.e1.is_some(), Kind::E1),
+            (
+                "[incremental]",
+                self.incremental.is_some(),
+                Kind::Incremental,
+            ),
+            ("[kmp]", self.kmp.is_some(), Kind::KmpLsp),
+            ("[jdtls]", self.jdtls.is_some(), Kind::Jdtls),
+        ];
+        if let Some((section, _, owner)) = sections
+            .iter()
+            .find(|(_, present, owner)| *present && *owner != self.kind)
+        {
+            return Err(BenchError::new(format!(
+                "suite: {section} belongs to a {owner:?} suite, not {:?}",
+                self.kind
+            )));
+        }
+        if let Some((section, _, _)) = sections
+            .iter()
+            .find(|(_, present, owner)| !*present && *owner == self.kind)
+        {
+            return Err(BenchError::new(format!(
+                "suite: a {:?} suite needs {section}",
+                self.kind
+            )));
+        }
         match self.kind {
             Kind::RgFloor => {
-                let q = self
-                    .queries
-                    .as_ref()
-                    .context("suite: an rg-floor suite needs [queries]")?;
-                if q.fixed.is_empty() && q.picked == 0 {
+                if let Some(q) = &self.queries
+                    && q.fixed.is_empty()
+                    && q.picked == 0
+                {
                     return Err(BenchError::new("suite: [queries] selects nothing"));
-                }
-                if self.e1.is_some() {
-                    return Err(BenchError::new("suite: [e1] belongs to an e1 suite"));
                 }
             }
             Kind::E1 => {
-                let e = self.e1.as_ref().context("suite: an e1 suite needs [e1]")?;
-                if e.threads.is_empty() || e.threads.contains(&0) || e.stages.is_empty() {
+                if let Some(e) = &self.e1
+                    && (e.threads.is_empty() || e.threads.contains(&0) || e.stages.is_empty())
+                {
                     return Err(BenchError::new("suite: [e1] needs threads >= 1 and stages"));
                 }
-                if self.queries.is_some() {
+            }
+            Kind::Incremental => {
+                if let Some(i) = &self.incremental
+                    && (i.threads == 0 || i.edits == 0)
+                {
                     return Err(BenchError::new(
-                        "suite: [queries] belongs to an rg-floor suite",
+                        "suite: [incremental] needs threads >= 1 and edits >= 1",
+                    ));
+                }
+            }
+            Kind::KmpLsp => {
+                if let Some(k) = &self.kmp
+                    && k.picked == 0
+                {
+                    return Err(BenchError::new("suite: [kmp] picks no names"));
+                }
+            }
+            Kind::Jdtls => {
+                if let Some(j) = &self.jdtls
+                    && (j.sites == 0 || j.deadline_secs == 0)
+                {
+                    return Err(BenchError::new(
+                        "suite: [jdtls] needs sites >= 1 and a deadline",
                     ));
                 }
             }
@@ -217,7 +315,17 @@ mod tests {
         // when
         let err = Suite::parse(text).unwrap_err();
         // then
-        assert!(err.to_string().contains("[queries]"), "{err}");
+        assert!(err.to_string().contains("[e1] belongs to"), "{err}");
+    }
+
+    #[test]
+    fn should_name_the_missing_section_when_a_suite_lacks_its_own() {
+        // given
+        let text = "name = \"x\"\ndescription = \"d\"\nkind = \"incremental\"\n";
+        // when
+        let err = Suite::parse(text).unwrap_err();
+        // then
+        assert!(err.to_string().contains("needs [incremental]"), "{err}");
     }
 
     #[test]

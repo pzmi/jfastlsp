@@ -156,6 +156,14 @@ fn command_text(program: &str, args: &[&str]) -> Option<String> {
         .filter(|s| !s.is_empty())
 }
 
+/// The first line `program --version` prints, or `not found`: for an arm's binary that is not
+/// on `PATH`.
+pub fn version_of(program: &Path) -> String {
+    command_text(&program.to_string_lossy(), &["--version"])
+        .map(first_line)
+        .unwrap_or_else(|| "not found".to_string())
+}
+
 fn first_line(s: String) -> String {
     s.lines().next().unwrap_or("").trim().to_string()
 }

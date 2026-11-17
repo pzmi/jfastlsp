@@ -11,6 +11,9 @@ is `bench.yml`'s `bench-gate` (BENCH-04), which reads what this harness writes.
 just bench-corpus small            # fetch and verify the pinned corpus (BENCH-01), once
 just bench rg-floor small          # the ripgrep floor on junit-framework
 just bench e1 medium               # the E1 parse pipeline on spring-framework
+just bench incremental lombok      # the incremental proxies on fineract (fetches the commit pairs)
+just bench kmp-lsp medium          # the kmp-lsp arm (builds the pinned kmp-lsp once)
+just bench jdtls fixture           # the jdtls arm behind jfl-jdtls, on the synthetic fixture
 just bench path/to/suite.toml small
 jfl-bench compare a/e1-small.json b/e1-small.json     # two runs of one suite (default band 20 %)
 ```
@@ -38,6 +41,9 @@ A suite is a TOML file (`tools/jfl-bench/suites/`, embedded in the binary; or an
 | Suite | Measures | Tool | Metrics (`<suite>/<size>/...`) |
 |:--|:--|:--|:--|
 | `rg-floor` | `rg -c -w -t java --no-config --no-ignore-global --no-ignore-parent --no-ignore-exclude NAME ROOT`: what a name query costs with no index | hyperfine 2.0.0 (`-N`, 3 warm-ups, 20 runs) | per query slot `qNN`: `p50`, `p95` (ms), `rss_peak` (MiB), `matches`; the spike's own form `spike00` (`rg -c -t java '\bString\b' .` run in the checkout); over all slots: `p50`, `p95`, `rss_peak`; `cold_ms` |
+| `incremental` | syntax-tier **proxies** for an index kept fresh (BENCH-03): one edit, a rebase and a switch between the pinned commit pairs of `doc/bench-corpus.md`, the fan-out of the most-imported types, a warm reopen | `jfl-bench`, `git` | `<case>/proxy/...`: `edit/proxy/{rehash,reparse,decl_diff,total}_ms/{p50,p95}` (over edits of 20 seed-picked files), `{rebase,switch}/proxy/diff_ms`, `t4/reparse_ms`, `t4/total_ms`, `changed_files`, `deleted_files`; `fanout/kNN/proxy/{dependants,importers,mentions,scan_ms,t4/reparse_ms}`; `reopen/proxy/{walk_ms,stat_ms,t4/rehash_ms,t4/cold/rehash_ms}` |
+| `kmp-lsp` | the kmp-lsp arm at its pinned release (`scripts/kmp-lsp-fetch.sh`): `kmp-lsp index` with an empty cache and with its cache, `refs` and `find` for the first 10 of `rg-floor`'s picks | hyperfine 2.0.0 | `index_ms`, `index_rss_peak`, `index_cached_ms`; `refs/p50`, `refs/p95`, `find/p50`, `find/p95` (median over queries), `refs/rss_peak`, `find/rss_peak`; `refs/qNN/matches`, `find/qNN/matches` (result lines of one untimed run; an exit that is neither a result nor kmp-lsp's "nothing found" fails the run) |
+| `jdtls` | jdtls behind our proxy (`jfl-jdtls`, EVAL-11) over LSP: `initialize`, time to `ServiceReady`, then `definition`, `references`, `hover`, `workspace/symbol` at usage sites of seed-picked types; only `fixture` in the sandbox | `jfl-bench` (an LSP client) | `initialize_ms`, `ready_ms` (one session); per operation `p50`, `p95` (over all requests), `found`; `backend_rss_peak`, `backend_rss` (the JVM, bounded by the configured heap: jfl-jdtls sets `-Xms` to the cap up to 1 GiB), `backend_heap_used`, `backend_heap_committed` (`jcmd GC.heap_info`) |
 | `e1` | the E1 pipeline in process, stage by stage (`jfl-bench parse`, one process per measurement) | `jfl-bench` | per thread count `tN` and stage `read`, `hash`, `parse`, `extract` (cumulative): `work_ms`, `total_ms`; for the full index also `list_ms`, `files_per_s`, `mb_per_s`, `file_p50_ms`, `file_p95_ms`, `file_max_ms`, `rss_peak_mib`, `rss_steady_mib`, and the counts `files`, `err_files`, `failed_files`, `decls`; `cold/<stage>/work_ms` and `total_ms` |
 
 **Queries are picked from the corpus by seed**, not by hand, and **series are keyed by slot**
@@ -161,6 +167,28 @@ ms. Treat the spike's 0.04 s as a different method's number, not as a target.
 The spike's spring-framework `e1` row (1.04 s, 9,326 files/s, 46 MB) is 7 % faster in time, 11 %
 in files/s, and within 5 % on memory.
 
+## Comparison arms and the incremental suite (BENCH-03)
+
+The first baseline with every arm, the comparison against plan §1.7 and the recommendations for
+DEC-02 are in [`baseline.md`](baseline.md). In short:
+
+- **Arms.** The `rg` floor (`rg-floor`), **kmp-lsp** at a pinned release (`kmp-lsp`; its own
+  index and cache, timed end to end) and **jdtls behind `jfl-jdtls`** (`jdtls`, an LSP client in
+  the harness; no thread and no timed wait: the session runs under `timeout(1)`, which ends a
+  server that stops answering). jdtls's import runs the project's build, so the sandbox runs it
+  only on `fixture`, the synthetic three-module project in `tools/jfl-bench/fixtures/multi-module`,
+  with the Gradle and Maven imports off and its source roots given as `java.project.sourcePaths`;
+  a corpus run needs `--trusted-build` and is a `bench.yml` dispatch job (BENCH-04) or an owner
+  run. The fixture is opened as a scratch copy, because jdtls writes Eclipse metadata into it.
+- **Incremental suite.** Before IDX exists every series is a **proxy** and says so in its name
+  (`incremental/<size>/<case>/proxy/...`). The full metric of a case is written by the card that
+  makes it measurable, under the same case without `proxy` (`incremental/<size>/edit/generation_ms`
+  from IDX-09); the proxy series keeps running beside it, so the history shows how far the
+  product is above its own syntax-tier floor. `baseline.md` maps each proxy to its full metric and
+  card. The edit is applied in memory, so the corpus stays clean; the pairs are fetched into the
+  pinned checkout (`scripts/bench-corpus.sh fetch-pairs SIZE`, which `just bench incremental`
+  runs), which never moves.
+
 ## In-process benchmarks (the convention for product crates)
 
 The harness times a process from outside; a hot function is timed from inside, in the crate that
@@ -183,7 +211,7 @@ owns it. The convention, for the first product task with a hot path (IDX-07 onwa
 What needs a product arrives with it: freshness lag after an edit and `initialize` against a warm
 daemon with LSP-06 (the M1 gate) for `jfl`; the marginal cost of 1, 3 and 10 worktrees (the
 corpus helper `scripts/bench-corpus.sh worktrees` creates them) with LSP-06 for `jfl` and with E4 (EVAL-06) for
-jdtls; BENCH-03 adds the comparison arms beside `rg`.
+jdtls; BENCH-03 added the comparison arms beside `rg`.
 
 ## Adding a suite
 

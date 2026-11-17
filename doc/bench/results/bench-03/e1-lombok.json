@@ -1,0 +1,651 @@
+{
+  "schema": 1,
+  "suite": "e1",
+  "corpus": {
+    "size": "lombok",
+    "repo": "fineract",
+    "commit": "9dfe8dfe5e162afe09f102a9aa57d00a70c770f2",
+    "java_files": 7301
+  },
+  "machine": {
+    "cpu_model": "Intel(R) Xeon(R) Processor @ 2.10GHz",
+    "logical_cpus": 4,
+    "ram_mib": 16087,
+    "os": "Ubuntu 24.04.5 LTS",
+    "kernel": "Linux 6.18.44-fc-v553",
+    "arch": "x86_64",
+    "disk": {
+      "filesystem": "/dev/vda",
+      "size_gib": 251
+    },
+    "tools": {
+      "git": "git version 2.43.0",
+      "hyperfine": "hyperfine 2.0.0",
+      "rg": "ripgrep 15.2.0 (rev e89fff89ac)"
+    },
+    "commit": "e5658ac15fb0e15e142a2a005e68779e22e508c0",
+    "dirty": false
+  },
+  "build": {
+    "profile": "bench-tool",
+    "debug_assertions": false,
+    "toolchain": "1.97.0"
+  },
+  "queries": [],
+  "config": {
+    "runs": 3,
+    "warmup": 1,
+    "seed": 1
+  },
+  "metrics": [
+    {
+      "name": "e1/lombok/t1/read/work_ms",
+      "unit": "ms",
+      "better": "smaller",
+      "stat": "median of 3 runs",
+      "value": 48.017046,
+      "runs": [
+        63.575055000000006,
+        45.884063000000005,
+        48.017046
+      ],
+      "spread_pct": 36.84314940989915
+    },
+    {
+      "name": "e1/lombok/t1/read/total_ms",
+      "unit": "ms",
+      "better": "smaller",
+      "stat": "median of 3 runs",
+      "value": 119.41102,
+      "runs": [
+        145.425992,
+        113.70798,
+        119.41102
+      ],
+      "spread_pct": 26.562047623410308
+    },
+    {
+      "name": "e1/lombok/t1/hash/work_ms",
+      "unit": "ms",
+      "better": "smaller",
+      "stat": "median of 3 runs",
+      "value": 89.179313,
+      "runs": [
+        163.15121399999998,
+        89.179313,
+        75.55675600000001
+      ],
+      "spread_pct": 98.22284457383068
+    },
+    {
+      "name": "e1/lombok/t1/hash/total_ms",
+      "unit": "ms",
+      "better": "smaller",
+      "stat": "median of 3 runs",
+      "value": 142.77783,
+      "runs": [
+        237.696617,
+        142.77783,
+        126.418667
+      ],
+      "spread_pct": 77.93783530678398
+    },
+    {
+      "name": "e1/lombok/t1/parse/work_ms",
+      "unit": "ms",
+      "better": "smaller",
+      "stat": "median of 3 runs",
+      "value": 4707.774275000001,
+      "runs": [
+        4707.774275000001,
+        5015.724071000001,
+        4570.100014999999
+      ],
+      "spread_pct": 9.465705659815251
+    },
+    {
+      "name": "e1/lombok/t1/parse/total_ms",
+      "unit": "ms",
+      "better": "smaller",
+      "stat": "median of 3 runs",
+      "value": 4778.844646,
+      "runs": [
+        4778.844646,
+        5088.756373,
+        4639.727508
+      ],
+      "spread_pct": 9.396180421471694
+    },
+    {
+      "name": "e1/lombok/t1/extract/work_ms",
+      "unit": "ms",
+      "better": "smaller",
+      "stat": "median of 3 runs",
+      "value": 5893.852742,
+      "runs": [
+        5893.852742,
+        5938.545176,
+        5664.6518209999995
+      ],
+      "spread_pct": 4.647102107730268
+    },
+    {
+      "name": "e1/lombok/t1/extract/total_ms",
+      "unit": "ms",
+      "better": "smaller",
+      "stat": "median of 3 runs",
+      "value": 5964.907335999999,
+      "runs": [
+        5964.907335999999,
+        5994.755827999999,
+        5741.283049
+      ],
+      "spread_pct": 4.249400111720356
+    },
+    {
+      "name": "e1/lombok/t1/extract/list_ms",
+      "unit": "ms",
+      "better": "smaller",
+      "stat": "median of 3 runs",
+      "value": 71.054209,
+      "runs": [
+        71.054209,
+        56.210103,
+        76.63083
+      ],
+      "spread_pct": 28.73964440305008
+    },
+    {
+      "name": "e1/lombok/t1/extract/files_per_s",
+      "unit": "files/s",
+      "better": "larger",
+      "stat": "median of 3 runs",
+      "value": 1238.748289038946,
+      "runs": [
+        1238.748289038946,
+        1229.42568989897,
+        1288.8700366249748
+      ],
+      "spread_pct": 4.798742993390799
+    },
+    {
+      "name": "e1/lombok/t1/extract/mb_per_s",
+      "unit": "MB/s",
+      "better": "larger",
+      "stat": "median of 3 runs",
+      "value": 8.563922481523036,
+      "runs": [
+        8.563922481523036,
+        8.499471925209448,
+        8.910432555250955
+      ],
+      "spread_pct": 4.798742993390801
+    },
+    {
+      "name": "e1/lombok/t1/extract/file_p50_ms",
+      "unit": "ms",
+      "better": "smaller",
+      "stat": "median of 3 runs",
+      "value": 0.222082,
+      "runs": [
+        0.222082,
+        0.213833,
+        0.224467
+      ],
+      "spread_pct": 4.788321430822851
+    },
+    {
+      "name": "e1/lombok/t1/extract/file_p95_ms",
+      "unit": "ms",
+      "better": "smaller",
+      "stat": "median of 3 runs",
+      "value": 2.881583,
+      "runs": [
+        2.938453,
+        2.881583,
+        2.787444
+      ],
+      "spread_pct": 5.2404876069854724
+    },
+    {
+      "name": "e1/lombok/t1/extract/file_max_ms",
+      "unit": "ms",
+      "better": "smaller",
+      "stat": "median of 3 runs",
+      "value": 137.704999,
+      "runs": [
+        143.187259,
+        109.901036,
+        137.704999
+      ],
+      "spread_pct": 24.172123918319052
+    },
+    {
+      "name": "e1/lombok/t1/extract/rss_peak_mib",
+      "unit": "MiB",
+      "better": "smaller",
+      "stat": "median of 3 runs",
+      "value": 36.90234375,
+      "runs": [
+        36.90234375,
+        36.87890625,
+        36.90234375
+      ],
+      "spread_pct": 0.06351222610352493
+    },
+    {
+      "name": "e1/lombok/t1/extract/rss_steady_mib",
+      "unit": "MiB",
+      "better": "smaller",
+      "stat": "median of 3 runs",
+      "value": 36.90234375,
+      "runs": [
+        36.90234375,
+        36.87890625,
+        36.90234375
+      ],
+      "spread_pct": 0.06351222610352493
+    },
+    {
+      "name": "e1/lombok/t1/extract/files",
+      "unit": "count",
+      "better": "info",
+      "stat": "count",
+      "value": 7301.0,
+      "runs": [
+        7301.0
+      ],
+      "spread_pct": null
+    },
+    {
+      "name": "e1/lombok/t1/extract/err_files",
+      "unit": "count",
+      "better": "info",
+      "stat": "count",
+      "value": 0.0,
+      "runs": [
+        0.0
+      ],
+      "spread_pct": null
+    },
+    {
+      "name": "e1/lombok/t1/extract/failed_files",
+      "unit": "count",
+      "better": "info",
+      "stat": "count",
+      "value": 0.0,
+      "runs": [
+        0.0
+      ],
+      "spread_pct": null
+    },
+    {
+      "name": "e1/lombok/t1/extract/decls",
+      "unit": "count",
+      "better": "info",
+      "stat": "count",
+      "value": 186001.0,
+      "runs": [
+        186001.0
+      ],
+      "spread_pct": null
+    },
+    {
+      "name": "e1/lombok/t4/read/work_ms",
+      "unit": "ms",
+      "better": "smaller",
+      "stat": "median of 3 runs",
+      "value": 18.38791,
+      "runs": [
+        18.503334,
+        18.38791,
+        15.834291
+      ],
+      "spread_pct": 14.515205915191004
+    },
+    {
+      "name": "e1/lombok/t4/read/total_ms",
+      "unit": "ms",
+      "better": "smaller",
+      "stat": "median of 3 runs",
+      "value": 66.09960099999999,
+      "runs": [
+        66.09960099999999,
+        67.0205,
+        64.191024
+      ],
+      "spread_pct": 4.280624931457604
+    },
+    {
+      "name": "e1/lombok/t4/hash/work_ms",
+      "unit": "ms",
+      "better": "smaller",
+      "stat": "median of 3 runs",
+      "value": 20.43363,
+      "runs": [
+        20.43363,
+        20.091887,
+        21.017918
+      ],
+      "spread_pct": 4.531896682087332
+    },
+    {
+      "name": "e1/lombok/t4/hash/total_ms",
+      "unit": "ms",
+      "better": "smaller",
+      "stat": "median of 3 runs",
+      "value": 79.335243,
+      "runs": [
+        67.60512200000001,
+        84.749142,
+        79.335243
+      ],
+      "spread_pct": 21.60958907001772
+    },
+    {
+      "name": "e1/lombok/t4/parse/work_ms",
+      "unit": "ms",
+      "better": "smaller",
+      "stat": "median of 3 runs",
+      "value": 1386.0813730000002,
+      "runs": [
+        1521.0944720000002,
+        1386.0813730000002,
+        1279.649635
+      ],
+      "spread_pct": 17.419239714434877
+    },
+    {
+      "name": "e1/lombok/t4/parse/total_ms",
+      "unit": "ms",
+      "better": "smaller",
+      "stat": "median of 3 runs",
+      "value": 1440.564856,
+      "runs": [
+        1589.244591,
+        1440.564856,
+        1345.576591
+      ],
+      "spread_pct": 16.914753888734317
+    },
+    {
+      "name": "e1/lombok/t4/extract/work_ms",
+      "unit": "ms",
+      "better": "smaller",
+      "stat": "median of 3 runs",
+      "value": 1454.013507,
+      "runs": [
+        1439.687122,
+        1454.013507,
+        1500.0759320000002
+      ],
+      "spread_pct": 4.153249588760537
+    },
+    {
+      "name": "e1/lombok/t4/extract/total_ms",
+      "unit": "ms",
+      "better": "smaller",
+      "stat": "median of 3 runs",
+      "value": 1505.873851,
+      "runs": [
+        1495.7779549999998,
+        1505.873851,
+        1554.047366
+      ],
+      "spread_pct": 3.86947492057887
+    },
+    {
+      "name": "e1/lombok/t4/extract/list_ms",
+      "unit": "ms",
+      "better": "smaller",
+      "stat": "median of 3 runs",
+      "value": 53.971136,
+      "runs": [
+        56.090591,
+        51.859952,
+        53.971136
+      ],
+      "spread_pct": 7.838706600505876
+    },
+    {
+      "name": "e1/lombok/t4/extract/files_per_s",
+      "unit": "files/s",
+      "better": "larger",
+      "stat": "median of 3 runs",
+      "value": 5021.273849830887,
+      "runs": [
+        5071.240749766184,
+        5021.273849830887,
+        4867.086954902226
+      ],
+      "spread_pct": 4.065776951616246
+    },
+    {
+      "name": "e1/lombok/t4/extract/mb_per_s",
+      "unit": "MB/s",
+      "better": "larger",
+      "stat": "median of 3 runs",
+      "value": 34.71391273671297,
+      "runs": [
+        35.05935229168494,
+        34.71391273671297,
+        33.64796202863149
+      ],
+      "spread_pct": 4.065776951616234
+    },
+    {
+      "name": "e1/lombok/t4/extract/file_p50_ms",
+      "unit": "ms",
+      "better": "smaller",
+      "stat": "median of 3 runs",
+      "value": 0.225081,
+      "runs": [
+        0.225081,
+        0.234886,
+        0.222725
+      ],
+      "spread_pct": 5.402943829110411
+    },
+    {
+      "name": "e1/lombok/t4/extract/file_p95_ms",
+      "unit": "ms",
+      "better": "smaller",
+      "stat": "median of 3 runs",
+      "value": 2.83986,
+      "runs": [
+        2.793627,
+        2.83986,
+        3.014928
+      ],
+      "spread_pct": 7.792672878240476
+    },
+    {
+      "name": "e1/lombok/t4/extract/file_max_ms",
+      "unit": "ms",
+      "better": "smaller",
+      "stat": "median of 3 runs",
+      "value": 97.510413,
+      "runs": [
+        92.219089,
+        97.510413,
+        101.102292
+      ],
+      "spread_pct": 9.110004487418188
+    },
+    {
+      "name": "e1/lombok/t4/extract/rss_peak_mib",
+      "unit": "MiB",
+      "better": "smaller",
+      "stat": "median of 3 runs",
+      "value": 59.9375,
+      "runs": [
+        52.4765625,
+        59.9375,
+        60.1328125
+      ],
+      "spread_pct": 12.773722627737227
+    },
+    {
+      "name": "e1/lombok/t4/extract/rss_steady_mib",
+      "unit": "MiB",
+      "better": "smaller",
+      "stat": "median of 3 runs",
+      "value": 59.9375,
+      "runs": [
+        52.4765625,
+        59.9375,
+        60.1328125
+      ],
+      "spread_pct": 12.773722627737227
+    },
+    {
+      "name": "e1/lombok/t4/extract/files",
+      "unit": "count",
+      "better": "info",
+      "stat": "count",
+      "value": 7301.0,
+      "runs": [
+        7301.0
+      ],
+      "spread_pct": null
+    },
+    {
+      "name": "e1/lombok/t4/extract/err_files",
+      "unit": "count",
+      "better": "info",
+      "stat": "count",
+      "value": 0.0,
+      "runs": [
+        0.0
+      ],
+      "spread_pct": null
+    },
+    {
+      "name": "e1/lombok/t4/extract/failed_files",
+      "unit": "count",
+      "better": "info",
+      "stat": "count",
+      "value": 0.0,
+      "runs": [
+        0.0
+      ],
+      "spread_pct": null
+    },
+    {
+      "name": "e1/lombok/t4/extract/decls",
+      "unit": "count",
+      "better": "info",
+      "stat": "count",
+      "value": 186001.0,
+      "runs": [
+        186001.0
+      ],
+      "spread_pct": null
+    },
+    {
+      "name": "e1/lombok/t1/cold/read/work_ms",
+      "unit": "ms",
+      "better": "smaller",
+      "stat": "median of 3 runs",
+      "value": 375.664331,
+      "runs": [
+        386.12986,
+        375.664331,
+        302.13311799999997
+      ],
+      "spread_pct": 22.35952020688385
+    },
+    {
+      "name": "e1/lombok/t1/cold/read/total_ms",
+      "unit": "ms",
+      "better": "smaller",
+      "stat": "median of 3 runs",
+      "value": 554.5690989999999,
+      "runs": [
+        597.896074,
+        554.5690989999999,
+        500.284768
+      ],
+      "spread_pct": 17.601288311233514
+    },
+    {
+      "name": "e1/lombok/t1/cold/extract/work_ms",
+      "unit": "ms",
+      "better": "smaller",
+      "stat": "median of 3 runs",
+      "value": 6534.135929,
+      "runs": [
+        6289.513723,
+        6534.135929,
+        8689.28469
+      ],
+      "spread_pct": 36.72667653498397
+    },
+    {
+      "name": "e1/lombok/t1/cold/extract/total_ms",
+      "unit": "ms",
+      "better": "smaller",
+      "stat": "median of 3 runs",
+      "value": 6742.942217999999,
+      "runs": [
+        6495.494219,
+        6742.942217999999,
+        8937.798551
+      ],
+      "spread_pct": 36.220158100723026
+    },
+    {
+      "name": "e1/lombok/t4/cold/read/work_ms",
+      "unit": "ms",
+      "better": "smaller",
+      "stat": "median of 3 runs",
+      "value": 499.637718,
+      "runs": [
+        1008.185296,
+        499.637718,
+        280.353035
+      ],
+      "spread_pct": 145.67200088765117
+    },
+    {
+      "name": "e1/lombok/t4/cold/read/total_ms",
+      "unit": "ms",
+      "better": "smaller",
+      "stat": "median of 3 runs",
+      "value": 866.655008,
+      "runs": [
+        1896.658292,
+        866.655008,
+        581.637436
+      ],
+      "spread_pct": 151.73521688113297
+    },
+    {
+      "name": "e1/lombok/t4/cold/extract/work_ms",
+      "unit": "ms",
+      "better": "smaller",
+      "stat": "median of 3 runs",
+      "value": 2512.8369199999997,
+      "runs": [
+        2512.8369199999997,
+        2556.689495,
+        1619.445059
+      ],
+      "spread_pct": 37.29825953050707
+    },
+    {
+      "name": "e1/lombok/t4/cold/extract/total_ms",
+      "unit": "ms",
+      "better": "smaller",
+      "stat": "median of 3 runs",
+      "value": 2715.8976949999997,
+      "runs": [
+        2715.8976949999997,
+        2788.608824,
+        1841.089115
+      ],
+      "spread_pct": 34.88790136478245
+    }
+  ],
+  "notes": []
+}

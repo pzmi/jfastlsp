@@ -33,6 +33,24 @@ not in the tree and were not checked, because no Gradle run happens in the sandb
 snippets, positions or expectations derived from it; it contributes timings and memory numbers
 only.
 
+## Commit pairs (the incremental suite)
+
+The incremental suite of `tools/jfl-bench` (BENCH-03, [`bench/baseline.md`](bench/baseline.md))
+moves a checkout from an older commit to the pin: a **rebase** onto about a week of upstream and a
+**switch** from a branch about five weeks behind. `scripts/bench-corpus.sh fetch-pairs SIZE`
+fetches them shallow into the pinned checkout, which stays at its pin; `pairs SIZE` prints them;
+`check-doc` checks this table. Both are first-parent ancestors of the pin.
+
+| Size | Role | Commit | Distance to the pin | `.java` files changed |
+|:--|:--|:--|:--|--:|
+| medium | rebase | `f0fbdf71ed16a021c46eb42712057a184040b5aa` | 2026-11-06; 36 commits, 19 first-parent | 60 |
+| medium | switch | `a4566465f1f1d98bf52f5cc289b9e63b918bb9c3` | 2026-10-08; 240 commits, 150 first-parent (the E1 spike's second worktree) | 270 |
+| lombok | rebase | `12e7559288b9106accbbdfc0225c2745fef9582f` | 2026-11-10; 58 commits, 23 first-parent | 450 |
+| lombok | switch | `c5cc48a1371c14d2688be32bd99462c29c4b98e4` | 2026-10-10; 724 commits, 284 first-parent | 2,041 |
+
+Changed files are `git diff --name-only --no-renames <pair> <pin> -- '*.java'`, deletions
+included.
+
 ## Fetching
 
 `scripts/bench-corpus.sh [fetch] [small|medium|lombok|huge-files|large|large-permissive|all]`

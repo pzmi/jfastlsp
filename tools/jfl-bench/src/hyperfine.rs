@@ -41,6 +41,8 @@ pub struct Spec {
     pub ok_exit_codes: Vec<i32>,
     /// A shell command run before every run (hyperfine's `--prepare`): the cache drop.
     pub prepare: Option<String>,
+    /// Variables set for hyperfine, which its runs inherit (kmp-lsp's cache directory).
+    pub env: Vec<(String, String)>,
 }
 
 /// What the runs produced.
@@ -201,6 +203,7 @@ pub fn run(spec: &Spec, scratch: &Path) -> Result<Timings> {
     if let Some(cwd) = &spec.cwd {
         cmd.current_dir(cwd);
     }
+    cmd.envs(spec.env.iter().map(|(k, v)| (k, v)));
     let status = cmd
         .status()
         .context("run hyperfine (is it on PATH? `mise install --locked` pins it)")?;
@@ -225,6 +228,7 @@ mod tests {
             runs: 20,
             ok_exit_codes: vec![0, 1],
             prepare: Some("sync".into()),
+            env: Vec::new(),
         }
     }
 

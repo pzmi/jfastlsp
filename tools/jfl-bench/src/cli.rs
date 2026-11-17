@@ -7,6 +7,7 @@ use std::path::PathBuf;
 use crate::corpus;
 use crate::e1::{self, Stage};
 use crate::error::{BenchError, Context, Result};
+use crate::incremental;
 use crate::machine;
 use crate::queries;
 use crate::report::{self, Report};
@@ -27,13 +28,21 @@ usage: jfl-bench <command>
       --out DIR            where the JSON goes (default: target/bench)
       --runs N | --seed N  override the suite's repetitions or query seed
       --allow-debug        run a debug build anyway (refused otherwise; the report says so)
+      --kmp-lsp PATH       the kmp-lsp arm's binary (default: scripts/kmp-lsp-fetch.sh's)
+      --jfl-jdtls PATH     the jdtls arm's proxy (default: beside this binary)
+      --trusted-build      let the jdtls arm import a corpus checkout's Gradle build (never in the
+                           sandbox: a bench.yml dispatch job or the owner)
   compare A.json B.json  per-metric change between two reports [--band PCT, default 20] [--strict]
   parse ROOT             the E1 pipeline once, one JSON line [--threads N] [--upto read|hash|parse|extract]
   queries ROOT           queries picked by seed [--count N] [--seed N]
+  fanout ROOT            the most-imported project types and their dependants [--count N]
   machine                the machine facts as JSON [--corpus-path DIR] [--repo-root DIR]
   sample -- CMD ARGS...  run a command once and report its peak and steady RSS
 
-Suites built in: rg-floor, e1; or a path to a .toml suite. Reports, never gates.";
+SIZE is a corpus size of scripts/bench-corpus.sh, or `fixture` (the synthetic multi-module
+project of tools/jfl-bench/fixtures, the jdtls arm's sandbox input).
+Suites built in: rg-floor, e1, incremental, kmp-lsp, jdtls; or a path to a .toml suite.
+Reports, never gates.";
 
 /// Parsed `--flag value` pairs and positionals.
 #[derive(Default)]
@@ -113,10 +122,11 @@ pub fn run(args: Vec<OsString>) -> Result<()> {
     };
     let rest: Vec<OsString> = it.collect();
     match command.to_string_lossy().as_ref() {
-        "run" => cmd_run(parse_args(rest, &["allow-debug"])?),
+        "run" => cmd_run(parse_args(rest, &["allow-debug", "trusted-build"])?),
         "compare" => cmd_compare(parse_args(rest, &["strict"])?),
         "parse" => cmd_parse(parse_args(rest, &[])?),
         "queries" => cmd_queries(parse_args(rest, &[])?),
+        "fanout" => cmd_fanout(parse_args(rest, &[])?),
         "machine" => cmd_machine(parse_args(rest, &[])?),
         "sample" => cmd_sample(parse_args(rest, &[])?),
         "-h" | "--help" | "help" => {
@@ -130,7 +140,15 @@ pub fn run(args: Vec<OsString>) -> Result<()> {
 }
 
 fn cmd_run(p: Parsed) -> Result<()> {
-    p.only(&["corpus-path", "repo-root", "out", "runs", "seed"])?;
+    p.only(&[
+        "corpus-path",
+        "repo-root",
+        "out",
+        "runs",
+        "seed",
+        "kmp-lsp",
+        "jfl-jdtls",
+    ])?;
     if cfg!(debug_assertions) && !p.switch("allow-debug") {
         return Err(BenchError::new(
             "this is a debug build: its numbers are not measurements. Build with \
@@ -148,7 +166,10 @@ fn cmd_run(p: Parsed) -> Result<()> {
     if let Some(seed) = p.number::<u64>("seed")? {
         suite.run.seed = seed;
     }
-    let explicit = p.flag("corpus-path").map(PathBuf::from);
+    let explicit = p.flag("corpus-path").map(PathBuf::from).or_else(|| {
+        (size == runner::FIXTURE_SIZE)
+            .then(|| repo_root.join("tools/jfl-bench/fixtures/multi-module"))
+    });
     let corpus_root = corpus::locate(&repo_root, size, explicit.as_deref())?;
     let out_dir = PathBuf::from(p.flag("out").unwrap_or("target/bench"));
     let scratch = std::env::temp_dir().join(format!("jfl-bench-{}", std::process::id()));
@@ -159,6 +180,9 @@ fn cmd_run(p: Parsed) -> Result<()> {
         repo_root,
         exe: std::env::current_exe().context("locate this executable")?,
         scratch: scratch.clone(),
+        kmp_lsp: p.flag("kmp-lsp").map(PathBuf::from),
+        jfl_jdtls: p.flag("jfl-jdtls").map(PathBuf::from),
+        trusted_build: p.switch("trusted-build"),
     };
     let result = runner::run(&args, &runner::SystemCacheDrop);
     let _ = std::fs::remove_dir_all(&scratch);
@@ -278,6 +302,34 @@ fn cmd_queries(p: Parsed) -> Result<()> {
     println!(
         "{}",
         serde_json::to_string_pretty(&picked).context("encode the queries")?
+    );
+    Ok(())
+}
+
+fn cmd_fanout(p: Parsed) -> Result<()> {
+    p.only(&["count"])?;
+    let root = PathBuf::from(
+        p.positional
+            .first()
+            .context("fanout needs a root directory")?,
+    );
+    let picked = incremental::widely_used(&root, p.number::<usize>("count")?.unwrap_or(3))?;
+    let rows: Vec<serde_json::Value> = picked
+        .iter()
+        .enumerate()
+        .map(|(i, w)| {
+            serde_json::json!({
+                "slot": format!("k{i:02}"),
+                "type": w.fqn,
+                "importers": w.importers,
+                "dependants": w.dependants.len(),
+                "mentions": w.mentions,
+            })
+        })
+        .collect();
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&rows).context("encode the types")?
     );
     Ok(())
 }

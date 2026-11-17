@@ -116,8 +116,9 @@ pub struct RunResult {
     pub rss_end_kib: Option<u64>,
 }
 
-#[derive(Clone, Copy)]
-enum Kind {
+/// What a declaration is: the key a declaration diff compares, beside the name.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub(crate) enum Kind {
     Package,
     Import,
     Class,
@@ -130,9 +131,10 @@ enum Kind {
     Field,
 }
 
-struct Decl {
-    kind: Kind,
-    name: Box<str>,
+/// One extracted entry: a declaration, an import or the package clause.
+pub(crate) struct Decl {
+    pub(crate) kind: Kind,
+    pub(crate) name: Box<str>,
     start: (u32, u32),
     end: (u32, u32),
 }
@@ -331,21 +333,25 @@ fn ms(d: std::time::Duration) -> f64 {
     d.as_secs_f64() * 1e3
 }
 
-/// Run the pipeline once and measure it.
-pub fn run(options: &Options) -> Result<RunResult> {
+/// A parser for the orchard grammar.
+pub(crate) fn java_parser() -> Result<Parser> {
     let language: tree_sitter::Language = tree_sitter_java_orchard::LANGUAGE.into();
-    let pool = rayon::ThreadPoolBuilder::new()
-        .num_threads(options.threads)
-        .build()
-        .context("build the thread pool")?;
+    let mut parser = Parser::new();
+    parser
+        .set_language(&language)
+        .context("load the Java grammar")?;
+    Ok(parser)
+}
 
-    let t_all = Instant::now();
-    let files = list_java(&options.root);
-    let list = t_all.elapsed();
+/// Parse `src` from scratch and extract its entries; `None` when the parser gives up.
+pub(crate) fn parse_extract(parser: &mut Parser, src: &[u8]) -> Option<Vec<Decl>> {
+    parser.parse(src, None).map(|tree| extract(&tree, src))
+}
 
-    let t_work = Instant::now();
-    let upto = options.upto;
-    let results: Vec<FileOut> = pool.install(|| {
+/// The per-file stages up to `upto` over `files` on `pool`, one parser per worker.
+fn process_all(pool: &rayon::ThreadPool, files: &[PathBuf], upto: Stage) -> Vec<FileOut> {
+    let language: tree_sitter::Language = tree_sitter_java_orchard::LANGUAGE.into();
+    pool.install(|| {
         files
             .par_iter()
             .map_init(
@@ -356,7 +362,58 @@ pub fn run(options: &Options) -> Result<RunResult> {
                 |p, f| process(p.as_mut(), f, upto),
             )
             .collect()
-    });
+    })
+}
+
+/// What re-indexing a set of files cost: the pool's wall time, and what it found.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Batch {
+    /// Wall time of the per-file stages across the pool, ms (the pool is built before it).
+    pub work_ms: f64,
+    /// Files given.
+    pub files: u64,
+    /// Files that could not be read or parsed.
+    pub failed: u64,
+    /// Entries extracted (0 below the extract stage).
+    pub decls: u64,
+}
+
+/// Run the per-file stages up to `upto` over exactly `files` on `threads` workers: what an index
+/// does to the files a change touched.
+///
+/// Pinned by: `tests/incremental.rs` (a re-parse of the changed set counts what the diff found).
+pub fn index_files(files: &[PathBuf], threads: usize, upto: Stage) -> Result<Batch> {
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(threads.max(1))
+        .build()
+        .context("build the thread pool")?;
+    let t = Instant::now();
+    let results = process_all(&pool, files, upto);
+    let work = t.elapsed();
+    Ok(Batch {
+        work_ms: ms(work),
+        files: files.len() as u64,
+        failed: results.iter().filter(|r| r.failed).count() as u64,
+        decls: results
+            .iter()
+            .map(|r| r.decls.len() as u64)
+            .fold(0, u64::saturating_add),
+    })
+}
+
+/// Run the pipeline once and measure it.
+pub fn run(options: &Options) -> Result<RunResult> {
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(options.threads)
+        .build()
+        .context("build the thread pool")?;
+
+    let t_all = Instant::now();
+    let files = list_java(&options.root);
+    let list = t_all.elapsed();
+
+    let t_work = Instant::now();
+    let results = process_all(&pool, &files, options.upto);
     let work = t_work.elapsed();
     let total = t_all.elapsed();
 

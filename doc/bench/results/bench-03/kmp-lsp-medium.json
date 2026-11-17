@@ -1,0 +1,659 @@
+{
+  "schema": 1,
+  "suite": "kmp-lsp",
+  "corpus": {
+    "size": "medium",
+    "repo": "spring-framework",
+    "commit": "4cb62d893e09e23791d661e8d9b35aedee7006d0",
+    "java_files": 9294
+  },
+  "machine": {
+    "cpu_model": "Intel(R) Xeon(R) Processor @ 2.10GHz",
+    "logical_cpus": 4,
+    "ram_mib": 16087,
+    "os": "Ubuntu 24.04.5 LTS",
+    "kernel": "Linux 6.18.44-fc-v553",
+    "arch": "x86_64",
+    "disk": {
+      "filesystem": "/dev/vda",
+      "size_gib": 251
+    },
+    "tools": {
+      "git": "git version 2.43.0",
+      "hyperfine": "hyperfine 2.0.0",
+      "kmp-lsp": "kmp-lsp 0.27.0",
+      "kmp-lsp-build": "commit cd086c8fa363e442b88223ec8c23fa39ea41d609; toolchain rustc 1.97.0 (2d8144b78 2026-07-07); sha256 bc1f577443993dad5236294cf452ac00e8d30adad409e4c639da33cdffacf076",
+      "rg": "ripgrep 15.2.0 (rev e89fff89ac)"
+    },
+    "commit": "f7165fc39239c11a2984a0fb6406964de6ece86d",
+    "dirty": false
+  },
+  "build": {
+    "profile": "bench-tool",
+    "debug_assertions": false,
+    "toolchain": "1.99.1"
+  },
+  "queries": [
+    {
+      "slot": "q00",
+      "name_blake3": "bed57206790eefdd"
+    },
+    {
+      "slot": "q01",
+      "name_blake3": "5415134f64db4649"
+    },
+    {
+      "slot": "q02",
+      "name_blake3": "6f228539effc2213"
+    },
+    {
+      "slot": "q03",
+      "name_blake3": "c1072b477016de98"
+    },
+    {
+      "slot": "q04",
+      "name_blake3": "528f9033fd547efb"
+    },
+    {
+      "slot": "q05",
+      "name_blake3": "6a77b7e655c4ca6d"
+    },
+    {
+      "slot": "q06",
+      "name_blake3": "993c9dd5ca9281dc"
+    },
+    {
+      "slot": "q07",
+      "name_blake3": "e6585fc14dae3c8c"
+    },
+    {
+      "slot": "q08",
+      "name_blake3": "40e03c843e3bd367"
+    },
+    {
+      "slot": "q09",
+      "name_blake3": "4091571477deebd8"
+    }
+  ],
+  "config": {
+    "runs": 10,
+    "warmup": 1,
+    "seed": 1
+  },
+  "metrics": [
+    {
+      "name": "kmp-lsp/medium/index_ms",
+      "unit": "ms",
+      "better": "smaller",
+      "stat": "median of 5 runs",
+      "value": 7473.9407089999995,
+      "runs": [
+        7473.9407089999995,
+        7748.772185,
+        7583.442372,
+        7132.860656,
+        6815.799789
+      ],
+      "spread_pct": 12.48300504814722
+    },
+    {
+      "name": "kmp-lsp/medium/index_rss_peak",
+      "unit": "MiB",
+      "better": "smaller",
+      "stat": "max of 5 runs",
+      "value": 581.30078125,
+      "runs": [
+        567.32421875,
+        581.30078125,
+        578.40234375,
+        569.734375,
+        575.078125
+      ],
+      "spread_pct": 2.430376307566907
+    },
+    {
+      "name": "kmp-lsp/medium/index_cached_ms",
+      "unit": "ms",
+      "better": "smaller",
+      "stat": "median of 10 runs",
+      "value": 1431.868094,
+      "runs": [
+        1308.7659119999998,
+        1476.475036,
+        1265.739843,
+        1366.893949,
+        1404.505793,
+        1480.330728,
+        1390.890809,
+        1477.10492,
+        1519.177699,
+        1459.230395
+      ],
+      "spread_pct": 17.699804686059302
+    },
+    {
+      "name": "kmp-lsp/medium/refs/q00/matches",
+      "unit": "count",
+      "better": "info",
+      "stat": "count",
+      "value": 2.0,
+      "runs": [
+        2.0
+      ],
+      "spread_pct": null
+    },
+    {
+      "name": "kmp-lsp/medium/refs/q01/matches",
+      "unit": "count",
+      "better": "info",
+      "stat": "count",
+      "value": 1.0,
+      "runs": [
+        1.0
+      ],
+      "spread_pct": null
+    },
+    {
+      "name": "kmp-lsp/medium/refs/q02/matches",
+      "unit": "count",
+      "better": "info",
+      "stat": "count",
+      "value": 1.0,
+      "runs": [
+        1.0
+      ],
+      "spread_pct": null
+    },
+    {
+      "name": "kmp-lsp/medium/refs/q03/matches",
+      "unit": "count",
+      "better": "info",
+      "stat": "count",
+      "value": 2.0,
+      "runs": [
+        2.0
+      ],
+      "spread_pct": null
+    },
+    {
+      "name": "kmp-lsp/medium/refs/q04/matches",
+      "unit": "count",
+      "better": "info",
+      "stat": "count",
+      "value": 1.0,
+      "runs": [
+        1.0
+      ],
+      "spread_pct": null
+    },
+    {
+      "name": "kmp-lsp/medium/refs/q05/matches",
+      "unit": "count",
+      "better": "info",
+      "stat": "count",
+      "value": 105.0,
+      "runs": [
+        105.0
+      ],
+      "spread_pct": null
+    },
+    {
+      "name": "kmp-lsp/medium/refs/q06/matches",
+      "unit": "count",
+      "better": "info",
+      "stat": "count",
+      "value": 1.0,
+      "runs": [
+        1.0
+      ],
+      "spread_pct": null
+    },
+    {
+      "name": "kmp-lsp/medium/refs/q07/matches",
+      "unit": "count",
+      "better": "info",
+      "stat": "count",
+      "value": 9.0,
+      "runs": [
+        9.0
+      ],
+      "spread_pct": null
+    },
+    {
+      "name": "kmp-lsp/medium/refs/q08/matches",
+      "unit": "count",
+      "better": "info",
+      "stat": "count",
+      "value": 65.0,
+      "runs": [
+        65.0
+      ],
+      "spread_pct": null
+    },
+    {
+      "name": "kmp-lsp/medium/refs/q09/matches",
+      "unit": "count",
+      "better": "info",
+      "stat": "count",
+      "value": 2.0,
+      "runs": [
+        2.0
+      ],
+      "spread_pct": null
+    },
+    {
+      "name": "kmp-lsp/medium/refs/p50",
+      "unit": "ms",
+      "better": "smaller",
+      "stat": "median over 10 queries",
+      "value": 1443.7896515000002,
+      "runs": [
+        1508.6287045000001,
+        1433.9933765,
+        1507.337923,
+        1478.2144990000002,
+        1412.1828070000001,
+        1414.003702,
+        1427.5476875000002,
+        1426.8065345,
+        1453.5859265000001,
+        1584.890949
+      ],
+      "spread_pct": null
+    },
+    {
+      "name": "kmp-lsp/medium/refs/p95",
+      "unit": "ms",
+      "better": "smaller",
+      "stat": "median over 10 queries",
+      "value": 1622.830473,
+      "runs": [
+        1599.684675,
+        1514.357515,
+        1600.783472,
+        1663.6269920000002,
+        1594.8661749999999,
+        1574.538824,
+        1763.103111,
+        1644.8774740000001,
+        1697.7700810000001,
+        1675.468071
+      ],
+      "spread_pct": null
+    },
+    {
+      "name": "kmp-lsp/medium/refs/rss_peak",
+      "unit": "MiB",
+      "better": "smaller",
+      "stat": "max of 100 runs",
+      "value": 460.5859375,
+      "runs": [
+        459.7890625,
+        459.91796875,
+        459.828125,
+        460.08984375,
+        460.12109375,
+        460.1875,
+        459.921875,
+        459.53515625,
+        460.3671875,
+        459.92578125,
+        460.19921875,
+        460.3515625,
+        460.234375,
+        460.26171875,
+        460.20703125,
+        459.89453125,
+        460.34765625,
+        460.30859375,
+        460.03515625,
+        460.19921875,
+        460.33984375,
+        459.703125,
+        459.56640625,
+        460.34765625,
+        459.94921875,
+        459.921875,
+        460.23046875,
+        459.5234375,
+        459.80078125,
+        459.75,
+        460.09375,
+        460.24609375,
+        460.55859375,
+        459.56640625,
+        459.85546875,
+        459.98046875,
+        460.0078125,
+        459.7421875,
+        459.87890625,
+        460.05859375,
+        460.11328125,
+        459.91796875,
+        459.49609375,
+        460.0546875,
+        459.93359375,
+        460.06640625,
+        459.60546875,
+        460.12890625,
+        460.046875,
+        460.140625,
+        460.10546875,
+        459.65625,
+        460.15625,
+        460.1328125,
+        460.05078125,
+        459.97265625,
+        459.328125,
+        459.58203125,
+        460.30859375,
+        460.02734375,
+        460.30859375,
+        460.15625,
+        459.8984375,
+        460.3671875,
+        459.97265625,
+        460.53515625,
+        460.15625,
+        460.12890625,
+        460.125,
+        460.01171875,
+        460.171875,
+        460.421875,
+        460.00390625,
+        460.15234375,
+        460.15625,
+        460.06640625,
+        460.05859375,
+        460.26171875,
+        459.8359375,
+        460.046875,
+        459.33203125,
+        460.109375,
+        460.14453125,
+        460.38671875,
+        460.54296875,
+        460.43359375,
+        460.09375,
+        460.23046875,
+        459.62890625,
+        459.96875,
+        460.32421875,
+        460.109375,
+        459.96875,
+        460.1015625,
+        460.12109375,
+        459.83984375,
+        460.19140625,
+        460.5859375,
+        460.2109375,
+        460.30859375
+      ],
+      "spread_pct": 0.2733817836038851
+    },
+    {
+      "name": "kmp-lsp/medium/find/q00/matches",
+      "unit": "count",
+      "better": "info",
+      "stat": "count",
+      "value": 1.0,
+      "runs": [
+        1.0
+      ],
+      "spread_pct": null
+    },
+    {
+      "name": "kmp-lsp/medium/find/q01/matches",
+      "unit": "count",
+      "better": "info",
+      "stat": "count",
+      "value": 1.0,
+      "runs": [
+        1.0
+      ],
+      "spread_pct": null
+    },
+    {
+      "name": "kmp-lsp/medium/find/q02/matches",
+      "unit": "count",
+      "better": "info",
+      "stat": "count",
+      "value": 1.0,
+      "runs": [
+        1.0
+      ],
+      "spread_pct": null
+    },
+    {
+      "name": "kmp-lsp/medium/find/q03/matches",
+      "unit": "count",
+      "better": "info",
+      "stat": "count",
+      "value": 2.0,
+      "runs": [
+        2.0
+      ],
+      "spread_pct": null
+    },
+    {
+      "name": "kmp-lsp/medium/find/q04/matches",
+      "unit": "count",
+      "better": "info",
+      "stat": "count",
+      "value": 1.0,
+      "runs": [
+        1.0
+      ],
+      "spread_pct": null
+    },
+    {
+      "name": "kmp-lsp/medium/find/q05/matches",
+      "unit": "count",
+      "better": "info",
+      "stat": "count",
+      "value": 6.0,
+      "runs": [
+        6.0
+      ],
+      "spread_pct": null
+    },
+    {
+      "name": "kmp-lsp/medium/find/q06/matches",
+      "unit": "count",
+      "better": "info",
+      "stat": "count",
+      "value": 1.0,
+      "runs": [
+        1.0
+      ],
+      "spread_pct": null
+    },
+    {
+      "name": "kmp-lsp/medium/find/q07/matches",
+      "unit": "count",
+      "better": "info",
+      "stat": "count",
+      "value": 1.0,
+      "runs": [
+        1.0
+      ],
+      "spread_pct": null
+    },
+    {
+      "name": "kmp-lsp/medium/find/q08/matches",
+      "unit": "count",
+      "better": "info",
+      "stat": "count",
+      "value": 3.0,
+      "runs": [
+        3.0
+      ],
+      "spread_pct": null
+    },
+    {
+      "name": "kmp-lsp/medium/find/q09/matches",
+      "unit": "count",
+      "better": "info",
+      "stat": "count",
+      "value": 1.0,
+      "runs": [
+        1.0
+      ],
+      "spread_pct": null
+    },
+    {
+      "name": "kmp-lsp/medium/find/p50",
+      "unit": "ms",
+      "better": "smaller",
+      "stat": "median over 10 queries",
+      "value": 1574.8745052499999,
+      "runs": [
+        1468.7029955,
+        1529.993336,
+        1537.621462,
+        1603.9199320000002,
+        1585.8281525,
+        1563.920858,
+        1644.4646185000001,
+        1638.458878,
+        1733.280966,
+        1490.520868
+      ],
+      "spread_pct": null
+    },
+    {
+      "name": "kmp-lsp/medium/find/p95",
+      "unit": "ms",
+      "better": "smaller",
+      "stat": "median over 10 queries",
+      "value": 1896.607922,
+      "runs": [
+        1635.9637610000002,
+        1717.960375,
+        1710.0431350000001,
+        2065.193941,
+        1882.618739,
+        1910.5971049999998,
+        2019.378831,
+        2202.3548260000002,
+        2094.132605,
+        1808.770223
+      ],
+      "spread_pct": null
+    },
+    {
+      "name": "kmp-lsp/medium/find/rss_peak",
+      "unit": "MiB",
+      "better": "smaller",
+      "stat": "max of 100 runs",
+      "value": 463.2109375,
+      "runs": [
+        459.71875,
+        463.2109375,
+        460.4375,
+        459.98828125,
+        459.984375,
+        459.55078125,
+        459.76953125,
+        459.66015625,
+        460.19921875,
+        460.1796875,
+        460.2578125,
+        460.11328125,
+        459.78515625,
+        459.95703125,
+        460.109375,
+        460.41015625,
+        460.3125,
+        459.9453125,
+        460.49609375,
+        460.13671875,
+        459.75,
+        459.61328125,
+        459.84765625,
+        460.0546875,
+        459.7109375,
+        460.10546875,
+        459.60546875,
+        460.09765625,
+        460.05078125,
+        460.1484375,
+        460.01953125,
+        459.78515625,
+        460.11328125,
+        459.703125,
+        460.0703125,
+        459.6171875,
+        460.38671875,
+        459.60546875,
+        460.34765625,
+        460.03515625,
+        460.515625,
+        460.08984375,
+        460.1640625,
+        460.49609375,
+        460.31640625,
+        460.40625,
+        460.4296875,
+        460.1171875,
+        460.4609375,
+        460.35546875,
+        460.21484375,
+        460.02734375,
+        459.98828125,
+        460.11328125,
+        459.546875,
+        460.09375,
+        460.30078125,
+        460.41015625,
+        459.97265625,
+        460.0703125,
+        459.76953125,
+        460.1875,
+        460.16796875,
+        460.30859375,
+        459.58203125,
+        460.078125,
+        460.2890625,
+        460.01171875,
+        460.33984375,
+        460.01171875,
+        459.46484375,
+        460.25,
+        460.0546875,
+        460.27734375,
+        460.125,
+        460.12109375,
+        460.44140625,
+        459.80078125,
+        460.234375,
+        460.51953125,
+        460.19921875,
+        459.9375,
+        460.1484375,
+        459.85546875,
+        460.33203125,
+        459.9609375,
+        459.73046875,
+        459.91796875,
+        460.0234375,
+        460.11328125,
+        460.37890625,
+        459.828125,
+        459.63671875,
+        460.28125,
+        460.0390625,
+        459.4140625,
+        460.10546875,
+        460.1484375,
+        460.15234375,
+        459.69140625
+      ],
+      "spread_pct": 0.8252254087922163
+    }
+  ],
+  "notes": [
+    "kmp-lsp 0.27.0 (scripts/kmp-lsp-fetch.sh): its index also covers Kotlin and other sources it finds, and it walks with its own rules (fd if present, else a walk), so its file set is not exactly e1's",
+    "kmp-lsp: no fd on PATH; it listed files with its built-in walk"
+  ]
+}

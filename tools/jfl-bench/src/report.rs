@@ -129,6 +129,28 @@ impl Metric {
         }
     }
 
+    /// The `p`-th percentile (`label` `p95`) over `values` that are different measurements (one
+    /// per edit and run, one per request): no spread, as for [`Metric::median_over`].
+    pub fn percentile_over(
+        name: String,
+        unit: &str,
+        better: Better,
+        values: Vec<f64>,
+        p: f64,
+        label: &str,
+        what: &str,
+    ) -> Self {
+        Self {
+            name,
+            unit: unit.to_string(),
+            better,
+            stat: format!("{label} over {} {what}", values.len()),
+            value: stats::percentile(&values, p),
+            spread_pct: None,
+            runs: values,
+        }
+    }
+
     /// A metric with a single measurement, or a count.
     pub fn single(name: String, unit: &str, better: Better, value: f64) -> Self {
         Self {

@@ -138,15 +138,31 @@ private-names:
 bench-corpus size="small" cache="":
     bash scripts/bench-corpus.sh fetch {{quote(size)}} {{ if cache != "" { "--cache " + quote(cache) } else { "" } }}
 
-# The benchmark suites over the pinned corpus (BENCH-02, ADR 0031): JSON results with the machine's
-# facts in `out`. Reports, never gates: `check` and `land.sh` do not run it (fnd §9).
-# `just bench rg-floor small`, `just bench e1 medium`, `just bench path/to/suite.toml small`.
-bench suite="rg-floor" corpus="small" out="target/bench": _preflight (_require "hyperfine") (_require "rg") (bench-corpus corpus)
-    {{cargo}} build --locked --profile bench-tool -p jfl-bench
+# The benchmark suites over the pinned corpus (BENCH-02, BENCH-03, ADR 0031): JSON results with the
+# machine's facts in `out`. Reports, never gates: `check` and `land.sh` do not run it (fnd §9).
+# `just bench rg-floor small`, `just bench e1 medium`, `just bench incremental lombok`,
+# `just bench kmp-lsp medium`, `just bench jdtls fixture`, `just bench path/to/suite.toml small`.
+# Fetches what the suite needs first: the corpus (and its commit pairs for `incremental`), the
+# pinned kmp-lsp build or the pinned jdtls; `fixture` is the synthetic project in tools/jfl-bench.
+bench suite="rg-floor" corpus="small" out="target/bench": _preflight (_require "hyperfine") (_require "rg")
+    #!/usr/bin/env bash
+    set -euo pipefail
+    suite={{quote(suite)}}
+    corpus={{quote(corpus)}}
+    if [ "$corpus" != fixture ]; then
+      bash scripts/bench-corpus.sh fetch "$corpus"
+      if [ "$suite" = incremental ]; then bash scripts/bench-corpus.sh fetch-pairs "$corpus"; fi
+    fi
+    packages=(-p jfl-bench)
+    case "$suite" in
+      kmp-lsp) bash scripts/kmp-lsp-fetch.sh ;;
+      jdtls) bash scripts/jdtls-fetch.sh; packages+=(-p jfl-jdtls) ;;
+    esac
+    {{cargo}} build --locked --profile bench-tool "${packages[@]}"
     # The real binaries first on PATH: a mise shim in front of rg or hyperfine adds its own launcher's
     # start-up time and memory to every timed run.
     PATH="$(dirname "$(mise which hyperfine)"):$(dirname "$(mise which rg)"):$PATH" \
-      "${CARGO_TARGET_DIR:-target}/bench-tool/jfl-bench" run {{quote(suite)}} {{quote(corpus)}} --out {{quote(out)}}
+      "${CARGO_TARGET_DIR:-target}/bench-tool/jfl-bench" run "$suite" "$corpus" --out {{quote(out)}}
 
 # The pinned jdtls behind jfl-jdtls on the synthetic fixture (EVAL-11); needs Java 21+ and the download.
 jdtls-it:

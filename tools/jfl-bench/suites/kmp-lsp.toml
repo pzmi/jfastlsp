@@ -1,0 +1,16 @@
+# The kmp-lsp arm (BENCH-03, ADR 0031): a tree-sitter Java/Kotlin language server in Rust at a
+# pinned release (scripts/kmp-lsp-fetch.sh), timed end to end like the rg floor. Its index needs
+# no build of the corpus.
+name = "kmp-lsp"
+description = "kmp-lsp at a pinned release: full index with an empty and a warm cache, refs and find per picked name."
+kind = "kmp-lsp"
+
+[run]
+warmup = 1
+runs = 10
+seed = 1
+
+[kmp]
+# The first 10 of rg-floor's picks (same seed): a refs or find run loads kmp-lsp's whole cache.
+picked = 10
+index_runs = 5

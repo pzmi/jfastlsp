@@ -1,0 +1,659 @@
+{
+  "schema": 1,
+  "suite": "kmp-lsp",
+  "corpus": {
+    "size": "lombok",
+    "repo": "fineract",
+    "commit": "9dfe8dfe5e162afe09f102a9aa57d00a70c770f2",
+    "java_files": 7301
+  },
+  "machine": {
+    "cpu_model": "Intel(R) Xeon(R) Processor @ 2.10GHz",
+    "logical_cpus": 4,
+    "ram_mib": 16087,
+    "os": "Ubuntu 24.04.5 LTS",
+    "kernel": "Linux 6.18.44-fc-v553",
+    "arch": "x86_64",
+    "disk": {
+      "filesystem": "/dev/vda",
+      "size_gib": 251
+    },
+    "tools": {
+      "git": "git version 2.43.0",
+      "hyperfine": "hyperfine 2.0.0",
+      "kmp-lsp": "kmp-lsp 0.27.0",
+      "kmp-lsp-build": "commit cd086c8fa363e442b88223ec8c23fa39ea41d609; toolchain rustc 1.97.0 (2d8144b78 2026-07-07); sha256 bc1f577443993dad5236294cf452ac00e8d30adad409e4c639da33cdffacf076",
+      "rg": "ripgrep 15.2.0 (rev e89fff89ac)"
+    },
+    "commit": "f7165fc39239c11a2984a0fb6406964de6ece86d",
+    "dirty": false
+  },
+  "build": {
+    "profile": "bench-tool",
+    "debug_assertions": false,
+    "toolchain": "1.99.1"
+  },
+  "queries": [
+    {
+      "slot": "q00",
+      "name_blake3": "194d06cba1a264e8"
+    },
+    {
+      "slot": "q01",
+      "name_blake3": "6752598b74210fc1"
+    },
+    {
+      "slot": "q02",
+      "name_blake3": "72316b2554242b7c"
+    },
+    {
+      "slot": "q03",
+      "name_blake3": "36096112518a3826"
+    },
+    {
+      "slot": "q04",
+      "name_blake3": "c11989e21a7a8daf"
+    },
+    {
+      "slot": "q05",
+      "name_blake3": "569afb2f634a4ab5"
+    },
+    {
+      "slot": "q06",
+      "name_blake3": "507d8affc4d24f9b"
+    },
+    {
+      "slot": "q07",
+      "name_blake3": "510e0e42827bcbbd"
+    },
+    {
+      "slot": "q08",
+      "name_blake3": "817d60501fd1539b"
+    },
+    {
+      "slot": "q09",
+      "name_blake3": "074cf38633065b99"
+    }
+  ],
+  "config": {
+    "runs": 10,
+    "warmup": 1,
+    "seed": 1
+  },
+  "metrics": [
+    {
+      "name": "kmp-lsp/lombok/index_ms",
+      "unit": "ms",
+      "better": "smaller",
+      "stat": "median of 5 runs",
+      "value": 7303.285656,
+      "runs": [
+        6554.643091,
+        7261.618264,
+        7525.07302,
+        7303.285656,
+        8031.749870000001
+      ],
+      "spread_pct": 20.22523626453645
+    },
+    {
+      "name": "kmp-lsp/lombok/index_rss_peak",
+      "unit": "MiB",
+      "better": "smaller",
+      "stat": "max of 5 runs",
+      "value": 544.62890625,
+      "runs": [
+        544.62890625,
+        523.55078125,
+        529.6328125,
+        526.453125,
+        520.8203125
+      ],
+      "spread_pct": 4.522452734989463
+    },
+    {
+      "name": "kmp-lsp/lombok/index_cached_ms",
+      "unit": "ms",
+      "better": "smaller",
+      "stat": "median of 10 runs",
+      "value": 1317.9338625,
+      "runs": [
+        1125.5327790000001,
+        1487.249933,
+        1260.570872,
+        1537.3018789999999,
+        1355.338173,
+        1280.529552,
+        1445.862736,
+        1413.4144150000002,
+        1123.859639,
+        1224.511843
+      ],
+      "spread_pct": 31.37048464751772
+    },
+    {
+      "name": "kmp-lsp/lombok/refs/q00/matches",
+      "unit": "count",
+      "better": "info",
+      "stat": "count",
+      "value": 2.0,
+      "runs": [
+        2.0
+      ],
+      "spread_pct": null
+    },
+    {
+      "name": "kmp-lsp/lombok/refs/q01/matches",
+      "unit": "count",
+      "better": "info",
+      "stat": "count",
+      "value": 14.0,
+      "runs": [
+        14.0
+      ],
+      "spread_pct": null
+    },
+    {
+      "name": "kmp-lsp/lombok/refs/q02/matches",
+      "unit": "count",
+      "better": "info",
+      "stat": "count",
+      "value": 1.0,
+      "runs": [
+        1.0
+      ],
+      "spread_pct": null
+    },
+    {
+      "name": "kmp-lsp/lombok/refs/q03/matches",
+      "unit": "count",
+      "better": "info",
+      "stat": "count",
+      "value": 5.0,
+      "runs": [
+        5.0
+      ],
+      "spread_pct": null
+    },
+    {
+      "name": "kmp-lsp/lombok/refs/q04/matches",
+      "unit": "count",
+      "better": "info",
+      "stat": "count",
+      "value": 10.0,
+      "runs": [
+        10.0
+      ],
+      "spread_pct": null
+    },
+    {
+      "name": "kmp-lsp/lombok/refs/q05/matches",
+      "unit": "count",
+      "better": "info",
+      "stat": "count",
+      "value": 1.0,
+      "runs": [
+        1.0
+      ],
+      "spread_pct": null
+    },
+    {
+      "name": "kmp-lsp/lombok/refs/q06/matches",
+      "unit": "count",
+      "better": "info",
+      "stat": "count",
+      "value": 5.0,
+      "runs": [
+        5.0
+      ],
+      "spread_pct": null
+    },
+    {
+      "name": "kmp-lsp/lombok/refs/q07/matches",
+      "unit": "count",
+      "better": "info",
+      "stat": "count",
+      "value": 107.0,
+      "runs": [
+        107.0
+      ],
+      "spread_pct": null
+    },
+    {
+      "name": "kmp-lsp/lombok/refs/q08/matches",
+      "unit": "count",
+      "better": "info",
+      "stat": "count",
+      "value": 3.0,
+      "runs": [
+        3.0
+      ],
+      "spread_pct": null
+    },
+    {
+      "name": "kmp-lsp/lombok/refs/q09/matches",
+      "unit": "count",
+      "better": "info",
+      "stat": "count",
+      "value": 6.0,
+      "runs": [
+        6.0
+      ],
+      "spread_pct": null
+    },
+    {
+      "name": "kmp-lsp/lombok/refs/p50",
+      "unit": "ms",
+      "better": "smaller",
+      "stat": "median over 10 queries",
+      "value": 1318.0999155,
+      "runs": [
+        1304.1483509999998,
+        1345.7063465,
+        1326.079319,
+        1308.4522630000001,
+        1310.120512,
+        1474.7315415,
+        1434.4025165,
+        1284.2770685,
+        1347.4424135,
+        1251.062524
+      ],
+      "spread_pct": null
+    },
+    {
+      "name": "kmp-lsp/lombok/refs/p95",
+      "unit": "ms",
+      "better": "smaller",
+      "stat": "median over 10 queries",
+      "value": 1581.2563599999999,
+      "runs": [
+        1638.172056,
+        1533.994813,
+        1728.19169,
+        1628.517907,
+        1402.021307,
+        2003.6796689999999,
+        1669.387925,
+        1508.16471,
+        1474.768206,
+        1405.1062000000002
+      ],
+      "spread_pct": null
+    },
+    {
+      "name": "kmp-lsp/lombok/refs/rss_peak",
+      "unit": "MiB",
+      "better": "smaller",
+      "stat": "max of 100 runs",
+      "value": 367.1796875,
+      "runs": [
+        366.73046875,
+        367.11328125,
+        367.1796875,
+        366.640625,
+        366.70703125,
+        366.82421875,
+        366.59375,
+        366.76171875,
+        367.0078125,
+        366.94921875,
+        366.88671875,
+        366.9296875,
+        366.921875,
+        366.71875,
+        367.078125,
+        366.78515625,
+        366.875,
+        366.84765625,
+        367.03125,
+        366.89453125,
+        367.00390625,
+        366.796875,
+        366.796875,
+        366.76953125,
+        367.0,
+        366.84765625,
+        366.76171875,
+        366.94921875,
+        366.52734375,
+        366.78125,
+        366.94921875,
+        366.8515625,
+        366.828125,
+        366.90234375,
+        366.3125,
+        366.78515625,
+        367.0,
+        366.7109375,
+        367.1640625,
+        366.671875,
+        366.7578125,
+        366.9765625,
+        366.66015625,
+        366.78515625,
+        366.94140625,
+        366.7890625,
+        367.0390625,
+        366.8828125,
+        367.00390625,
+        366.75390625,
+        366.8671875,
+        367.08203125,
+        366.859375,
+        366.77734375,
+        366.36328125,
+        366.58984375,
+        366.47265625,
+        366.92578125,
+        366.85546875,
+        366.71484375,
+        366.75,
+        366.66796875,
+        366.81640625,
+        366.5625,
+        367.01171875,
+        367.0,
+        366.62890625,
+        366.91796875,
+        366.875,
+        366.83984375,
+        367.015625,
+        366.78125,
+        366.62109375,
+        366.53515625,
+        367.0234375,
+        366.76953125,
+        366.7421875,
+        366.8125,
+        366.84765625,
+        367.01953125,
+        366.93359375,
+        366.59765625,
+        366.80078125,
+        366.6015625,
+        366.84765625,
+        366.82421875,
+        366.875,
+        367.12890625,
+        366.984375,
+        366.859375,
+        366.73046875,
+        366.0859375,
+        367.06640625,
+        366.6796875,
+        366.90234375,
+        367.1640625,
+        366.70703125,
+        366.72265625,
+        366.9140625,
+        366.65234375
+      ],
+      "spread_pct": 0.29815939814395775
+    },
+    {
+      "name": "kmp-lsp/lombok/find/q00/matches",
+      "unit": "count",
+      "better": "info",
+      "stat": "count",
+      "value": 1.0,
+      "runs": [
+        1.0
+      ],
+      "spread_pct": null
+    },
+    {
+      "name": "kmp-lsp/lombok/find/q01/matches",
+      "unit": "count",
+      "better": "info",
+      "stat": "count",
+      "value": 1.0,
+      "runs": [
+        1.0
+      ],
+      "spread_pct": null
+    },
+    {
+      "name": "kmp-lsp/lombok/find/q02/matches",
+      "unit": "count",
+      "better": "info",
+      "stat": "count",
+      "value": 1.0,
+      "runs": [
+        1.0
+      ],
+      "spread_pct": null
+    },
+    {
+      "name": "kmp-lsp/lombok/find/q03/matches",
+      "unit": "count",
+      "better": "info",
+      "stat": "count",
+      "value": 1.0,
+      "runs": [
+        1.0
+      ],
+      "spread_pct": null
+    },
+    {
+      "name": "kmp-lsp/lombok/find/q04/matches",
+      "unit": "count",
+      "better": "info",
+      "stat": "count",
+      "value": 2.0,
+      "runs": [
+        2.0
+      ],
+      "spread_pct": null
+    },
+    {
+      "name": "kmp-lsp/lombok/find/q05/matches",
+      "unit": "count",
+      "better": "info",
+      "stat": "count",
+      "value": 1.0,
+      "runs": [
+        1.0
+      ],
+      "spread_pct": null
+    },
+    {
+      "name": "kmp-lsp/lombok/find/q06/matches",
+      "unit": "count",
+      "better": "info",
+      "stat": "count",
+      "value": 1.0,
+      "runs": [
+        1.0
+      ],
+      "spread_pct": null
+    },
+    {
+      "name": "kmp-lsp/lombok/find/q07/matches",
+      "unit": "count",
+      "better": "info",
+      "stat": "count",
+      "value": 2.0,
+      "runs": [
+        2.0
+      ],
+      "spread_pct": null
+    },
+    {
+      "name": "kmp-lsp/lombok/find/q08/matches",
+      "unit": "count",
+      "better": "info",
+      "stat": "count",
+      "value": 1.0,
+      "runs": [
+        1.0
+      ],
+      "spread_pct": null
+    },
+    {
+      "name": "kmp-lsp/lombok/find/q09/matches",
+      "unit": "count",
+      "better": "info",
+      "stat": "count",
+      "value": 1.0,
+      "runs": [
+        1.0
+      ],
+      "spread_pct": null
+    },
+    {
+      "name": "kmp-lsp/lombok/find/p50",
+      "unit": "ms",
+      "better": "smaller",
+      "stat": "median over 10 queries",
+      "value": 1117.212505,
+      "runs": [
+        1137.886356,
+        1117.200648,
+        1197.7617584999998,
+        1069.598463,
+        1093.2002185,
+        1151.390991,
+        1102.5906475000002,
+        1128.620258,
+        1067.449811,
+        1117.224362
+      ],
+      "spread_pct": null
+    },
+    {
+      "name": "kmp-lsp/lombok/find/p95",
+      "unit": "ms",
+      "better": "smaller",
+      "stat": "median over 10 queries",
+      "value": 1219.722143,
+      "runs": [
+        1234.471868,
+        1292.480157,
+        1272.594507,
+        1162.846317,
+        1177.0820760000001,
+        1204.320885,
+        1289.5730299999998,
+        1206.393231,
+        1203.2594530000001,
+        1233.051055
+      ],
+      "spread_pct": null
+    },
+    {
+      "name": "kmp-lsp/lombok/find/rss_peak",
+      "unit": "MiB",
+      "better": "smaller",
+      "stat": "max of 100 runs",
+      "value": 367.15625,
+      "runs": [
+        366.71484375,
+        366.78515625,
+        366.73046875,
+        366.66796875,
+        366.85546875,
+        366.8828125,
+        366.6796875,
+        366.64453125,
+        366.9296875,
+        366.76953125,
+        366.859375,
+        366.72265625,
+        366.734375,
+        366.90625,
+        366.92578125,
+        366.8828125,
+        366.64453125,
+        366.8828125,
+        366.859375,
+        366.88671875,
+        366.640625,
+        366.8125,
+        367.0234375,
+        366.80078125,
+        366.83203125,
+        366.69921875,
+        366.83203125,
+        366.9765625,
+        366.7578125,
+        366.79296875,
+        366.87890625,
+        366.2109375,
+        367.0546875,
+        366.90625,
+        366.9296875,
+        366.60546875,
+        366.93359375,
+        366.68359375,
+        366.39453125,
+        366.65625,
+        366.2890625,
+        366.7421875,
+        366.703125,
+        366.58984375,
+        366.62890625,
+        366.859375,
+        366.83984375,
+        366.8046875,
+        366.75390625,
+        367.0546875,
+        367.15625,
+        366.953125,
+        366.60546875,
+        366.87109375,
+        366.50390625,
+        366.7109375,
+        366.88671875,
+        366.80859375,
+        366.95703125,
+        366.6796875,
+        366.828125,
+        366.87109375,
+        367.03515625,
+        366.796875,
+        366.44921875,
+        366.75,
+        366.7109375,
+        366.91015625,
+        366.8046875,
+        366.71875,
+        366.70703125,
+        366.76953125,
+        366.671875,
+        366.76953125,
+        366.36328125,
+        366.96875,
+        366.98828125,
+        367.01953125,
+        366.8125,
+        366.734375,
+        366.7578125,
+        366.8203125,
+        366.609375,
+        366.6953125,
+        366.859375,
+        366.76171875,
+        366.7578125,
+        366.8203125,
+        366.46875,
+        366.734375,
+        366.546875,
+        366.66796875,
+        366.75390625,
+        366.5546875,
+        366.95703125,
+        366.79296875,
+        366.8125,
+        366.8203125,
+        366.6640625,
+        366.8359375
+      ],
+      "spread_pct": 0.2577264691473727
+    }
+  ],
+  "notes": [
+    "kmp-lsp 0.27.0 (scripts/kmp-lsp-fetch.sh): its index also covers Kotlin and other sources it finds, and it walks with its own rules (fd if present, else a walk), so its file set is not exactly e1's",
+    "kmp-lsp: no fd on PATH; it listed files with its built-in walk"
+  ]
+}

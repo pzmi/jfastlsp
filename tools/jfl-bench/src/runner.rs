@@ -9,10 +9,12 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use crate::arms;
 use crate::corpus;
 use crate::e1::{RunResult, Stage};
 use crate::error::{BenchError, Context, Result};
 use crate::hyperfine;
+use crate::incremental;
 use crate::machine;
 use crate::queries;
 use crate::report::{Better, Metric, QuerySlot, Report, RunFacts};
@@ -34,21 +36,35 @@ pub struct Args {
     pub exe: PathBuf,
     /// A scratch directory for hyperfine's export and captured output.
     pub scratch: PathBuf,
+    /// The kmp-lsp binary for the kmp-lsp arm (default: where `scripts/kmp-lsp-fetch.sh` puts it).
+    pub kmp_lsp: Option<PathBuf>,
+    /// The `jfl-jdtls` binary for the jdtls arm (default: beside this binary).
+    pub jfl_jdtls: Option<PathBuf>,
+    /// Let the jdtls arm import a corpus checkout's build (runs its Gradle build: a dispatch job
+    /// or the owner, never the sandbox).
+    pub trusted_build: bool,
 }
+
+/// The size name of the synthetic multi-module fixture (`tools/jfl-bench/fixtures/multi-module`),
+/// the only checkout the jdtls arm opens without `--trusted-build`.
+///
+/// Pinned by: `runner::tests::should_refuse_a_corpus_checkout_when_the_jdtls_arm_is_not_trusted`.
+pub const FIXTURE_SIZE: &str = "fixture";
 
 /// Run the suite and return its report.
 pub fn run(args: &Args, drop: &dyn CacheDrop) -> Result<Report> {
     std::fs::create_dir_all(&args.scratch).context(format!("create {}", args.scratch.display()))?;
-    let machine = machine::collect(
-        &args.repo_root,
-        &args.corpus_root,
-        &["hyperfine", "rg", "git"],
-    );
+    let tools: &[&str] = match args.suite.kind {
+        Kind::Jdtls => &["hyperfine", "rg", "git", "java"],
+        _ => &["hyperfine", "rg", "git"],
+    };
+    let mut machine = machine::collect(&args.repo_root, &args.corpus_root, tools);
     let corpus = corpus::describe(&args.corpus_root, &args.size)?;
     let mut notes = Vec::new();
     let driven: &[&str] = match args.suite.kind {
         Kind::RgFloor => &["rg", "hyperfine"],
-        Kind::E1 => &[],
+        Kind::KmpLsp => &["hyperfine"],
+        Kind::E1 | Kind::Incremental | Kind::Jdtls => &[],
     };
     for tool in driven {
         if machine::find_on_path(tool).is_some_and(|p| machine::is_shim(&p)) {
@@ -80,6 +96,67 @@ pub fn run(args: &Args, drop: &dyn CacheDrop) -> Result<Report> {
             let e = args.suite.e1.as_ref().context("e1 suite without [e1]")?;
             e1_suite(args, e, drop, &mut notes)?
         }
+        Kind::Incremental => {
+            let i = args
+                .suite
+                .incremental
+                .as_ref()
+                .context("incremental suite without [incremental]")?;
+            let (m, slots) = incremental_suite(args, i, drop, &mut notes)?;
+            query_slots = slots;
+            m
+        }
+        Kind::KmpLsp => {
+            let k = args
+                .suite
+                .kmp
+                .as_ref()
+                .context("kmp-lsp suite without [kmp]")?;
+            let kmp = args
+                .kmp_lsp
+                .clone()
+                .or_else(arms::default_kmp_lsp)
+                .context("no kmp-lsp path: pass --kmp-lsp PATH")?;
+            machine
+                .tools
+                .insert("kmp-lsp".to_string(), machine::version_of(&kmp));
+            // scripts/kmp-lsp-fetch.sh's record: the commit, toolchain and sha256 of the binary.
+            if let Some(verified) = kmp
+                .parent()
+                .and_then(Path::parent)
+                .and_then(|d| std::fs::read_to_string(d.join(".verified")).ok())
+            {
+                let build: Vec<&str> = verified.lines().map(str::trim).collect();
+                machine
+                    .tools
+                    .insert("kmp-lsp-build".to_string(), build.join("; "));
+            }
+            let (m, slots) = arms::kmp_suite(
+                &arms::KmpRun {
+                    size: &args.size,
+                    root: &args.corpus_root,
+                    kmp: &kmp,
+                    scratch: &args.scratch,
+                    warmup: args.suite.run.warmup,
+                    runs: args.suite.run.runs,
+                    seed: args.suite.run.seed,
+                },
+                k,
+                &mut notes,
+            )?;
+            query_slots = slots;
+            m
+        }
+        Kind::Jdtls => {
+            let j = args
+                .suite
+                .jdtls
+                .as_ref()
+                .context("jdtls suite without [jdtls]")?;
+            let (m, slots) = jdtls_suite(args, j, &mut notes)?;
+            query_slots = slots;
+            m
+        }
     };
     Ok(Report {
         schema: 1,
@@ -96,6 +173,102 @@ pub fn run(args: &Args, drop: &dyn CacheDrop) -> Result<Report> {
         metrics,
         notes,
     })
+}
+
+fn incremental_suite(
+    args: &Args,
+    i: &crate::suite::Incremental,
+    drop: &dyn CacheDrop,
+    notes: &mut Vec<String>,
+) -> Result<(Vec<Metric>, Vec<QuerySlot>)> {
+    let pairs = if i.roles.is_empty() {
+        Vec::new()
+    } else {
+        match incremental::read_pairs(&args.repo_root, &args.size) {
+            Ok(p) => p,
+            Err(e) => {
+                notes.push(format!("pairs: {e}"));
+                Vec::new()
+            }
+        }
+    };
+    let run = &args.suite.run;
+    let options = incremental::Options {
+        threads: i.threads,
+        warmup: run.warmup,
+        runs: run.runs,
+        cold_runs: run.cold_runs,
+        seed: run.seed,
+        edits: i.edits,
+        fanout: i.fanout,
+        roles: i.roles.clone(),
+    };
+    incremental::measure(&args.corpus_root, &args.size, &options, &pairs, drop, notes)
+}
+
+/// Copy the tree at `from` to `to` (files and directories only).
+fn copy_tree(from: &Path, to: &Path) -> Result<()> {
+    std::fs::create_dir_all(to).context(format!("create {}", to.display()))?;
+    for entry in std::fs::read_dir(from).context(format!("read {}", from.display()))? {
+        let entry = entry.context("read a directory entry")?;
+        let target = to.join(entry.file_name());
+        let kind = entry.file_type().context("read a file type")?;
+        if kind.is_dir() {
+            copy_tree(&entry.path(), &target)?;
+        } else if kind.is_file() {
+            std::fs::copy(entry.path(), &target)
+                .context(format!("copy {}", entry.path().display()))?;
+        }
+    }
+    Ok(())
+}
+
+fn jdtls_suite(
+    args: &Args,
+    j: &crate::suite::Jdtls,
+    notes: &mut Vec<String>,
+) -> Result<(Vec<Metric>, Vec<QuerySlot>)> {
+    let fixture = args.size == FIXTURE_SIZE;
+    if !fixture && !args.trusted_build {
+        return Err(BenchError::new(format!(
+            "the jdtls arm on the {} corpus imports its Gradle build, which never runs in the sandbox: \
+             run `jfl-bench run jdtls fixture` here, and the corpus run as a bench.yml dispatch job or \
+             an owner run with --trusted-build (doc/bench/baseline.md)",
+            args.size
+        )));
+    }
+    // jdtls writes Eclipse metadata into the project it opens: the fixture is opened as a scratch
+    // copy (a git root, as jfl-jdtls expects), never in this repository.
+    let root = if fixture {
+        let copy = args.scratch.join("fixture");
+        copy_tree(&args.corpus_root, &copy)?;
+        std::fs::create_dir_all(copy.join(".git")).context("mark the fixture copy a git root")?;
+        copy.canonicalize().context("resolve the fixture copy")?
+    } else {
+        notes.push(
+            "jdtls: trusted build: jdtls imported the checkout's Gradle build and wrote Eclipse metadata into it"
+                .to_string(),
+        );
+        args.corpus_root.clone()
+    };
+    let jfl_jdtls = match &args.jfl_jdtls {
+        Some(p) => p.clone(),
+        None => args.exe.with_file_name("jfl-jdtls"),
+    };
+    arms::jdtls_suite(
+        &arms::JdtlsRun {
+            size: &args.size,
+            root: &root,
+            jfl_jdtls: &jfl_jdtls,
+            scratch: &args.scratch,
+            trusted_build: args.trusted_build,
+            warmup: args.suite.run.warmup,
+            runs: args.suite.run.runs,
+            seed: args.suite.run.seed,
+        },
+        j,
+        notes,
+    )
 }
 
 /// The shell command hyperfine runs before every cold run (`--prepare`).
@@ -230,6 +403,7 @@ fn rg_floor(
                 runs: run.runs,
                 ok_exit_codes: vec![0, 1],
                 prepare: None,
+                env: Vec::new(),
             },
             &args.scratch,
         )?;
@@ -324,6 +498,7 @@ fn rg_floor(
                         runs: run.cold_runs,
                         ok_exit_codes: vec![0, 1],
                         prepare: Some(DROP_CACHES_COMMAND.to_string()),
+                        env: Vec::new(),
                     },
                     &args.scratch,
                 )?;
@@ -529,6 +704,39 @@ fn e1_cold(args: &Args, e: &E1, drop: &dyn CacheDrop) -> Result<Vec<Metric>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn jdtls_args(size: &str, scratch: &Path) -> Args {
+        Args {
+            suite: Suite::load("jdtls").unwrap(),
+            size: size.to_string(),
+            corpus_root: scratch.join("corpus"),
+            repo_root: PathBuf::from("."),
+            exe: scratch.join("jfl-bench"),
+            scratch: scratch.join("scratch"),
+            kmp_lsp: None,
+            jfl_jdtls: Some(scratch.join("no-such-jfl-jdtls")),
+            trusted_build: false,
+        }
+    }
+
+    #[test]
+    fn should_refuse_a_corpus_checkout_when_the_jdtls_arm_is_not_trusted() {
+        // given: a corpus size, no --trusted-build, and no jfl-jdtls that could be started
+        let scratch = std::env::temp_dir().join(format!("jfl-bench-refuse-{}", std::process::id()));
+        let args = jdtls_args("medium", &scratch);
+        let j = args.suite.jdtls.clone().unwrap();
+        let mut notes = Vec::new();
+        // when
+        let err = jdtls_suite(&args, &j, &mut notes).unwrap_err();
+        // then: refused before anything is copied or started
+        assert!(
+            err.to_string().contains("never runs in the sandbox"),
+            "{err}"
+        );
+        assert!(err.to_string().contains("--trusted-build"), "{err}");
+        assert!(!args.scratch.exists());
+        assert!(notes.is_empty());
+    }
 
     #[test]
     fn should_sum_the_counts_when_rg_prints_one_line_per_file() {

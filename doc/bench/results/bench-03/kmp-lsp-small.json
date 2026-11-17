@@ -1,0 +1,659 @@
+{
+  "schema": 1,
+  "suite": "kmp-lsp",
+  "corpus": {
+    "size": "small",
+    "repo": "junit-framework",
+    "commit": "e5198f9b098c550e66d378650f78bac8883e2a72",
+    "java_files": 1813
+  },
+  "machine": {
+    "cpu_model": "Intel(R) Xeon(R) Processor @ 2.10GHz",
+    "logical_cpus": 4,
+    "ram_mib": 16087,
+    "os": "Ubuntu 24.04.5 LTS",
+    "kernel": "Linux 6.18.44-fc-v553",
+    "arch": "x86_64",
+    "disk": {
+      "filesystem": "/dev/vda",
+      "size_gib": 251
+    },
+    "tools": {
+      "git": "git version 2.43.0",
+      "hyperfine": "hyperfine 2.0.0",
+      "kmp-lsp": "kmp-lsp 0.27.0",
+      "kmp-lsp-build": "commit cd086c8fa363e442b88223ec8c23fa39ea41d609; toolchain rustc 1.97.0 (2d8144b78 2026-07-07); sha256 bc1f577443993dad5236294cf452ac00e8d30adad409e4c639da33cdffacf076",
+      "rg": "ripgrep 15.2.0 (rev e89fff89ac)"
+    },
+    "commit": "f7165fc39239c11a2984a0fb6406964de6ece86d",
+    "dirty": false
+  },
+  "build": {
+    "profile": "bench-tool",
+    "debug_assertions": false,
+    "toolchain": "1.99.1"
+  },
+  "queries": [
+    {
+      "slot": "q00",
+      "name_blake3": "9d92ea3fdcad4b4a"
+    },
+    {
+      "slot": "q01",
+      "name_blake3": "00311f4ff0044931"
+    },
+    {
+      "slot": "q02",
+      "name_blake3": "ceafd2818f8dbc45"
+    },
+    {
+      "slot": "q03",
+      "name_blake3": "5a9cf2eaec2a34ef"
+    },
+    {
+      "slot": "q04",
+      "name_blake3": "d1b815d8db34b820"
+    },
+    {
+      "slot": "q05",
+      "name_blake3": "fcc341082fc68a25"
+    },
+    {
+      "slot": "q06",
+      "name_blake3": "f4344d35e0908a6a"
+    },
+    {
+      "slot": "q07",
+      "name_blake3": "2770c0dc7739ac6a"
+    },
+    {
+      "slot": "q08",
+      "name_blake3": "c44437d47c002a7e"
+    },
+    {
+      "slot": "q09",
+      "name_blake3": "f12c8467fd0b762b"
+    }
+  ],
+  "config": {
+    "runs": 10,
+    "warmup": 1,
+    "seed": 1
+  },
+  "metrics": [
+    {
+      "name": "kmp-lsp/small/index_ms",
+      "unit": "ms",
+      "better": "smaller",
+      "stat": "median of 5 runs",
+      "value": 1418.682075,
+      "runs": [
+        1418.682075,
+        1481.795545,
+        1432.1491939999999,
+        1348.9786669999999,
+        1286.135276
+      ],
+      "spread_pct": 13.791692476272388
+    },
+    {
+      "name": "kmp-lsp/small/index_rss_peak",
+      "unit": "MiB",
+      "better": "smaller",
+      "stat": "max of 5 runs",
+      "value": 150.12890625,
+      "runs": [
+        144.72265625,
+        150.12890625,
+        144.046875,
+        146.9453125,
+        140.51171875
+      ],
+      "spread_pct": 6.645253583092662
+    },
+    {
+      "name": "kmp-lsp/small/index_cached_ms",
+      "unit": "ms",
+      "better": "smaller",
+      "stat": "median of 10 runs",
+      "value": 235.394966,
+      "runs": [
+        232.127335,
+        267.823522,
+        233.97669,
+        205.360675,
+        257.273341,
+        236.813242,
+        220.957758,
+        243.167565,
+        211.748761,
+        243.01415200000002
+      ],
+      "spread_pct": 26.535336783710168
+    },
+    {
+      "name": "kmp-lsp/small/refs/q00/matches",
+      "unit": "count",
+      "better": "info",
+      "stat": "count",
+      "value": 3.0,
+      "runs": [
+        3.0
+      ],
+      "spread_pct": null
+    },
+    {
+      "name": "kmp-lsp/small/refs/q01/matches",
+      "unit": "count",
+      "better": "info",
+      "stat": "count",
+      "value": 4.0,
+      "runs": [
+        4.0
+      ],
+      "spread_pct": null
+    },
+    {
+      "name": "kmp-lsp/small/refs/q02/matches",
+      "unit": "count",
+      "better": "info",
+      "stat": "count",
+      "value": 2.0,
+      "runs": [
+        2.0
+      ],
+      "spread_pct": null
+    },
+    {
+      "name": "kmp-lsp/small/refs/q03/matches",
+      "unit": "count",
+      "better": "info",
+      "stat": "count",
+      "value": 2.0,
+      "runs": [
+        2.0
+      ],
+      "spread_pct": null
+    },
+    {
+      "name": "kmp-lsp/small/refs/q04/matches",
+      "unit": "count",
+      "better": "info",
+      "stat": "count",
+      "value": 4.0,
+      "runs": [
+        4.0
+      ],
+      "spread_pct": null
+    },
+    {
+      "name": "kmp-lsp/small/refs/q05/matches",
+      "unit": "count",
+      "better": "info",
+      "stat": "count",
+      "value": 8.0,
+      "runs": [
+        8.0
+      ],
+      "spread_pct": null
+    },
+    {
+      "name": "kmp-lsp/small/refs/q06/matches",
+      "unit": "count",
+      "better": "info",
+      "stat": "count",
+      "value": 1.0,
+      "runs": [
+        1.0
+      ],
+      "spread_pct": null
+    },
+    {
+      "name": "kmp-lsp/small/refs/q07/matches",
+      "unit": "count",
+      "better": "info",
+      "stat": "count",
+      "value": 1.0,
+      "runs": [
+        1.0
+      ],
+      "spread_pct": null
+    },
+    {
+      "name": "kmp-lsp/small/refs/q08/matches",
+      "unit": "count",
+      "better": "info",
+      "stat": "count",
+      "value": 29.0,
+      "runs": [
+        29.0
+      ],
+      "spread_pct": null
+    },
+    {
+      "name": "kmp-lsp/small/refs/q09/matches",
+      "unit": "count",
+      "better": "info",
+      "stat": "count",
+      "value": 5.0,
+      "runs": [
+        5.0
+      ],
+      "spread_pct": null
+    },
+    {
+      "name": "kmp-lsp/small/refs/p50",
+      "unit": "ms",
+      "better": "smaller",
+      "stat": "median over 10 queries",
+      "value": 264.74548975,
+      "runs": [
+        288.7410965,
+        267.273509,
+        257.677744,
+        253.511614,
+        278.41763349999997,
+        272.153989,
+        257.2970265,
+        256.074479,
+        262.2174705,
+        272.209599
+      ],
+      "spread_pct": null
+    },
+    {
+      "name": "kmp-lsp/small/refs/p95",
+      "unit": "ms",
+      "better": "smaller",
+      "stat": "median over 10 queries",
+      "value": 297.9245435,
+      "runs": [
+        311.616149,
+        320.130978,
+        300.641297,
+        277.86708000000004,
+        311.014858,
+        295.20779000000005,
+        266.243762,
+        281.05924000000005,
+        324.04611,
+        287.36107300000003
+      ],
+      "spread_pct": null
+    },
+    {
+      "name": "kmp-lsp/small/refs/rss_peak",
+      "unit": "MiB",
+      "better": "smaller",
+      "stat": "max of 100 runs",
+      "value": 85.85546875,
+      "runs": [
+        85.33203125,
+        85.4921875,
+        85.5390625,
+        85.46484375,
+        85.671875,
+        85.21875,
+        85.63671875,
+        85.46484375,
+        85.70703125,
+        85.4296875,
+        85.13671875,
+        85.63671875,
+        85.85546875,
+        85.66796875,
+        85.66796875,
+        85.4765625,
+        85.23046875,
+        85.58984375,
+        85.3359375,
+        85.69921875,
+        85.62109375,
+        85.63671875,
+        85.0703125,
+        85.53125,
+        85.83203125,
+        85.453125,
+        85.7109375,
+        85.44140625,
+        85.37109375,
+        85.546875,
+        85.27734375,
+        85.5390625,
+        85.37890625,
+        85.4375,
+        85.4140625,
+        85.21484375,
+        85.45703125,
+        85.53515625,
+        85.42578125,
+        85.390625,
+        85.359375,
+        85.3671875,
+        85.6640625,
+        85.33984375,
+        85.48828125,
+        85.39453125,
+        85.65234375,
+        85.34375,
+        85.2421875,
+        85.5234375,
+        85.65234375,
+        85.4296875,
+        85.36328125,
+        85.46484375,
+        85.484375,
+        85.39453125,
+        85.6796875,
+        85.703125,
+        84.984375,
+        85.65625,
+        85.0703125,
+        85.41015625,
+        85.58203125,
+        85.44140625,
+        85.52734375,
+        85.5234375,
+        85.421875,
+        85.58203125,
+        85.62109375,
+        85.6328125,
+        85.51171875,
+        85.5390625,
+        85.4609375,
+        85.46875,
+        85.69140625,
+        85.40625,
+        85.44140625,
+        85.48828125,
+        85.4453125,
+        85.37109375,
+        85.39453125,
+        85.58203125,
+        85.64453125,
+        85.609375,
+        85.52734375,
+        85.58984375,
+        85.29296875,
+        85.4296875,
+        85.65625,
+        85.640625,
+        85.50390625,
+        85.59375,
+        85.69140625,
+        85.38671875,
+        85.41796875,
+        85.4765625,
+        85.65234375,
+        85.6484375,
+        85.31640625,
+        85.18359375
+      ],
+      "spread_pct": 1.0190558881323402
+    },
+    {
+      "name": "kmp-lsp/small/find/q00/matches",
+      "unit": "count",
+      "better": "info",
+      "stat": "count",
+      "value": 1.0,
+      "runs": [
+        1.0
+      ],
+      "spread_pct": null
+    },
+    {
+      "name": "kmp-lsp/small/find/q01/matches",
+      "unit": "count",
+      "better": "info",
+      "stat": "count",
+      "value": 2.0,
+      "runs": [
+        2.0
+      ],
+      "spread_pct": null
+    },
+    {
+      "name": "kmp-lsp/small/find/q02/matches",
+      "unit": "count",
+      "better": "info",
+      "stat": "count",
+      "value": 2.0,
+      "runs": [
+        2.0
+      ],
+      "spread_pct": null
+    },
+    {
+      "name": "kmp-lsp/small/find/q03/matches",
+      "unit": "count",
+      "better": "info",
+      "stat": "count",
+      "value": 2.0,
+      "runs": [
+        2.0
+      ],
+      "spread_pct": null
+    },
+    {
+      "name": "kmp-lsp/small/find/q04/matches",
+      "unit": "count",
+      "better": "info",
+      "stat": "count",
+      "value": 2.0,
+      "runs": [
+        2.0
+      ],
+      "spread_pct": null
+    },
+    {
+      "name": "kmp-lsp/small/find/q05/matches",
+      "unit": "count",
+      "better": "info",
+      "stat": "count",
+      "value": 2.0,
+      "runs": [
+        2.0
+      ],
+      "spread_pct": null
+    },
+    {
+      "name": "kmp-lsp/small/find/q06/matches",
+      "unit": "count",
+      "better": "info",
+      "stat": "count",
+      "value": 1.0,
+      "runs": [
+        1.0
+      ],
+      "spread_pct": null
+    },
+    {
+      "name": "kmp-lsp/small/find/q07/matches",
+      "unit": "count",
+      "better": "info",
+      "stat": "count",
+      "value": 1.0,
+      "runs": [
+        1.0
+      ],
+      "spread_pct": null
+    },
+    {
+      "name": "kmp-lsp/small/find/q08/matches",
+      "unit": "count",
+      "better": "info",
+      "stat": "count",
+      "value": 1.0,
+      "runs": [
+        1.0
+      ],
+      "spread_pct": null
+    },
+    {
+      "name": "kmp-lsp/small/find/q09/matches",
+      "unit": "count",
+      "better": "info",
+      "stat": "count",
+      "value": 2.0,
+      "runs": [
+        2.0
+      ],
+      "spread_pct": null
+    },
+    {
+      "name": "kmp-lsp/small/find/p50",
+      "unit": "ms",
+      "better": "smaller",
+      "stat": "median over 10 queries",
+      "value": 246.99464450000002,
+      "runs": [
+        265.936917,
+        250.71486650000003,
+        261.92635800000005,
+        266.95118,
+        243.27442250000001,
+        254.82727400000005,
+        228.63614750000002,
+        240.05912949999998,
+        238.722758,
+        233.0308455
+      ],
+      "spread_pct": null
+    },
+    {
+      "name": "kmp-lsp/small/find/p95",
+      "unit": "ms",
+      "better": "smaller",
+      "stat": "median over 10 queries",
+      "value": 275.07673150000005,
+      "runs": [
+        287.03443,
+        294.5624,
+        287.486152,
+        287.912009,
+        270.06535800000006,
+        277.007962,
+        266.771502,
+        270.65547100000003,
+        273.145501,
+        260.145979
+      ],
+      "spread_pct": null
+    },
+    {
+      "name": "kmp-lsp/small/find/rss_peak",
+      "unit": "MiB",
+      "better": "smaller",
+      "stat": "max of 100 runs",
+      "value": 85.859375,
+      "runs": [
+        85.74609375,
+        85.55078125,
+        85.5625,
+        85.62890625,
+        85.4609375,
+        85.61328125,
+        85.46484375,
+        85.578125,
+        85.59375,
+        85.5625,
+        85.5859375,
+        85.40625,
+        85.1875,
+        85.40234375,
+        85.5234375,
+        85.5234375,
+        85.4921875,
+        85.3828125,
+        85.41796875,
+        85.53125,
+        85.53515625,
+        85.17578125,
+        85.3125,
+        85.609375,
+        85.5703125,
+        85.37890625,
+        85.4765625,
+        85.58203125,
+        85.08984375,
+        85.48828125,
+        85.61328125,
+        85.48828125,
+        85.4296875,
+        85.07421875,
+        85.33203125,
+        85.44140625,
+        85.37890625,
+        84.96875,
+        85.43359375,
+        85.33984375,
+        85.53125,
+        85.38671875,
+        85.328125,
+        85.5390625,
+        85.65625,
+        85.32421875,
+        85.35546875,
+        85.80078125,
+        85.5625,
+        85.69921875,
+        85.6328125,
+        85.5390625,
+        85.4453125,
+        85.5078125,
+        85.49609375,
+        85.44140625,
+        85.5078125,
+        85.484375,
+        85.45703125,
+        85.40625,
+        85.30078125,
+        85.5,
+        85.546875,
+        85.58984375,
+        85.40625,
+        85.28125,
+        85.5703125,
+        84.796875,
+        85.51953125,
+        85.58203125,
+        85.46875,
+        85.2109375,
+        85.26953125,
+        85.5546875,
+        85.38671875,
+        85.49609375,
+        85.41015625,
+        85.5390625,
+        85.515625,
+        85.55859375,
+        85.56640625,
+        85.53515625,
+        85.34375,
+        85.39453125,
+        85.5078125,
+        85.61328125,
+        85.55859375,
+        85.42578125,
+        85.44140625,
+        85.25,
+        85.48828125,
+        85.5234375,
+        85.48828125,
+        85.859375,
+        85.35546875,
+        85.48046875,
+        85.4609375,
+        85.4921875,
+        84.9921875,
+        85.58203125
+      ],
+      "spread_pct": 1.242860406671236
+    }
+  ],
+  "notes": [
+    "kmp-lsp 0.27.0 (scripts/kmp-lsp-fetch.sh): its index also covers Kotlin and other sources it finds, and it walks with its own rules (fd if present, else a walk), so its file set is not exactly e1's",
+    "kmp-lsp: no fd on PATH; it listed files with its built-in walk"
+  ]
+}

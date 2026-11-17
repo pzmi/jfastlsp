@@ -8,6 +8,8 @@
 #   scripts/bench-corpus.sh worktrees SIZE N [--cache DIR] add N linked worktrees (default 10)
 #   scripts/bench-corpus.sh clean-worktrees SIZE [--cache DIR]
 #   scripts/bench-corpus.sh path SIZE [--cache DIR]        print the checkout path
+#   scripts/bench-corpus.sh pairs SIZE                     print SIZE's commit pairs (role sha)
+#   scripts/bench-corpus.sh fetch-pairs SIZE [--cache DIR] fetch them into the checkout (BENCH-03)
 #   scripts/bench-corpus.sh check-doc                      pins here match doc/bench-corpus.md
 #
 # SIZE is small | medium | lombok | huge-files | large | large-permissive | all. `all` fetches the six;
@@ -42,6 +44,20 @@ large-permissive|gradle|gradle/gradle|db675891c2bcf8e3c9a7c66ac9de429170a8a9cd|1
 PINS
 }
 
+# The incremental suite's commit pairs (BENCH-03): for a size, an older commit the checkout moves
+# from to its pin, as a rebase onto a week of upstream and as a switch from a branch about five
+# weeks behind. Fetched shallow into the pinned checkout (`fetch-pairs`), which never moves: the
+# suite diffs the two trees and re-reads the pin's files.
+# size|role|commit|what it is
+pairs_table() {
+  cat <<'PAIRS'
+medium|rebase|f0fbdf71ed16a021c46eb42712057a184040b5aa|2026-11-06, 36 commits (19 first-parent) before the pin
+medium|switch|a4566465f1f1d98bf52f5cc289b9e63b918bb9c3|2026-10-08, 240 commits (150 first-parent) before the pin; the E1 spike's second worktree
+lombok|rebase|12e7559288b9106accbbdfc0225c2745fef9582f|2026-11-10, 58 commits (23 first-parent) before the pin
+lombok|switch|c5cc48a1371c14d2688be32bd99462c29c4b98e4|2026-10-10, 724 commits (284 first-parent) before the pin
+PAIRS
+}
+
 die() { echo "bench-corpus: $*" >&2; exit 1; }
 say() { echo "bench-corpus: $*" >&2; }
 
@@ -59,7 +75,7 @@ done
 set -- "${args[@]+"${args[@]}"}"
 
 cmd="fetch"
-case "${1:-}" in fetch | worktrees | clean-worktrees | path | check-doc) cmd="$1"; shift ;; esac
+case "${1:-}" in fetch | worktrees | clean-worktrees | path | pairs | fetch-pairs | check-doc) cmd="$1"; shift ;; esac
 
 resolve_cache() {
   local dir="${cache:-${XDG_CACHE_HOME:-$HOME/.cache}/jfastlsp/bench-corpus}" probe rest="" real
@@ -134,7 +150,16 @@ doc_check() {
     n="$(awk -v s="$count" 'BEGIN { o = ""; while (length(s) > 3) { o = "," substr(s, length(s) - 2) o; s = substr(s, 1, length(s) - 3) } print s o }')"
     grep -F "$sha" "$f" | grep -q "| $n |" || { say "doc/bench-corpus.md lacks $n .java files for $name"; bad=1; }
   done < <(pins)
+  while IFS='|' read -r size role sha _; do
+    grep -qF "| $size | $role | \`$sha\` |" "$f" || { say "doc/bench-corpus.md lacks the row | $size | $role | $sha |"; bad=1; }
+  done < <(pairs_table)
   return "$bad"
+}
+
+# the pair lines of one size, as "role sha"; none for a size without pairs
+size_pairs() {
+  select_sizes "$1" >/dev/null
+  pairs_table | awk -F'|' -v s="$1" '$1 == s { print $2, $3 }'
 }
 
 case "$cmd" in
@@ -146,6 +171,30 @@ case "$cmd" in
     while IFS='|' read -r size name slug sha count licence; do
       fetch_one "$size" "$name" "$slug" "$sha" "$count" "$licence"
     done <<<"$selected"
+    ;;
+  pairs)
+    size="${1:-}"; [ -n "$size" ] || die "pairs needs a SIZE"
+    size_pairs "$size"
+    ;;
+  fetch-pairs)
+    size="${1:-}"; [ -n "$size" ] || die "fetch-pairs needs a SIZE"
+    [ "$size" != all ] || die "fetch-pairs takes one size"
+    wanted="$(size_pairs "$size")"
+    [ -n "$wanted" ] || { say "$size has no commit pairs"; exit 0; }
+    cache_dir="$(resolve_cache)"
+    read -r name sha count < <(one_pin "$size")
+    dest="$cache_dir/$name"
+    [ -f "$dest/.git/jfl-corpus-verified" ] || die "$name is not fetched; run: scripts/bench-corpus.sh fetch $size"
+    while read -r role psha; do
+      if git -C "$dest" cat-file -e "$psha^{commit}" 2>/dev/null; then
+        say "$name: $role pair $psha present"
+        continue
+      fi
+      say "$name: fetching the $role pair $psha"
+      GIT_TERMINAL_PROMPT=0 git -C "$dest" fetch -q --depth 1 --no-tags origin "$psha"
+      git -C "$dest" cat-file -e "$psha^{commit}" || die "$name: the $role pair $psha did not arrive"
+    done <<<"$wanted"
+    verify "$dest" "$sha" "$count" || die "$name failed verification after fetching its pairs"
     ;;
   path)
     cache_dir="$(resolve_cache)"
