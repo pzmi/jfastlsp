@@ -141,6 +141,7 @@ targets), **IDX-15** (M1 and the blocking bench gate), **LSP-06** (M2), **SEM-07
 | BENCH-03 | Comparison arms and the first baseline | BENCH-02, EVAL-11 | standard | M |  | FND-06 |
 | BENCH-04 | Results history and the regression gate on one runner class | BENCH-03, FND-05 | standard | S |  | FORMAL-01 |
 | BENCH-05 | Real-corpus golden cases | BENCH-04, EVAL-08 | deep | M |  | EVAL-10 |
+| BENCH-06 | Lombok repository in the corpus and as a second evaluation target | BENCH-01 | standard | S |  | BENCH-05 |
 | FORMAL-01 | Formal toolchain: Quint, Apalache, JDK pins, `MODELS`, formal stages | FND-05 | standard | M |  | EVAL-12, BENCH-04 |
 | FORMAL-02 | Conformance harness: quint-connect drivers, committed-trace replay, negative controls | FORMAL-01 | deep | M |  | EVAL-07, EVAL-05 |
 | FORMAL-03 | `views.qnt`: generations, freshness, completeness | FORMAL-02, DEC-02 | deep | M |  | IDX-01, IDX-04 |
@@ -525,8 +526,8 @@ dispatch jobs or `(owner)` items.
 - **Cites:** plan §5.6, §8; ver §4, §7.1; ADR 0004, ADR 0031.
 - `fixtures/corpus/<repository>/`: expectation files only (repository, commit, file, position,
   construct, expected symbol or `possible` reason), picked by construct with ast-grep (pinned by
-  mise) from the **Apache-2.0 repositories only** (spring-framework, kafka, gradle; never
-  elasticsearch, and not junit-framework's EPL-2.0 code), with expected answers from a `scip-java`
+  mise) from the **Apache-2.0 repositories only** (spring-framework, fineract, kafka,
+  gradle; never elasticsearch, and not junit-framework's EPL-2.0 code), with expected answers from a `scip-java`
   index of the repository at its commit. Indexes are built outside the gate and outside the
   sandbox (a `bench.yml` dispatch job this task adds, which runs the Gradle build on the runner,
   or the owner's machine) and kept as artefacts, never committed. `jfl-oracle corpus-check`
@@ -538,6 +539,24 @@ dispatch jobs or `(owner)` items.
   - [ ] the fixtures hold positions and symbols only (a schema test)
   - [ ] (owner) the `scip-java` indexes for the medium corpus, if the sandbox cannot build them
 - **Impact:** none (fixtures).
+
+#### BENCH-06: Lombok repository in the corpus and as a second evaluation target
+- **Depends on:** BENCH-01. **Model:** standard. **Size:** S. **Parallel with:** BENCH-05.
+- **Cites:** ADR 0032, `doc/bench-corpus.md`; plan §3, §9.1, §9.2.
+- The owner's decision of 2026-11-17 (ADR 0032, amended): apache/fineract (Apache-2.0) at
+  `9dfe8dfe5e162afe09f102a9aa57d00a70c770f2` becomes the `lombok` size of the corpus and a
+  second E0 and E3 target beside spring-framework, which stays primary. `scripts/bench-corpus.sh`
+  gains the size (7,301 `.java` files, checked at the pin) and `doc/bench-corpus.md` the row, with
+  the survey of `spikes/lombok/RESULTS.md` as evidence. The cards that leaned on synthetic-only
+  processor coverage (EVAL-02, EVAL-07, EVAL-10, SEM-05) name fineract where a real Lombok or
+  MapStruct build helps. No Gradle run or build of fineract in the sandbox.
+- **Reuse considered:** the existing fetch script (one more pin line); openrewrite/rewrite
+  (mixed licence, little MapStruct) and datahub (mixed-language tree) rejected in the survey.
+- **Accept:**
+  - [x] `just bench-corpus lombok` fetches and verifies fineract at the pin (7,301 `.java` files); `check-doc` and `scripts/test-bench-corpus.sh` pass
+  - [x] ADR 0032 carries the dated amendment, Accepted (owner, 2026-11-17), and its index row (unchanged: `adr-index` ties the title to the file's) stays `Accepted (owner, 2026-11-17)`
+  - [x] EVAL-02, EVAL-07, EVAL-10, SEM-05 and DEC-01's note name fineract where it applies
+- **Impact:** none (tooling and docs). `tools/jfl-bench` takes the size name as it takes the others.
 
 ### Lane FORMAL: formal models and conformance
 
@@ -660,7 +679,7 @@ target repository is private, only aggregated reports under `doc/eval/` are comm
 - **Accept:**
   - [x] `doc/eval/target-criteria.md` committed
   - [x] (owner) the target repository chosen; an ADR records the choice, naming it only if it is public (otherwise "a private repository meeting the criteria", with its size class) and the commit to pin
-- **Decided:** 2026-11-17, option B. [ADR 0032](adr/0032-evaluation-target-spring-framework-at-the-bench-pin.md) (Accepted, owner) names spring-framework (public, Apache-2.0) at the bench pin `4cb62d893e09e23791d661e8d9b35aedee7006d0`. Lombok and MapStruct stay with the synthetic fixtures (EVAL-07, SEM-05, EVAL-10).
+- **Decided:** 2026-11-17, option B. [ADR 0032](adr/0032-evaluation-target-spring-framework-at-the-bench-pin.md) (Accepted, owner) names spring-framework (public, Apache-2.0) at the bench pin `4cb62d893e09e23791d661e8d9b35aedee7006d0`. Lombok and MapStruct stay with the synthetic fixtures (EVAL-07, SEM-05, EVAL-10), and, amended the same day (BENCH-06), apache/fineract is a second target for them.
 - **Impact:** none (decision).
 
 #### EVAL-01: Evaluation harness: Harbor adapter, arms, transcript metrics
@@ -714,16 +733,21 @@ target repository is private, only aggregated reports under `doc/eval/` are comm
 
 #### EVAL-02: E0 task set from the target repository's history
 - **Depends on:** DEC-01, EVAL-01. **Model:** standard. **Size:** M. **Parallel with:** FND-05.
-- **Cites:** plan §9.2 (E0); ver §11; ADR 0004.
+- **Cites:** plan §9.2 (E0); ver §11; ADR 0004, ADR 0032 (amended 2026-11-17).
 - Select 15 to 20 tasks from the target's history (bug fixes, signature changes, cross-module
   features, one rename), each with its starting commit, prompt, test command and known-good diff,
   in the EVAL-01 format. If the target is public, the agent does this and commits the task set
   under `doc/eval/e0/`; if private, the agent commits only a selection guide
   (`doc/eval/e0-selection.md`) and the owner builds the set outside this repository.
+  Fineract (ADR 0032 amendment; Lombok and MapStruct, public) gets a smaller second set of 5 to 8
+  tasks under `doc/eval/e0/fineract/`, at least two touching Lombok-generated or MapStruct-generated
+  members, reported beside spring-framework's and never pooled with it. Its test commands run on
+  `bench.yml` or the owner's machine, never as a Gradle build in the sandbox.
 - **Accept:**
   - [ ] the task set (public target) or the selection guide (private target) committed
   - [ ] each task's test command fails at the starting commit and passes with the known-good diff (checked by the agent for a public target)
   - [ ] (owner) for a private target: the task set built and checked the same way, kept outside this repository
+  - [ ] the fineract second set committed under `doc/eval/e0/fineract/` (5 to 8 tasks, two or more on Lombok or MapStruct members); (owner) its test commands checked at the starting commits on `bench.yml` or the owner's machine
 - **Impact:** none.
 
 #### EVAL-03: E0 arms, Harbor images and runbook
@@ -811,7 +835,9 @@ target repository is private, only aggregated reports under `doc/eval/` are comm
   worktrees as a script that builds them, Lombok and MapStruct with generated sources present and
   missing, Java 8, 17 and 21 syntax). The `java-fixtures` stage compiles every fixture with the
   pinned JDK (offline; Lombok and MapStruct jars from a pinned, checksum-verified download cached
-  by a recipe, or the cases that need them stay syntax-only and say so); its CI job.
+  by a recipe, or the cases that need them stay syntax-only and say so); its CI job. These
+  synthetic Lombok and MapStruct projects stay the offline gate; fineract (BENCH-06) is the real
+  counterpart, read through BENCH-05's cases and never copied into a fixture.
 - **Accept:**
   - [ ] at least 200 resolution cases, at least 8 per construct of plan §5.6; a coverage table in `fixtures/java/resolution/README.md`
   - [ ] `java-fixtures` green in `check` and CI; a broken fixture outside `fixtures/java/broken/` fails it
@@ -859,7 +885,7 @@ target repository is private, only aggregated reports under `doc/eval/` are comm
 
 #### EVAL-10: E3 `javac` worker spike from the forked compiler core
 - **Depends on:** EVAL-01. **Model:** standard. **Size:** M. **Parallel with:** FND-06, BENCH-05.
-- **Cites:** plan §3, §9.2 (E3); ver §10; ADR 0027.
+- **Cites:** plan §3, §9.2 (E3); ver §10; ADR 0027, ADR 0032 (amended 2026-11-17).
 - Fork the compiler core of georgewfraser/java-language-server (MIT; pinned base commit,
   licence and notices kept) into `java/javac-worker/` as the spike: one warm JVM compiling single
   files through its long-lived `JavacTask` with body erasure, `-proc:none -implicit:none` and a
@@ -869,12 +895,16 @@ target repository is private, only aggregated reports under `doc/eval/` are comm
   of distinct `EnvironmentKey`s (plan §5.4). Measured on the multi-module fixture project with a
   classpath the fixture declares (no Gradle run in the sandbox); a module of the small bench
   corpus, whose classpath needs a Gradle resolve, is an `(owner)` or `bench.yml` dispatch run.
+  Fineract is the real Lombok and MapStruct target: whether `-proc:none` leaves false errors on
+  its generated members, and what loading the processors costs, are measured there on the same
+  kind of run (criterion S2 of `doc/eval/target-criteria.md`; spring-framework runs no such processor).
 - **Reuse considered:** the forked compiler core (ADR 0027) instead of a blank spike; ECJ as a
   comparison arm; jdtls's javac backend (incubating) and NetBeans' nb-javac for ideas only.
 - **Accept:**
   - [ ] fixture results committed in `doc/eval/e3-results.md` with machine facts, for javac and ECJ
   - [ ] (owner) one module of the small corpus measured the same way; aggregates added
   - [ ] (owner) run on two modules of the target repository and over 10 worktrees' classpaths; aggregates added
+  - [ ] (owner) run on two fineract modules that use Lombok and MapStruct, with and without the processors loaded; false errors and cost added to `doc/eval/e3-results.md`
 - **Impact:** none.
 
 #### DEC-03: Storage tier (from E1)
@@ -1478,7 +1508,7 @@ M1 (plan §10.1): syntax index, envelope, daemon, CLI and plugin. Starts after t
 
 #### SEM-05: Semantic diagnostics, processors and `jfl diag`
 - **Depends on:** SEM-04, LSP-04. **Model:** deep. **Size:** L. **Parallel with:** SEM-02, SEM-03, SEM-08.
-- **Cites:** plan §3.2, §3.3, §7.3; ADR 0015.
+- **Cites:** plan §3.2, §3.3, §7.3; ADR 0015, ADR 0032 (amended 2026-11-17).
 - `javac` results through the diagnostics coordinator (the model and driver of LSP-04 cover them;
   extend the driver if the coordinator's inputs change), generated-source roots added, errors on
   processor-generated members suppressed and marked in hover, no semantic diagnostics without a
@@ -1488,6 +1518,7 @@ M1 (plan §10.1): syntax index, envelope, daemon, CLI and plugin. Starts after t
   an idea.
 - **Accept:**
   - [ ] the Lombok and MapStruct fixtures produce zero errors with generated sources missing; a real type error in the same files is reported
+  - [ ] on the fineract corpus (BENCH-06), semantic diagnostics report no error on a Lombok-generated or MapStruct-generated member with generated sources missing (a `bench.yml` or `(owner)` run; counts only in the report)
   - [ ] `conformance-replay` still green for `diagnostics`
   - [ ] `jfl diag` e2e and golden, including its deadline path
   - [ ] runs on the bench corpus (small at least, `just bench`) and reports the metrics it affects; its correctness tests also run against the real-corpus cases that apply (BENCH-05)

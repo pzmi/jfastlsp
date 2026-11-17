@@ -95,4 +95,8 @@ run_fail "wrong count" "has 2 .java files, doc/bench-corpus.md says 3" \
 run_fail "in-repo cache" "inside the repository" \
   "$script" fetch small --cache "$here/../corpus-cache" --local-source "$tmp/src"
 [ ! -e "$here/../corpus-cache" ] || fail "refused cache directory was created"
+
+# the lombok slot is a known size with its own checkout name (no network: only the path is asked)
+[ "$("$script" path lombok --cache "$tmp/cache3")" = "$tmp/cache3/fineract" ] || fail "lombok size path"
+run_fail "unknown size" "unknown size 'bogus'" "$script" fetch bogus --cache "$tmp/cache3"
 echo "ok"

@@ -6,6 +6,8 @@ Date: 2026-11-17
 
 Accepted (owner, 2026-11-17).
 
+Amended 2026-11-17 (owner): fineract added as second target (see Amendments).
+
 ## Context
 
 DEC-01 (plan §9.1; ADR 0009, which gives each open owner choice its own decision task) asks the
@@ -53,7 +55,8 @@ enters this one.
 - **Contamination.** Public history may already be in model training data, so E0 success rates
   can be inflated. The Multi-SWE-bench control (EVAL-12, ADR 0029) carries the same risk, so the
   two are read together and the owner reads the rates with it in mind (criteria §4, §6).
-- **No Lombok or MapStruct.** The pin uses neither (`doc/bench-corpus.md`; criterion S1). Processor
+- **No Lombok or MapStruct at the primary target** (amended 2026-11-17: fineract, a second
+  target, has both; see Amendments). The pin uses neither (`doc/bench-corpus.md`; criterion S1). Processor
   behaviour is therefore covered by the synthetic fixtures of EVAL-07 (Lombok and MapStruct, with
   generated sources present and missing), by the SEM-05 acceptance (zero false errors with
   generated sources missing), and by the E3 spike (EVAL-10), which must say whether the pin runs any
@@ -71,3 +74,34 @@ enters this one.
 - **C: kafka at its bench pin.** Public and Apache-2.0, but about 68 projects from one root build
   with Scala beside Java: a heavier build for three arms times three runs, and E2's coverage
   would skip the Scala call sites. Ranked second in the criteria.
+
+## Amendments
+
+### 2026-11-17 (owner): fineract added as second target
+
+Accepted (owner, 2026-11-17). The owner asked and decided in the same session as the original
+choice. The decision above stands: spring-framework stays the primary E0 to E4 target. What
+changes is the "No Lombok or MapStruct" consequence, which left processor behaviour to synthetic
+fixtures alone.
+
+**apache/fineract** (<https://github.com/apache/fineract>, Apache-2.0) at commit
+`9dfe8dfe5e162afe09f102a9aa57d00a70c770f2` becomes (a) the `lombok` size of the bench corpus
+(BENCH-06, `doc/bench-corpus.md`) and (b) a **second** E0 and E3 target beside spring-framework,
+chosen for the real Lombok and MapStruct use the primary lacks: 7,301 `.java` files, 2,874 of
+them importing `lombok.*`, MapStruct in 24 modules, Gradle with 39 includes, 0 parse errors, 1.07 s
+warm index (survey in `spikes/lombok/RESULTS.md`). The runner-up openrewrite/rewrite has a mixed
+licence (source-available modules) and almost no MapStruct.
+
+Consequences of the amendment:
+
+- EVAL-02 may add a smaller second task set from fineract's history (public, so committed under
+  `doc/eval/e0/` with its own subdirectory); its results are reported beside, never pooled with,
+  spring-framework's. The contamination caveat above applies to it as well.
+- Processor coverage on a real build: EVAL-10 (E3) also measures fineract modules, and SEM-05 and
+  EVAL-07's real-corpus counterpart read fineract's Lombok and MapStruct sites; the synthetic
+  fixtures stay the offline gate. Golden cases from fineract are positions and symbol names only
+  (BENCH-05; Apache-2.0).
+- **No Gradle run or build of fineract in the sandbox**: building it, its `scip-java` index and
+  any E0 or E3 run on it are `bench.yml` dispatch jobs or the owner's machine, as for
+  spring-framework.
+- Any other commit of fineract needs another dated amendment.

@@ -56,7 +56,8 @@ agent-sized tasks (plan §9.1). Each experiment uses a different part of it:
 - **S1 Lombok or MapStruct present.** Plan §9.2 asks for them "if possible", and E3 needs zero
   false errors with them (plan §10.4). None of the five public corpus repositories uses
   either, so without a candidate that does, they are covered only by synthetic fixtures
-  (`doc/bench-corpus.md`; ver §4).
+  (`doc/bench-corpus.md`; ver §4). *Update 2026-11-17:* apache/fineract is now the corpus's
+  `lombok` repository and a second target (ADR 0032, amended); the five above stay Lombok-free.
 - **S2 Annotation processors that generate sources.** Plan §3.3 needs generated sources on the
   diagnostics path.
 - **S3 A clean default branch** with no history rewrites, so pins stay reachable.
@@ -117,7 +118,8 @@ Pros and cons for each experiment:
 - E1: measured on 2026-11-16 (9.3k files, 1.04 s warm, 1.42 s cold), so the target's numbers
   compare directly with the corpus.
 - E2: `scip-java` indexes a pure Java build; coverage is not diluted by unindexed Scala.
-- E3: no Lombok or MapStruct, so those need the synthetic fixtures.
+- E3: no Lombok or MapStruct in spring-framework, so those need the synthetic fixtures (and,
+  since 2026-11-17, fineract; ADR 0032 amendment).
 - E4: a worktree 150 commits apart is already measured (C7).
 
 **C, kafka.**
@@ -138,7 +140,8 @@ checked and cited in the ADR, which matters for the DEC-02 go/no-go record. It i
 the Java arms and the coverage measure are not muddied by Scala. Its numbers for E1 and E4 are
 already on record in the corpus, so E0 to E4 read together. Its build is smaller than kafka's,
 which keeps the E0 run count on the owner's machine practical. Its weak points are public-history
-contamination (shared with the control) and no Lombok or MapStruct. If the owner values
+contamination (shared with the control) and no Lombok or MapStruct (fineract was added as a second target on 2026-11-17 for
+that; ADR 0032). If the owner values
 representativeness over reproducibility, option A is the alternative, with the aggregate-only
 rules of §3 and the loss of published task sets.
 

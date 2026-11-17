@@ -10,7 +10,7 @@
 #   scripts/bench-corpus.sh path SIZE [--cache DIR]        print the checkout path
 #   scripts/bench-corpus.sh check-doc                      pins here match doc/bench-corpus.md
 #
-# SIZE is small | medium | huge-files | large | large-permissive | all. `all` fetches the five;
+# SIZE is small | medium | lombok | huge-files | large | large-permissive | all. `all` fetches the six;
 # `large` is elasticsearch (SSPL / Elastic License 2.0 / AGPL-3.0): clone at bench time only,
 # never vendor it and never derive a fixture, snippet or position file from it.
 #
@@ -35,6 +35,7 @@ pins() {
   cat <<'PINS'
 small|junit-framework|junit-team/junit-framework|e5198f9b098c550e66d378650f78bac8883e2a72|1813|EPL-2.0
 medium|spring-framework|spring-projects/spring-framework|4cb62d893e09e23791d661e8d9b35aedee7006d0|9294|Apache-2.0
+lombok|fineract|apache/fineract|9dfe8dfe5e162afe09f102a9aa57d00a70c770f2|7301|Apache-2.0
 huge-files|kafka|apache/kafka|7e0ebdf74f30cab1ded2a462cc9d45cefdf86c2a|6307|Apache-2.0
 large|elasticsearch|elastic/elasticsearch|157ebe1325f24f34bf871997e880f0c0293b7279|33850|SSPL, Elastic License 2.0 or AGPL-3.0
 large-permissive|gradle|gradle/gradle|db675891c2bcf8e3c9a7c66ac9de429170a8a9cd|11750|Apache-2.0
@@ -79,7 +80,7 @@ select_sizes() {
   local want="${1:-small}" out
   if [ "$want" = all ]; then pins; return; fi
   out="$(pins | awk -F'|' -v s="$want" '$1 == s')"
-  [ -n "$out" ] || die "unknown size '$want' (small, medium, huge-files, large, large-permissive, all)"
+  [ -n "$out" ] || die "unknown size '$want' (small, medium, lombok, huge-files, large, large-permissive, all)"
   echo "$out"
 }
 
@@ -140,9 +141,11 @@ case "$cmd" in
   check-doc) doc_check && say "pins match doc/bench-corpus.md" ;;
   fetch)
     cache_dir="$(resolve_cache)"
+    # a variable, not `< <(...)`: the unknown-size refusal must fail the script, not vanish
+    selected="$(select_sizes "${1:-small}")"
     while IFS='|' read -r size name slug sha count licence; do
       fetch_one "$size" "$name" "$slug" "$sha" "$count" "$licence"
-    done < <(select_sizes "${1:-small}")
+    done <<<"$selected"
     ;;
   path)
     cache_dir="$(resolve_cache)"
