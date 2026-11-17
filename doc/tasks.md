@@ -1282,6 +1282,10 @@ but follow in lane CLI (M2). Starts after the go decision.
   fresh. Ordering: `exact` before `possible`, stable by URI and range.
 - **Reuse considered:** `blake3` digests supplied by the adapters; the envelope itself has no
   published equivalent.
+- **Done note (IDX-02, round 2):** the bench item was met with synthetic inputs sized from the
+  corpus (spring-framework's and junit-framework's per-file declaration and identifier counts),
+  not a corpus run: the envelope, completeness and summary types read no files before IDX-07.
+  `just bench-domain-envelope` reports them.
 - **Accept:**
   - [ ] unit tests: `complete` is `true` only when every visible module is indexed and fresh; each missing condition yields its reason
   - [ ] property test: shuffling inputs never changes the envelope's order or content
@@ -1400,6 +1404,19 @@ but follow in lane CLI (M2). Starts after the go decision.
   adapter ends such a range at the line end (before the `\r`), with a test on a CRLF fixture.
 - **Decided (orchestrator, IDX-01 review):** strip a leading UTF-8 BOM when reading a file from disk,
   before indexing, as editors drop it from document text; a test with a BOM fixture.
+- **Decided (orchestrator, IDX-02 review):** before interning any name (declaration or reference
+  site), decode `\uXXXX` escapes and drop the identifier-ignorable characters of JLS §3.8 (`Cf`,
+  such as U+200B and U+FEFF), so that one identifier has one spelling and a reference spelled
+  otherwise still matches its declaration; `SymbolId` names admit more than Java's identifier
+  characters, and this extraction step is what keeps them Java's.
+- **Decided (orchestrator, IDX-02 review):** `Declaration::signature` is the header as written,
+  white space collapsed, *with* its annotations and their arguments and without body, Javadoc or a
+  field's initializer; `annotations` lists their names; `permits` names go to `permits`, never to
+  `supertypes`; parameter types go through `jfl_domain::erase_parameter_type` with the type
+  parameters in scope (method first, then each enclosing type), so a type variable erases to its
+  first bound.
+- **Decided (orchestrator, IDX-02 review):** reference sites leave out uses bound to locals and
+  parameters, using `locals.scm` (plan §5.5's memory decision); a use whose binding is unclear stays.
 - **Accept:**
   - [ ] summary goldens match for every file of `fixtures/java/projects/` and `fixtures/java/resolution/`
   - [ ] property test: arbitrary bytes and mutated corpus files never panic and finish within a bound
@@ -1421,6 +1438,11 @@ but follow in lane CLI (M2). Starts after the go decision.
   treated as a miss. The `summary_store` contract suite.
 - **Reuse considered:** `rusqlite`, `fst`, `postcard`, `blake3` (ADR 0025); cacache's layout copied,
   not the crate; `redb` the runner-up; `bincode` (unmaintained) and `rkyv` (unmeasured) rejected.
+- **Decided (orchestrator, IDX-02 review):** on the large tier, reference sites stay in the
+  persisted summaries and are not held in memory; memory holds a name → file postings index, and
+  a `refs` query loads the files its name lists (plan §5.5). The §1.7 syntax-tier RSS budget
+  (≤ 250 MB on elasticsearch) is unchanged; whole summaries in memory project to about 311 MiB
+  there (325 MiB with IDX-02's final 80-byte declarations).
 - **Accept:**
   - [ ] contract suite green for fake and adapter; a broken fake fails it
   - [ ] a truncated entry on disk is a miss, never a corrupt summary (integration test)
@@ -1475,6 +1497,12 @@ but follow in lane CLI (M2). Starts after the go decision.
   of the multi-module fixture.
 - **Reuse considered:** nothing maintained computes completeness; codebase-memory-mcp's CALLS vs
   USAGE edges and Code-Index-MCP's fallback flag as ideas.
+- **Decided (orchestrator, IDX-02 review):** the `possible` scan on the large tier reads reference
+  sites from the store through the name → file postings (plan §5.5), not from memory.
+- **Decided (orchestrator, IDX-02 review):** before M3 no project model names generated-source
+  roots, so `ModuleIndex`'s `missing_generated_roots` is unknown, not 0: when annotation
+  processors are detected (a processor path, or a known processor's annotation in a summary) and
+  the roots are unknown, report `GeneratedSourcesMissing` rather than claim `complete`.
 - **Accept:**
   - [ ] the completeness oracle passes for every module and seed in the gate's budget; a planted defect (ignore one file) makes it fail
   - [ ] references inside comments and strings never appear (golden cases)
@@ -1715,6 +1743,10 @@ so citations stay valid; IDX-15 is M2's gate.
   which; main never sees test), `complete` over the modules that can see the target's module,
   `incomplete_because` naming unindexed modules and missing generated-source roots,
   `EnvironmentKey` per module. The completeness oracle extended to module visibility.
+- **Decided (orchestrator, IDX-02 review):** `lombok.config` (for example `accessors.fluent`, which
+  renames generated members) and `module-info.java` (cross-module visibility) are inputs no key
+  covers yet: add their content digests to `EnvironmentKey`'s inputs here (or to the key of the
+  card that consumes them), with a test that changing either changes the key.
 - **Accept:**
   - [ ] the completeness oracle passes per module with visibility; a main source set never sees test-only types (test)
   - [ ] two worktrees with diverging classpaths get different `EnvironmentKey`s and do not share semantic results (test)
@@ -1779,7 +1811,7 @@ so citations stay valid; IDX-15 is M2's gate.
 
 #### SEM-01: Resolver core per DEC-04
 - **Depends on:** PROJ-05, DEC-04. **Model:** deep. **Size:** L. **Parallel with:** SEM-04.
-- **Cites:** plan §5.6, §6.1, §10.4; ADR 0014; DEC-04's ADR.
+- **Cites:** plan §5.4, §5.6, §6.1, §10.4; ADR 0014; DEC-04's ADR.
 - The resolver DEC-04 chose (by default `jfl-resolve`, a pure crate: scopes, imports, type
   hierarchy, member lookup, overload selection, expression types for receivers on fields,
   parameters, locals and chains) over summaries and library APIs, at a pinned generation. A new
@@ -1791,6 +1823,7 @@ so citations stay valid; IDX-15 is M2's gate.
 - **Accept:**
   - [ ] the resolution corpus's static-call, field, parameter, chain, overload, inheritance and generics cases resolve as expected
   - [ ] an unsupported construct yields `possible` with its reason, never a guess (tests per construct)
+  - [ ] the reads a resolution records meet plan §5.4's conditions: a new same-package type, a new type in an on-demand-imported package that collides with a resolved name, and an added Lombok annotation on a read declaration each change the dependent's `SemanticKey` (tests)
   - [ ] runs on the bench corpus (small at least, `just bench`) and reports the metrics it affects; its correctness tests also run against the real-corpus cases that apply (BENCH-05)
 - **Impact:** dependency graph (new crate if our own).
 

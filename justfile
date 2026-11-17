@@ -183,6 +183,12 @@ bench-process corpus="": _preflight
     # ${repo[@]+...}: an empty array under `set -u` is an error in bash 3.2 (macOS).
     {{cargo}} bench --locked -p jfl-process --bench spawn -- ${repo[@]+"${repo[@]}"}
 
+# jfl-domain's in-process envelope, completeness and summary benchmark (IDX-02, divan): synthetic,
+# deterministic inputs sized from the corpus (doc/bench/README.md); prints a typical summary's bytes
+# first. Reports, never gates. `just bench-domain-envelope`.
+bench-domain-envelope: _preflight
+    {{cargo}} bench --locked -p jfl-domain --bench envelope
+
 # Every tool of tools/versions.toml on the stages' PATH at its pinned version (xtask's cache first,
 # then mise's install directories), and versions.toml agreeing with mise.toml and mise.lock;
 # fails naming each missing or wrong tool and the fix (XT-02, fnd §8).

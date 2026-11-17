@@ -459,6 +459,36 @@ daemon are the closest published shapes (§16).
 | `EnvironmentKey` | the ordered classpath and module path (each entry by content digest), JDK identity (vendor, version, `release` file digest), `--release`, semantic compiler flags, annotation-processor path and options | `javac` workers, library indexes, semantic results |
 | `SemanticKey` | the file's `SyntaxKey`, the `EnvironmentKey`, and the digest of every declaration summary its resolution read | a file's resolution results, only within one `EnvironmentKey` |
 
+A declaration summary's digest covers its **API** only: its identity, kind, modifiers, signature
+(the header as written, annotations and their arguments included, since Lombok and other
+processors change members), parameter types, supertypes, permitted subtypes and annotation names;
+every enclosing type's header (its type parameters and bounds); its file's package and imports
+(sorted); and for a type, its direct members' signatures. It never covers a byte range, Javadoc,
+a field initializer or a body. A method-body edit therefore invalidates no dependent, while a new
+overload, an added `@Getter`, a changed bound or a changed import does. The key is sound only
+under these conditions, which bind the resolver (SEM-01) that records the reads:
+
+1. **Every scope consulted is a read.** The resolver records each scope it consults to bind a
+   name *and to prove the binding unique*, not only up to the first hit: the file's own types,
+   the same-package listing, each single-type and on-demand import, the enclosing and inherited
+   members, and the declarations it rejected for access. A scope is read as the **digest of its
+   name set**: for a package, the sorted simple names of its top-level types across the visible
+   modules; for an on-demand import of a type, the sorted names of its member types. A **miss**
+   (a name found in no scope) is recorded the same way, as the digests of every scope it was
+   looked up in, so a type added later to any of them changes the key. A candidate rejected for
+   access is read by its API digest, so a change of its modifiers changes the key.
+2. **A member's read includes its owner's**: reading `Box#get()` also reads `Box`, whose header
+   holds the type parameters `get`'s types are resolved through (the member digest also carries
+   it).
+3. **Results name declarations by `SymbolId`, never by range**: ranges are not in the API
+   digest, so a result is placed in its file at query time from the current summary.
+4. **`SemanticKey` keys name-binding results only.** It never keys `javac` diagnostics, constant
+   values (field initializers are outside the API) or Javadoc for hover; those read the current
+   summary or the compiler.
+
+`jfl-domain`'s `keys` and `summary` modules (IDX-02) implement the digest; SEM-01 tests the
+conditions.
+
 ### 5.5 Storage tier
 
 Infrastructure follows measurements. E1 (§9.2) measures a cold full-worktree parse and summarise
@@ -486,6 +516,17 @@ same crates (ADR 0025): `blake3` content keys, `postcard` summary blobs in a con
 directory of our own, `fst` for name lookup and, from the second row, `rusqlite` (WAL) for
 manifests and postings. The store is a cache: deleting the state directory loses time, never
 correctness (§5.10).
+
+**Memory on the large tier (orchestrator decision, IDX-02 review, 2026-11-17).** A summary as
+`jfl-domain` lays it out measures about 10 KB (`just bench-domain-envelope`) for spring-framework's mean file (25 declarations,
+about 240 identifier uses), most of it reference sites; held whole in memory that projects to
+about 311 MiB for elasticsearch's 33,850 files (9.6 KB per file; 325 MiB at the 10.1 KB
+measured once declarations kept `permits` and annotations apart), past §1.7's 250 MB syntax-tier budget, which is
+**unchanged**. So on the large tier reference sites stay in the persisted summaries on disk, and
+memory holds a name → file postings index (about 60 distinct names per file); a `refs` query
+loads only the files its name's postings list. Uses bound to locals and parameters are dropped at
+extraction (IDX-07's `locals.scm`): no cross-file target is ever a local, so this is sound and
+cuts the sites further. IDX-08 and IDX-11 implement it; EVAL-05 measures the RSS.
 
 ### 5.6 Resolver
 
