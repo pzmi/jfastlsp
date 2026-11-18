@@ -54,16 +54,22 @@ are the real procedure; this section summarises it.
    `Claude-Session`, in that order, written by hand). Only its own files are staged. The agent
    does not push, tag or touch `main`.
 4. **Review.** The orchestrator runs a read-only `/review` over every task commit before landing
-   it; HIGH and MEDIUM findings go back to the task's agent.
+   it; HIGH and MEDIUM findings go back to the task's agent. One review round per commit: LOWs go
+   onto the cards they belong to and never block; a focused re-verify of only the blocking
+   findings, by the same reviewer, is allowed for a security-relevant crate, a parser or a formal
+   model (standing rule 1).
 5. **Land.** `scripts/land.sh <sha>`: one commit at a time, the next only after the previous
    commit's CI is green; `just check` on the merged tree; push only on green (ADR 0002, ADR 0030).
    `land.sh` refuses a dirty checkout, resolves only `Cargo.lock` and the ADR index, checks each
    commit's sign-off and signature, and takes `--no-push` for a dry run; any other conflict aborts
    and names its files. Before anything in the merged tree runs, the landing checkout's own xtask
    (`scripts/xtask.sh tool-config`) checks its tool configuration (FND-09, XT-01); a commit that widens
-   that check's allowlists is refused by an older checkout, so the orchestrator lands it by hand
-   (cherry-pick onto a clean `origin/main`, review the new allowlist entry, the gate on the merged
-   tree, push only on green), after which `land.sh` has the new check.
+   that check's allowlists is refused by `main`'s `land.sh`, and no agent can push by hand. After
+   review, run `scripts/land.sh <sha>` from the lane worktree that holds the reviewed commit: its
+   own, reviewed tool-config check is then the trusted one, while the cherry-pick onto a clean
+   `origin/main`, the gate on the merged tree and push only on green stay `land.sh`'s. The land
+   target dir (`$XDG_CACHE_HOME/jfastlsp/land-xtask`, else `~/.cache/jfastlsp/land-xtask`) is a
+   cache that grows with every land: below about 10 GB free, delete it before landing.
 6. **Watch CI.** The orchestrator waits for the run of the pushed commit and reads the
    `Required` result. Without `gh` it uses the GitHub MCP tools. The `linux-arm` and `macos`
    jobs run only after the push (ADR 0002), so a platform failure is found there.
@@ -78,7 +84,10 @@ A task is done when:
 
 - code, tests and Quint models agree, and the affected documentation and ADRs are updated in the
   same commit;
-- the live gate exits 0 on the merged tree (`quick` is never reported as `check`);
+- the live gate exits 0 on the merged tree (`quick` is never reported as `check`), and the
+  author's own `just check` exited 0 with the commit in place (after `git commit` or `--amend`),
+  since some stages (secrets) scan committed objects; the exit code is the gate's own, never a
+  wrapper's `echo` or a pipeline's last command;
 - the architecture rules and their negative fixtures pass;
 - the commit is signed off, has the task's subject, and states its impact;
 - it is on `main` and `Required` is green for that commit;

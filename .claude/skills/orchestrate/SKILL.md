@@ -56,6 +56,9 @@ parallel, one worktree each, under the session scratchpad (never `/tmp`, never i
 `git worktree add <scratchpad>/wt-<lane> -b <lane> origin/main`.
 Reuse a lane's worktree for its next task after `git -C <scratchpad>/wt-<lane> reset --hard
 origin/main`; `git reset --hard` is only ever run with `-C` naming a scratchpad worktree.
+**Never reset a lane whose commit has not landed.** First confirm the landed commit equals the
+lane's (`git range-diff <lane-sha>^..<lane-sha> origin/main^..origin/main` shows `=`, or the
+trees are equal), and never batch a reset with a land command whose result you have not read.
 Each lane builds with its own `CARGO_TARGET_DIR` under the scratchpad
 (`<scratchpad>/<lane>-target`), named in the agent's prompt; build on disk, not `/dev/shm`.
 Delete a lane's target dir once its commit has landed and the lane has no next task.
@@ -142,6 +145,9 @@ resetting the worktree"; never discard its uncommitted change without reading it
 2. **Review every task commit before landing it**, not only at ⛳: a read-only `/review`
    subagent over that commit (it reads `.claude/skills/review/SKILL.md`). HIGH and MEDIUM
    findings go back to the task's agent by `SendMessage`; land only a clean or fixed commit.
+   One review round per commit: LOWs go onto the cards they belong to and never block; a focused
+   re-verify of only the blocking findings by the same reviewer is allowed for a
+   security-relevant crate, a parser or a formal model (rule 1; `doc/sdlc.md` §2 step 4).
    For the socket, the lock, `jfl-process`, the Gradle model (trusted code) and every parser of
    untrusted input, the review finishes before `land` starts, never alongside it.
 3. Land **one commit at a time**, the next only after the previous commit's CI run is green.
@@ -157,7 +163,10 @@ resetting the worktree"; never discard its uncommitted change without reading it
    Integration is direct on `main` (ADR 0002); there is no PR phase. Never land on red CI.
    `bench-gate` is not part of landing: it runs only in `bench.yml` on its runner class. A
    commit that moves a line of `.config/gate.sha256` changes the gate itself (fnd §3.6): review
-   each moved pin as such before landing.
+   each moved pin as such before landing. A commit that widens xtask's tool-config allowlists
+   is landed with `scripts/land.sh <sha>` run from the lane worktree holding the reviewed commit
+   (`doc/sdlc.md` §2 step 5), never by hand. Before each land check free space (`df -h /`); under
+   about 10 GB, delete the land target dir (a cache; path in `doc/sdlc.md` §2 step 5).
 4. An aborted land: a conflict in code the agent wrote goes back to that agent via
    `SendMessage` (rebase its lane, re-run the gate); a shared file follows the table above.
    Red `check` on the merged tree but green in the lane is an interaction bug: hand it to the

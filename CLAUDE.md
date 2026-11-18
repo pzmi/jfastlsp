@@ -194,6 +194,12 @@ project, not incidents of this repository; an incident here adds a dated line.
 10. **Never edit a worktree while its gate or `land` runs in it**; stop the run and start again.
 11. **Check a commit's signature with `git cat-file -p <sha> | grep -c ^gpgsig`**, not `%G?`
     (with no allowed-signers file it prints `N`).
+12. **Run the gate after the commit** (`just check` with the commit in place, `--amend`
+    included): some stages scan committed objects. Read the gate's own exit code, never a
+    wrapper's `echo`.
+13. **Never reset a lane whose commit has not landed** (2026-11-18): before resetting its
+    worktree to `origin/main`, confirm the landed commit equals the lane's (`git range-diff`
+    shows `=`, or tree equality); never batch a reset with a land whose result is unread.
 
 ## Public repository
 

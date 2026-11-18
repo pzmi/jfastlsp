@@ -236,6 +236,11 @@ a violation or the stage fails. It runs weekly and by hand (`formal.yml`, one jo
 `check`. On a violation the scratch directory is kept and named, and its counterexample
 (`violation1.itf.json`) becomes a regression trace.
 
+A model review checks three things beyond a green run: the simulation is deep (its `sim_steps`,
+set apart from Apalache's `steps`); witness checks show that the rare states the invariants
+guard are reached; and each invariant has a broken control that fails it. A shallow bound and a
+weakened invariant hid two real design bugs in the views model.
+
 ### 6.4 Property-based state-machine tests
 
 Required beside the models (ADR 0007, amended 2026-11-17). Each component with a conformance

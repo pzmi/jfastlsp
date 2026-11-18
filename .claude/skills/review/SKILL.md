@@ -189,7 +189,8 @@ commit subject `<ID>: summary`, an `Impact:` line, the trailer block last (`Sign
 
 Findings only, most severe first. Severity: **HIGH** (wrong behaviour, security, broken
 invariant, rule loosened or suppressed, `complete=true` wrong), **MEDIUM** (missing test, missing
-ADR, doc drift, unsupported claim, likely bug), **LOW** (style, naming, nit).
+ADR, doc drift, unsupported claim, likely bug), **LOW** (style, naming, nit). One round: HIGH and
+MEDIUM block; LOWs go onto the cards they belong to and never block (`doc/sdlc.md` §2 step 4).
 
 ```
 ## Review <range> (<n> commits, tasks <ids>)
