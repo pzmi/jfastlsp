@@ -26,6 +26,7 @@ pub mod registry;
 pub mod replay;
 pub mod smoke;
 pub mod trace;
+pub mod views;
 
 /// The harness itself failed: a trace that is not an ITF trace with Quint's `--mbt` metadata, a
 /// state the driver cannot decode, an action the driver has no case for, a missing file or an

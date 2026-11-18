@@ -214,8 +214,10 @@ generates traces (it holds the process grant) and the `jfl-conformance` binary r
 4. **Negative controls:** each driver has a test that swaps in a deliberately faulty component
    (plan §7: publish before store, release the lock before removing the socket, publish every
    result) and asserts the replay fails at a named step; `conformance-replay` also runs it over
-   the generated traces and fails unless it diverges on one of them (traces that never exercise
-   the driver are a harness error). The smoke model's control is a counter that skips 3, which
+   the generated traces and the model's committed regression traces and fails unless it
+   diverges on one of them (traces that never exercise the driver are a harness error). The
+   committed traces are in the union so the requirement does not depend on the seed's batch: a
+   control whose fault needs a rare interleaving would otherwise fail a gate by chance (IDX-09). The smoke model's control is a counter that skips 3, which
    fails at step 3.
 5. A model change without the matching driver and behaviour change fails the gate.
 

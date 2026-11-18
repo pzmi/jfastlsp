@@ -37,3 +37,8 @@ harness = false
 [[bench]]
 name = "store"
 harness = false
+
+# The view registry on the bench corpus (`just bench-views SIZE`, IDX-09); reports, never gates.
+[[bench]]
+name = "views"
+harness = false

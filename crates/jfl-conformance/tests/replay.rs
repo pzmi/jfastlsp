@@ -16,6 +16,7 @@ use jfl_conformance::registry;
 use jfl_conformance::replay::{self, Context, Failure};
 use jfl_conformance::smoke;
 use jfl_conformance::trace;
+use jfl_conformance::views;
 
 type TestResult = Result<(), Box<dyn Error>>;
 
@@ -147,7 +148,34 @@ fn should_conform_and_see_the_control_diverge_when_generated_traces_are_replayed
         "{out}"
     );
     assert!(
-        out.contains("the negative control diverged as it must, at step 3"),
+        out.contains("the negative control diverged as it must, at step 3 of")
+            && out.contains("trace_0.itf.json"),
+        "a control that diverges on a generated trace is reported there: {out}"
+    );
+    Ok(())
+}
+
+#[test]
+fn should_pass_the_control_when_it_diverges_only_on_a_regression_trace() -> TestResult {
+    // given: a generated run too short for the control (it counts to 2; the control skips 3),
+    // so only the committed regression trace (counting to 6) can show its fault
+    let short = Generated::new("short")?;
+    let three_states = committed()?
+        .split(r##",{"#meta":{"index":3}"##)
+        .next()
+        .map(|head| format!("{head}]}}"))
+        .unwrap_or_default();
+    short.trace("trace_0.itf.json", &three_states)?;
+
+    // when
+    let (code, out, err) = short.replay();
+
+    // then: the divergence is required in the union, and found on the committed trace
+    assert_eq!(code, cli::OK, "{out}{err}");
+    assert!(
+        out.contains(&format!(
+            "smoke: the negative control diverged as it must, at step 3 of {COMMITTED}"
+        )),
         "{out}"
     );
     Ok(())
@@ -307,27 +335,20 @@ fn should_report_a_harness_error_when_the_itf_file_is_malformed() -> TestResult 
 
 #[test]
 fn should_report_a_harness_error_when_a_run_is_empty_or_holds_a_stranger() -> TestResult {
-    // given: no trace; a file that is not a trace; a trace too short for the negative control
+    // given: no trace; a file that is not a trace (a control that never diverges is
+    // cli::tests::should_name_every_trace_tried_when_the_control_never_diverges)
     let empty = Generated::new("empty")?;
     let stranger = Generated::new("stranger")?;
     stranger.trace("trace_0.itf.json", &committed()?)?;
     stranger.trace("notes.txt", "x")?;
-    let short = Generated::new("short")?;
-    let three_states = committed()?
-        .split(r##",{"#meta":{"index":3}"##)
-        .next()
-        .map(|head| format!("{head}]}}"))
-        .unwrap_or_default();
-    short.trace("trace_0.itf.json", &three_states)?;
 
     // when
-    let results = [empty.replay(), stranger.replay(), short.replay()];
+    let results = [empty.replay(), stranger.replay()];
 
     // then
     let whys = [
         "no generated trace (an empty run never passes)",
         "notes.txt: not a trace file",
-        "the negative control conformed on all 1 generated traces of seed 0x7",
     ];
     for ((code, out, err), why) in results.iter().zip(whys) {
         assert_eq!(*code, cli::HARNESS, "{out}{err}");
@@ -433,7 +454,7 @@ fn should_refuse_the_registry_when_a_model_has_no_driver() -> TestResult {
     assert!(error(3).contains("smoke has a driver"), "{}", error(3));
     assert!(
         registry::check(&["smoke".to_owned()]).is_err(),
-        "views is pending, so registered"
+        "views has a driver, so registered"
     );
     assert!(
         registry::check(&["smoke".to_owned(), "views".to_owned()]).is_err(),
@@ -566,20 +587,27 @@ fn should_warn_of_each_pending_model_when_the_traces_are_replayed() {
 
 #[test]
 fn should_read_a_pending_model_s_generated_traces_when_its_driver_has_not_landed() -> TestResult {
-    // given: a well-formed and a malformed generated run of the pending views model
+    // given: a well-formed and a malformed generated run of the pending daemon model
     let scratch = Generated::new("pending")?;
-    let views = scratch.dir.join("views");
-    fs::create_dir_all(&views)?;
-    let committed_views = fs::read_to_string(
-        root().join("formal/traces/regression/views-two-views-share-a-generation.itf.json"),
+    let daemon = scratch.dir.join("daemon");
+    fs::create_dir_all(&daemon)?;
+    let committed_daemon = fs::read_to_string(
+        root().join("formal/traces/regression/daemon-two-proxies-spawn-at-once.itf.json"),
     )?;
     let run = |text: &str| -> Result<(u8, String, String), Box<dyn Error>> {
-        fs::write(views.join("trace_0.itf.json"), text)?;
-        let args: Vec<String> = ["replay", "--model", "views", "--seed", "0x7", "--generated"]
-            .iter()
-            .map(|w| (*w).to_owned())
-            .chain([scratch.dir.display().to_string()])
-            .collect();
+        fs::write(daemon.join("trace_0.itf.json"), text)?;
+        let args: Vec<String> = [
+            "replay",
+            "--model",
+            "daemon",
+            "--seed",
+            "0x7",
+            "--generated",
+        ]
+        .iter()
+        .map(|w| (*w).to_owned())
+        .chain([scratch.dir.display().to_string()])
+        .collect();
         let (mut out, mut err) = (Vec::new(), Vec::new());
         let code = cli::run(&args, &root(), &mut out, &mut err);
         Ok((
@@ -590,18 +618,134 @@ fn should_read_a_pending_model_s_generated_traces_when_its_driver_has_not_landed
     };
 
     // when
-    let (good, bad) = (run(&committed_views)?, run("{")?);
+    let (good, bad) = (run(&committed_daemon)?, run("{")?);
 
     // then
     assert_eq!(good.0, cli::OK, "{}{}", good.1, good.2);
     assert!(
         good.1.contains(
-            "views: 1 generated traces read, not replayed (its driver lands with IDX-09)"
+            "daemon: 1 generated traces read, not replayed (its driver lands with IDX-12)"
         ),
         "{}",
         good.1
     );
     assert_eq!(bad.0, cli::HARNESS, "{}{}", bad.1, bad.2);
     assert!(bad.2.contains("not an ITF trace"), "{}", bad.2);
+    Ok(())
+}
+
+/// The views regression trace whose build starts at step 3 (`write`, `deliver`, `reconcileStart`).
+const VIEWS_RECONCILE: &str = "formal/traces/regression/views-checkout-during-reconcile.itf.json";
+
+#[test]
+fn should_diverge_at_the_reconcile_when_the_views_control_publishes_early() -> TestResult {
+    // given
+    let text = fs::read_to_string(root().join(VIEWS_RECONCILE))?;
+    let context = Context {
+        model: "views",
+        seed: "0x3",
+        trace: VIEWS_RECONCILE,
+    };
+
+    // when
+    let conformed = replay::replay(
+        views::driver(),
+        &context,
+        trace::parse(VIEWS_RECONCILE, &text)?,
+    );
+    let control = replay::replay(
+        views::control_publishing_at_start(),
+        &context,
+        trace::parse(VIEWS_RECONCILE, &text)?,
+    );
+
+    // then
+    assert_eq!(conformed, Ok(21));
+    let Err(Failure::Diverged(divergence)) = control else {
+        return Err(format!("the views control did not diverge: {control:?}").into());
+    };
+    assert_eq!(divergence.step, 3);
+    assert_eq!(divergence.action, "reconcileStart");
+    assert!(
+        divergence
+            .to_string()
+            .contains("the build still waits for summaries"),
+        "{divergence}"
+    );
+    Ok(())
+}
+
+#[test]
+fn should_diverge_at_the_publish_when_the_views_control_store_lags() -> TestResult {
+    // given
+    let text = fs::read_to_string(root().join(VIEWS_RECONCILE))?;
+    let context = Context {
+        model: "views",
+        seed: "0x3",
+        trace: VIEWS_RECONCILE,
+    };
+
+    // when
+    let control = replay::replay(
+        views::control(),
+        &context,
+        trace::parse(VIEWS_RECONCILE, &text)?,
+    );
+
+    // then: write, deliver, reconcileStart, checkout, summarise, then publish (step 6)
+    let Err(Failure::Diverged(divergence)) = control else {
+        return Err(format!("the views control did not diverge: {control:?}").into());
+    };
+    assert_eq!(divergence.step, 6);
+    assert_eq!(divergence.action, "publish");
+    assert!(
+        divergence
+            .to_string()
+            .contains("a summary the build names is not stored"),
+        "{divergence}"
+    );
+    Ok(())
+}
+
+#[test]
+fn should_conform_and_see_the_views_control_diverge_when_views_traces_are_generated() -> TestResult
+{
+    // given: two committed views traces as one generated run
+    let scratch = Generated::new("views")?;
+    let views = scratch.dir.join("views");
+    fs::create_dir_all(&views)?;
+    for (i, name) in [
+        "views-two-views-share-a-generation",
+        "views-checkout-during-reconcile",
+    ]
+    .iter()
+    .enumerate()
+    {
+        let text =
+            fs::read_to_string(root().join(format!("formal/traces/regression/{name}.itf.json")))?;
+        fs::write(views.join(format!("trace_{i}.itf.json")), text)?;
+    }
+    let args: Vec<String> = ["replay", "--model", "views", "--seed", "0x7", "--generated"]
+        .iter()
+        .map(|w| (*w).to_owned())
+        .chain([scratch.dir.display().to_string()])
+        .collect();
+    let (mut out, mut err) = (Vec::new(), Vec::new());
+
+    // when
+    let code = cli::run(&args, &root(), &mut out, &mut err);
+
+    // then
+    let (out, err) = (String::from_utf8_lossy(&out), String::from_utf8_lossy(&err));
+    assert_eq!(code, cli::OK, "{out}{err}");
+    assert!(
+        out.contains("views: seed 0x7: 2 generated traces (30 states) conform"),
+        "{out}"
+    );
+    assert!(
+        out.contains("views: the negative control diverged as it must, at step 6 of"),
+        "{out}"
+    );
+    assert!(!err.contains("warning: views"), "{err}");
     Ok(())
 }

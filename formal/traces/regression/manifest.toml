@@ -24,8 +24,8 @@ max_steps = 6
 seed = "0x2a"
 
 # The views model's scenarios (FORMAL-03, doc/formal-models.md): each scenario's scripted step,
-# which enables exactly one action in each state, so the trace does not depend on the seed. Read,
-# not replayed, until IDX-09 brings the views driver (crates/jfl-conformance/src/registry.rs).
+# which enables exactly one action in each state, so the trace does not depend on the seed.
+# Replayed through the views driver (IDX-09, crates/jfl-conformance/src/views.rs).
 [traces.views-checkout-during-reconcile]
 model = "views"
 main = "views"

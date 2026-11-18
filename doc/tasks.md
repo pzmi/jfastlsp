@@ -1756,12 +1756,60 @@ but follow in lane CLI (M2). Starts after the go decision.
   ones included, uses `deny_unknown_fields` and a derived `PartialEq`.
 - **Reuse considered:** `salsa` weighed and deferred (per-process database, experimental
   persistence); turborepo's cookie file to prove the watcher caught up for `sync`.
+- **As built (IDX-09, slice 1, 2026-11-18):** the registry's core, `jfl_application::views`,
+  does no I/O: each method is one transition of `views.qnt` with the model's guards (a step the
+  model does not enable is a `ViewError`), generic over what a stat sees of a file (`FileSeen`:
+  the stat and the racy rule) and of `HEAD` and the index, and a summary's key; generations are
+  `Arc`s a pin keeps while the next publishes; the pin computes completeness through IDX-02's
+  `completeness` over the request's own view, adding `PendingChanges` (cookie not back, a late
+  read, dirty paths, a due rescan, a build, a moved `HEAD` or index), `NotWatched` and
+  `WatcherLostEvents` (two `IncompleteReason`s added, as the mapping asked). The `views` driver
+  (`jfl-conformance`) replays the model over it with the scripted world (tree, watcher, store)
+  beside the driver, every observed type `deny_unknown_fields` with derived `PartialEq`; no
+  model change. Two negative controls: the registered one shows the registry a store lagging by
+  its last write and diverges at `publish` (`NotStored`); the second publishes each build as it
+  starts and diverges at `reconcileStart` (`doc/formal-models.md`). A core with the ports inside
+  was not taken: the model's steps are finer than a port call. Round 2 (review): a cookie event
+  carries its cookie's stamp and only the latest queued cookie's counts (a real cookie raises
+  several events); a rescan takes the view's listing, reads new paths and certifies only with
+  one (file creation is not modelled: `doc/formal-models.md`, "Not modelled yet"); a module
+  count `ModuleIndex::new` refuses is incomplete, never empty. `just bench-views` measures it on
+  the corpus (`doc/bench/README.md`).
+- **Left for slice 2 (IDX-09):** the async shell over the ports (`SourceTree`, `RepoProbe`,
+  `SyntaxIndexer`, `SummaryStore`) that opens a view on first request (`RepoProbe::resolve`,
+  then watch, list, publish), feeds hints (a `Rescan` whose reasons `degrade_the_watch()` is
+  `watch_lost`, `WatcherOverflow` is `overflow` for every view of the instance, a new
+  directory's hint is scanned), writes the cookie file through the view's own watch with a
+  deadline (`cookie_lost` when it passes; the two round trips measured against plan §1.7's
+  100 ms), checks the filesystem type with `statfs` (`open(.., watched: false)` on network,
+  FUSE or overlay filesystems), takes the IDX-05 obligations (snapshot before `changed_since`,
+  the clock before the snapshot, `ChangedFiles::everything`, an error or `unrepresentable > 0`
+  as a rescan, the listing unioned with `tracked_java`, the `repo_probe` fake's I/O error) and
+  the IDX-06 union. `ViewRegistry::bind` picks the innermost *open* view, so the shell opens the
+  view `RepoProbe::resolve` names before it starts a request (else a nested worktree's file would
+  bind to its parent and be added to the parent's index), and never hands a parent view a hint
+  under a nested root. The shell supplies the listing to every rescan, and writes a cookie
+  file named by its stamp so its events carry it. From the slice-1 review: `Pin::complete_view`
+  is a copy of the request's view, not the view `completeness_at` read (return the root it
+  used); finished requests are never removed and keep their pinned generations alive (drop the
+  pin on finish, or a `forget`); `GitSeen.head` must cover the branch ref `HEAD` names and
+  `packed-refs`, not `.git/HEAD` alone (RepoProbe's stat set); a summary the store's cap evicts
+  between `summarised` and `publish` leaves the build stuck on `NotStored` (re-summarise or
+  abandon it); a protocol golden showing the two new reasons' words ("filesystem not watched",
+  "watcher lost events") when the shell first emits them. And the state-machine test
+  (**Decided (orchestrator, 2026-11-18):** not `proptest-state-machine`, whose `proptest`
+  default features bring 16 crates the workspace keeps out; the reference machine is written
+  over plain `proptest`, std only).
+  When the shell wires the summary store (IDX-08's review): create its root under the 0700 state
+  dir with 0700 directories, and fix the two store races if the shell makes them reachable (a
+  `NotFound` read racing a same-key write drops the live entry from the cap table; a discard
+  racing a good write deletes it).
 - **Accept:**
-  - [ ] `conformance-replay` replays the `views` regression and generated traces green
-  - [ ] the negative control fails at the expected step
-  - [ ] component tests: a request pinned to N while N+1 publishes answers wholly from N; a `sed -i`-style write seen by the stat is in the answer without `sync`
-  - [ ] a `proptest-state-machine` test of the registry (open, reconcile, publish, pin, `sync`) against a reference machine (ADR 0007, amended; ver §6.4)
-  - [ ] runs on the bench corpus (small at least, `just bench`) and reports the metrics it affects; its correctness tests also run against the real-corpus cases that apply (BENCH-05)
+  - [x] `conformance-replay` replays the `views` regression and generated traces green (`crates/jfl-conformance/src/views.rs`; the seven regression traces, and 10 × 30-step generated traces at each `check`'s seed; seeds 0x1 to 0x5 also run)
+  - [x] the negative control fails at the expected step (`tests/replay.rs::should_diverge_at_the_reconcile_when_the_views_control_publishes_early`: step 3, `reconcileStart`)
+  - [x] component tests: a request pinned to N while N+1 publishes answers wholly from N; a `sed -i`-style write seen by the stat is in the answer without `sync` (`crates/jfl-application/tests/views.rs`)
+  - [ ] a `proptest-state-machine` test of the registry (open, reconcile, publish, pin, `sync`) against a reference machine (ADR 0007, amended; ver §6.4), over plain `proptest` (Decided above)
+  - [x] runs on the bench corpus (small at least, `just bench`) and reports the metrics it affects; its correctness tests also run against the real-corpus cases that apply (BENCH-05): `just bench-views SIZE` (small and medium, `doc/bench/README.md`); BENCH-05 has no cases yet, and every request over the unchanged corpus came out complete
 - **Obligations from the watcher (IDX-06 review), with FORMAL-03's (watch, then scan; a loss on a
   watch error; a filesystem-type check; racy mtimes):** hints are not a complete record, so a view
   answers `complete=true` only from what it scanned or stat'ed, never from the absence of a hint.

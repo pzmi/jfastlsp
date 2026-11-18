@@ -1,8 +1,10 @@
 //! The `jfl-conformance` binary (ver §6.2 item 2): `replay [--model NAME] [--seed SEED
 //! --generated DIR]` replays the committed regression traces and, with `--generated`, the seeded
 //! traces xtask's `conformance-replay` stage (or `just conformance`) wrote under `DIR/<model>/`,
-//! through each model's driver, then the driver's negative control over the same generated
-//! traces, which must diverge on one of them. It runs no Quint itself (this crate holds no
+//! through each model's driver, then the driver's negative control over those generated traces
+//! and the model's committed regression traces, which must diverge on one of them: the committed
+//! traces make the control's divergence independent of the seed, so a run cannot fail by the
+//! luck of its batch ([`control_diverges`]). It runs no Quint itself (this crate holds no
 //! process grant): xtask generates, this replays.
 //!
 //! Exit codes: 0 every trace conforms; 1 a divergence (`DIVERGENCE: ...`, with model, seed, trace,
@@ -130,7 +132,7 @@ fn replay_all(
     }
     if let Some((seed, dir)) = &command.generated {
         for model in &chosen {
-            generated(model, seed, dir, out)?;
+            generated(model, seed, dir, root, out)?;
         }
     }
     let regressions = manifest::read(root)?;
@@ -189,8 +191,15 @@ fn replay_all(
 }
 
 /// Reads `dir/<model>/*.itf.json` (failing closed on any that is not a trace) and replays them
-/// through the model's driver, then its negative control; a pending model's are read only.
-fn generated(model: &str, seed: &str, dir: &Path, out: &mut dyn Write) -> Result<(), Failure> {
+/// through the model's driver, then its negative control over them and the model's committed
+/// regression traces ([`control_diverges`]); a pending model's are read only.
+fn generated(
+    model: &str,
+    seed: &str,
+    dir: &Path,
+    root: &Path,
+    out: &mut dyn Write,
+) -> Result<(), Failure> {
     let files = trace_files(&dir.join(model))?;
     let mut traces = Vec::with_capacity(files.len());
     for file in &files {
@@ -221,24 +230,25 @@ fn generated(model: &str, seed: &str, dir: &Path, out: &mut dyn Write) -> Result
         "conformance: {model}: seed {seed}: {} generated traces ({states} states) conform",
         traces.len()
     );
-    let caught = traces.iter().find_map(|(name, steps)| {
-        let context = Context {
-            model,
-            seed,
-            trace: name,
-        };
-        match replay::replay((entry.control)(), &context, steps.clone()) {
-            Err(Failure::Diverged(divergence)) => Some(divergence),
-            _ => None,
-        }
-    });
-    let Some(divergence) = caught else {
-        return Err(HarnessError::new(format!(
-            "{model}: the negative control conformed on all {} generated traces of seed {seed}: they do not exercise the driver (a longer budget?)",
-            traces.len()
-        ))
-        .into());
-    };
+    let mut committed = Vec::new();
+    for regression in manifest::read(root)?.iter().filter(|r| r.model == model) {
+        let name = regression.file.display().to_string();
+        let steps = trace::read(&root.join(&regression.file), &name)?;
+        committed.push(Tried {
+            name,
+            seed: regression.seed.clone(),
+            steps,
+        });
+    }
+    let generated: Vec<Tried> = traces
+        .into_iter()
+        .map(|(name, steps)| Tried {
+            name,
+            seed: seed.to_owned(),
+            steps,
+        })
+        .collect();
+    let divergence = control_diverges(entry.control, model, seed, &generated, &committed)?;
     let _ = writeln!(
         out,
         "conformance: {model}: the negative control diverged as it must, at step {} of {}",
@@ -277,6 +287,56 @@ fn trace_files(dir: &Path) -> Result<Vec<PathBuf>, HarnessError> {
     }
     files.sort();
     Ok(files)
+}
+
+/// One trace a negative control is tried on.
+#[derive(Debug, Clone)]
+pub struct Tried {
+    /// The trace file.
+    pub name: String,
+    /// The seed it was generated with.
+    pub seed: String,
+    /// Its steps.
+    pub steps: Vec<trace::RawStep>,
+}
+
+/// The first divergence of `control` over the `generated` traces (of `seed`), then the model's
+/// `committed` regression traces: a control must diverge on one of them, or it proves nothing
+/// (ver §6.2 item 4). The committed traces are fixed, so a control that diverges on one of them
+/// passes whatever the batch the seed drew. A harness error names every trace tried.
+///
+/// Pinned by: tests/replay.rs::should_pass_the_control_when_it_diverges_only_on_a_regression_trace
+/// and `cli::tests::should_name_every_trace_tried_when_the_control_never_diverges`.
+pub fn control_diverges(
+    control: fn() -> replay::Replayer,
+    model: &str,
+    seed: &str,
+    generated: &[Tried],
+    committed: &[Tried],
+) -> Result<replay::Divergence, HarnessError> {
+    let caught = generated.iter().chain(committed).find_map(|tried| {
+        let context = Context {
+            model,
+            seed: &tried.seed,
+            trace: &tried.name,
+        };
+        match replay::replay(control(), &context, tried.steps.clone()) {
+            Err(Failure::Diverged(divergence)) => Some(*divergence),
+            _ => None,
+        }
+    });
+    caught.ok_or_else(|| {
+        HarnessError::new(format!(
+            "{model}: the negative control conformed on all {} generated traces of seed {seed} and all {} committed regression traces ({}): they do not exercise the driver",
+            generated.len(),
+            committed.len(),
+            committed
+                .iter()
+                .map(|t| t.name.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        ))
+    })
 }
 
 #[cfg(test)]
@@ -321,5 +381,40 @@ mod tests {
             });
             assert_eq!(got.ok(), want, "{words:?}");
         }
+    }
+
+    use crate::smoke;
+
+    const THREE: &str = r##"{"#meta":{"format":"ITF"},"vars":["count","mbt::actionTaken","mbt::nondetPicks"],"states":[{"#meta":{"index":0},"count":{"#bigint":"0"},"mbt::actionTaken":"init","mbt::nondetPicks":{}},{"#meta":{"index":1},"count":{"#bigint":"1"},"mbt::actionTaken":"step","mbt::nondetPicks":{}},{"#meta":{"index":2},"count":{"#bigint":"2"},"mbt::actionTaken":"step","mbt::nondetPicks":{}}]}"##;
+
+    #[test]
+    fn should_name_every_trace_tried_when_the_control_never_diverges() -> Result<(), HarnessError> {
+        // given: traces too short to reach the value the smoke control skips
+        let short = |name: &str| -> Result<Tried, HarnessError> {
+            Ok(Tried {
+                name: name.to_owned(),
+                seed: "0x1".to_owned(),
+                steps: trace::parse(name, THREE)?,
+            })
+        };
+        let generated = [short("trace_0.itf.json")?, short("trace_1.itf.json")?];
+        let committed = [short("formal/traces/regression/short.itf.json")?];
+
+        // when
+        let caught = control_diverges(smoke::control, "smoke", "0x7", &generated, &committed);
+
+        // then
+        let Err(error) = caught else {
+            return Err(HarnessError::new(
+                "the control diverged on a trace too short to",
+            ));
+        };
+        assert!(
+            error.to_string().contains(
+                "smoke: the negative control conformed on all 2 generated traces of seed 0x7 and all 1 committed regression traces (formal/traces/regression/short.itf.json)"
+            ),
+            "{error}"
+        );
+        Ok(())
     }
 }

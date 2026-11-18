@@ -23,7 +23,7 @@ steps = 10
 sim_steps = 25
 
 # Views, generations, freshness and completeness (FORMAL-03, plan §7.1, doc/formal-models.md,
-# which holds the measured budget). Its driver lands with IDX-09.
+# which holds the measured budget). Its driver is IDX-09's (crates/jfl-conformance/src/views.rs).
 [models.views]
 file = "formal/views.qnt"
 main = "views"

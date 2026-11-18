@@ -360,6 +360,12 @@ pub enum IncompleteReason {
     IndexLoading,
     /// The internal deadline passed; the answer holds what was found by then (plan §2.7).
     Deadline,
+    /// The view's files are not watched (the watch is down, or its filesystem cannot be watched:
+    /// network, FUSE or overlay), so no change is known to have been seen (ADR 0037).
+    NotWatched,
+    /// The watcher lost events (an overflow, a lost watch) and no full scan started with the watch
+    /// up has published since (ADR 0037).
+    WatcherLostEvents,
 }
 
 /// The plan's wording: `module :payments not indexed`, `deadline`.
@@ -397,6 +403,8 @@ impl fmt::Display for IncompleteReason {
             }
             Self::IndexLoading => f.write_str("index loading"),
             Self::Deadline => f.write_str("deadline"),
+            Self::NotWatched => f.write_str("filesystem not watched"),
+            Self::WatcherLostEvents => f.write_str("watcher lost events"),
         }
     }
 }
@@ -1080,6 +1088,14 @@ mod tests {
             [IncompleteReason::IndexLoading, IncompleteReason::Deadline]
         );
         assert_eq!(IncompleteReason::Deadline.to_string(), "deadline");
+        assert_eq!(
+            IncompleteReason::NotWatched.to_string(),
+            "filesystem not watched"
+        );
+        assert_eq!(
+            IncompleteReason::WatcherLostEvents.to_string(),
+            "watcher lost events"
+        );
         assert_eq!(
             IncompleteReason::ModuleNotIndexed {
                 module: module(":payments")

@@ -11,6 +11,8 @@
 //!   implementation applies first.
 //! - [`summary_store`] (IDX-08): the `SummaryStore` port, the storage tier of DEC-03 and the large
 //!   tier's [`Declarations`] and name postings.
+//! - [`views`] (IDX-09): the view registry: views per worktree root, generations, freshness,
+//!   completeness and `sync`, the transitions of `formal/views.qnt`.
 
 pub mod blocking;
 pub mod hints;
@@ -18,6 +20,7 @@ pub mod repo_probe;
 pub mod source_tree;
 pub mod summary_store;
 pub mod syntax_indexer;
+pub mod views;
 
 pub use blocking::{BlockingPool, Interrupted};
 pub use hints::{DEFAULT_HINT_CAPACITY, HintQueue, HintSink, hint_queue};
@@ -36,4 +39,9 @@ pub use summary_store::{
 };
 pub use syntax_indexer::{
     GrammarId, Indexed, SyntaxDiagnostic, SyntaxIndexError, SyntaxIndexer, SyntaxProblem,
+};
+pub use views::{
+    Build, Cookie, Entry, Event, FileObserved, FileSeen, GitSeen, Observed, Pin, Published,
+    Request, RequestId, RequestPhase, Stamp, Started, Stored, SyncPhase, SyncState, ViewError,
+    ViewRegistry, ViewState,
 };

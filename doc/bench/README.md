@@ -351,6 +351,25 @@ Measured 2026-11-18 (IDX-08) on the 4 vCPU Xeon VM **while another lane was runn
 - **Why the postings are a sorted table, not `fst`** (a one-off measurement, not a bench arm): on medium, a version of the postings over an `fst` map took 101–126 ms in this bench's postings step against 50–54 ms for the table, for lookups no faster (211 against 190 ns). The arm was not kept. Details are in `crates/jfl-adapter-store/src/postings.rs` and plan §5.5.
 - **What memory the large tier keeps**: declarations hold the whole string arena, reference names included, so they are about 0.7 of a whole summary; dropping the strings only reference sites use would cut that further (a later optimisation, if EVAL-05's RSS asks for it).
 
+### The view registry (IDX-09, `just bench-views`)
+
+`crates/jfl-composition/benches/views.rs` `lstat`s every tracked `.java` file and measures `jfl-application`'s view registry over those real stats (warm; no summary read or stored, no cookie file written: the store and the syntax index have their own suites, and the cookie's round trip through the watcher lands with the registry's async shell).
+- The stat of every file and the open of a view from them (generation 1 published).
+- One request's freshness path over 2,000 files spread over the view, five times: its file's `lstat` (the clock read first, the racy rule applied), then `request_start` (bind to the innermost view, the stat compared with the published entry), the cookie delivered back, the pin (`HEAD` and the index re-statted and compared, completeness computed) and `finish`; p50 and p95 of the registry's part and of the `lstat`.
+- One changed file reconciled and published (its build beside the published generation), and a full rescan (`sync`: every file re-statted, nothing changed, published). Medians of five runs.
+
+Measured 2026-11-18 (IDX-09) on the 4 vCPU Xeon VM, one other lane running:
+
+| corpus | stat of every file | open | request, registry (p50, p95) | request, its `lstat` (p50, p95) | one change published | full rescan |
+|:--|--:|--:|--:|--:|--:|--:|
+| small junit-framework (1,813 files) | 2.1 ms | 0.19 ms | 0.69, 2.2 µs | 1.1, 2.4 µs | 0.21 ms | 2.5 ms |
+| medium spring-framework (9,294 files) | 9.0 ms | 1.3 ms | 0.60, 1.9 µs | 1.0, 2.3 µs | 1.25 ms | 12.9 ms |
+
+- **Per request** the registry's part does not grow with the view: a pin reads the generation's file count and latest read stamp, both counted at publish (a first version counted the files at every pin: 13.6 µs p50 on medium). Every request was complete (the corpus did not change while it ran).
+- **A publish** copies the generation's index (a build sits beside the published one, which pinned requests keep): linear in the view's files, 1.25 ms on medium, about 4.5 ms projected to elasticsearch's 33,850 files. A persistent map would make it proportional to the change; not needed at these numbers.
+- **The rescan takes the view's listing** since the review's round 2 (new files are read, the view certified only with one): one medium rerun gave 14.3 ms for the full rescan and an unchanged request path (p50 0.70 µs), within this VM's noise, so the table keeps the first run.
+- **The cookie's round trips** (one, or two when a summary was read after the first), which plan §1.7's 100 ms freshness target bounds, are not in these numbers: they are the watcher's latency and land with the shell that writes the cookie.
+
 ## Adding a suite
 
 1. A `suites/<name>.toml` with `name`, `description`, `kind` and the knobs of its kind

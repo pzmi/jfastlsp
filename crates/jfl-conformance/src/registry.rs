@@ -16,6 +16,7 @@ use std::path::Path;
 use crate::HarnessError;
 use crate::replay::Replayer;
 use crate::smoke;
+use crate::views;
 
 /// The MODELS registry, relative to the repository root (FORMAL-01).
 pub const MODELS: &str = "formal/models.toml";
@@ -36,19 +37,22 @@ pub struct Entry {
 }
 
 /// Every driver.
-pub const DRIVERS: [Entry; 1] = [Entry {
-    model: "smoke",
-    driver: smoke::driver,
-    control: smoke::control,
-}];
+pub const DRIVERS: [Entry; 2] = [
+    Entry {
+        model: "smoke",
+        driver: smoke::driver,
+        control: smoke::control,
+    },
+    Entry {
+        model: "views",
+        driver: views::driver,
+        control: views::control,
+    },
+];
 
 /// Registered models whose driver has not landed yet, each with the task that brings it. Each
 /// task must have an open card in [`TASKS`] ([`check_pending`]).
-pub const PENDING: [(&str, &str); 3] = [
-    ("views", "IDX-09"),
-    ("daemon", "IDX-12"),
-    ("diagnostics", "LSP-04"),
-];
+pub const PENDING: [(&str, &str); 2] = [("daemon", "IDX-12"), ("diagnostics", "LSP-04")];
 
 /// The driver of `model`.
 pub fn driver(model: &str) -> Option<&'static Entry> {

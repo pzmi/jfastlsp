@@ -131,7 +131,7 @@ impl StatRecord {
 }
 
 /// Whether `time` is at least `by` before `reference`.
-fn older_by(time: MTime, reference: MTime, by: Duration) -> bool {
+pub(crate) fn older_by(time: MTime, reference: MTime, by: Duration) -> bool {
     let secs = i64::try_from(by.as_secs()).unwrap_or(i64::MAX);
     let shifted_secs = time.secs.saturating_add(secs);
     let nanos = time.nanos.saturating_add(by.subsec_nanos());

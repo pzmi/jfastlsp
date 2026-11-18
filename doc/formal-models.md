@@ -28,8 +28,9 @@ review checks.
 ## `views`: views, generations, freshness and completeness
 
 `formal/views.qnt` (FORMAL-03; plan §4, §7.1, §2.1; ADR 0014, ADR 0017, ADR 0037). The driver
-is IDX-09's, over `jfl-application`'s view registry with the testkit's scripted source tree,
-watcher, repository probe and summary store. `views` is pending on IDX-09 until then.
+is IDX-09's (`crates/jfl-conformance/src/views.rs`), over `jfl-application`'s view registry
+(`crates/jfl-application/src/views.rs`, which does no I/O: each method is one transition below)
+with a scripted tree, watcher and summary store beside the driver.
 
 ### The world
 
@@ -184,6 +185,19 @@ model.
   wins over an older overlay).
 - **Worktrees added or removed** under a running parent view.
 - **Lazily opened views.** They are covered by obligation 1 (watch, then scan).
+- **File creation.** `PATHS` is fixed, so no file appears that the views did not index at `init`.
+  A file created while no event can be raised (the watch lost, an overflow) is seen only by a
+  rescan's listing: the registry's `reconcile_start` takes the listing, reads every listed path
+  the index lacks, and certifies the view only when it was given one. Adding created paths to the
+  model would add path and listing state to every record, and Apalache's time grows steeply with
+  the state (858 s at length 5 already, in a 60-minute job), so the case is pinned by component
+  tests instead: `tests/views.rs::should_read_a_file_created_while_the_watch_was_lost_when_the_rescan_lists_it`
+  and `should_stay_uncertain_when_a_rescan_has_no_listing` in `crates/jfl-application`.
+- **A cookie raising several events.** A real cookie write raises several (`IN_CREATE`,
+  `IN_CLOSE_WRITE`); the model's is one event. Each cookie event carries the stamp its cookie was
+  written at (the model's `cookieSeq`, the driver's event `seq`), and the registry ignores one
+  that is not the request's latest queued cookie:
+  `tests/views.rs::should_wait_for_the_second_cookie_when_a_stale_first_cookie_event_arrives`.
 - **Deadlines** (plan §2.7), including the bound on a request's wait for its cookie: the model's
   `requestPin` waits for a queued cookie; IDX-09 answers incomplete when the deadline passes
   first.
@@ -388,8 +402,23 @@ Each control is an action variant with a Quint test that expects its invariant t
 | `dropEventMarkingOne` | An overflow marks one view of a shared instance. | `CompleteIsHonest` |
 | `syncDoneEarly` | `sync` returns without its rescan. | `SyncIsBarrier` |
 
-Plan §7.1 names IDX-09's own negative control: publishing before the last summary is stored. It
-must diverge at the `publish` step of a trace whose build still has a pending path.
+Plan §7.1 names IDX-09's own negative control: publishing before the last summary is stored. The
+driver has two (`crates/jfl-conformance/src/views.rs`), each diverging where its fault first
+shows:
+
+- **The registered control** shows the registry a store that lags the observed one by its last
+  write (a write acknowledged before it can be read back). The registry's atomic-publish guard
+  refuses the next `publish` that names that summary (`NotStored`), so it diverges at the model's
+  `publish` step: step 6 of `views-checkout-during-reconcile`.
+- **The early-publish control** publishes each build as soon as it starts, before its summaries
+  are stored. It diverges at `reconcileStart` (with a path pending the guard refuses
+  `PendingSummaries`; with none the early generation differs from the model's): step 3 of the
+  same trace.
+
+`conformance-replay` requires the registered control to diverge on the generated batch or the
+committed regression traces, so the requirement holds at every seed: in a batch of ten 30-step
+traces the lagging store shows only when a `summarise` is followed by a `publish`, which some
+batch will lack.
 
 ### Budget
 
@@ -401,7 +430,7 @@ Temurin JDK 21. The registry holds two numbers per model: `steps`, Apalache's bo
 |:--|:--|:--|
 | `formal-typecheck` and `formal-test` (29 views tests, 1 smoke) | every `check` | about 4 s |
 | `formal-freshness`: eight traces regenerated | every `check` | about 2 s per trace |
-| `conformance-replay` | 10 traces of `sim_steps` (30), generated twice, every `check` | a few seconds. The traces are read, not replayed, until IDX-09. |
+| `conformance-replay` | 10 traces of `sim_steps` (30), generated twice, every `check` | a few seconds; the views driver replays them and the seven regression traces, and its control diverges (IDX-09). |
 | `formal-verify views`: Apalache | `steps = 5` | 858 s |
 | `formal-verify views`: simulation | 20000 samples of `sim_steps` (30) | 172 s |
 | `formal-verify views` in all | weekly in `formal.yml` (60-minute job) | 1048 s; perhaps twice that on a CI runner |
