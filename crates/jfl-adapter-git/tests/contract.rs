@@ -9,6 +9,7 @@ use std::path::Path;
 use jfl_adapter_git::GitRepoProbe;
 use jfl_domain::FileUri;
 use jfl_testkit::contracts::repo_probe::{Factory, Fixture, check};
+use jfl_testkit::contracts::{NonUtf8Name, PLATFORM_NON_UTF8_NAME};
 use jfl_testkit::exec::InlinePool;
 use jfl_testkit::fixtures::git::Repo;
 
@@ -52,13 +53,16 @@ impl Fixture for Real {
         Repo::open(self.scratch.path()).write(path, bytes)
     }
 
-    fn write_non_utf8_java(&self, dir: &str) -> Result<(), String> {
+    fn write_non_utf8_java(&self, dir: &str) -> Result<NonUtf8Name, String> {
         let name = OsStr::from_bytes(b"\xff-not-utf-8.java");
-        fs::write(
+        match fs::write(
             self.scratch.path().join(dir).join(Path::new(name)),
             b"class X {}",
-        )
-        .map_err(|e| e.to_string())
+        ) {
+            Ok(()) => Ok(NonUtf8Name::Written),
+            Err(e) if e.raw_os_error() == Some(libc::EILSEQ) => Ok(NonUtf8Name::Refused),
+            Err(e) => Err(e.to_string()),
+        }
     }
 
     fn remove(&self, path: &str) -> Result<(), String> {
@@ -121,4 +125,19 @@ fn should_pass_the_repo_probe_contract_when_run_against_real_git() {
 
     // then
     assert_eq!(violations, []);
+}
+
+#[test]
+fn should_write_or_refuse_a_non_utf8_name_as_the_platform_does_when_the_fixture_makes_one() {
+    // given: Linux holds the name; APFS refuses it with EILSEQ (PLATFORM_NON_UTF8_NAME)
+    let fixture = RealGit.fixture().unwrap();
+    fixture
+        .init("main", &[("src/A.java", b"class A {}\n")])
+        .unwrap();
+
+    // when
+    let outcome = fixture.write_non_utf8_java("main/src");
+
+    // then
+    assert_eq!(outcome, Ok(PLATFORM_NON_UTF8_NAME));
 }

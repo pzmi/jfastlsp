@@ -10,7 +10,8 @@
 # SHASUMS256.txt, equal to the binary inside each archive), then `mise install --locked` of the
 # tools the job runs (ci.rs's CI_TOOLS; Node and Quint only in `formal`, the JDK and Apalache
 # never: formal.yml installs them); the
-# toolchain of rust-toolchain.toml; the cargo cache, keyed by the toolchain and Cargo.lock
+# toolchain of rust-toolchain.toml, before the first `just` (the justfile builds xtask as it parses,
+# so every recipe needs it; ARCH-ci-lockstep); the cargo cache, keyed by the toolchain and Cargo.lock
 # (rust-cache's own key) and mise.lock, saved only from main (fnd §7.3). Written out per job
 # rather than as a local action: zizmor wants the `$/` self-repository form, which actionlint
 # does not parse yet.
@@ -218,6 +219,13 @@ jobs:
           cache_save: ${{ github.ref == 'refs/heads/main' }}
           # mise.toml's [env] stays out of the gate's environment (ARCH-ci-lockstep).
           env: false
+      - name: Rust toolchain of rust-toolchain.toml
+        run: rustup toolchain install
+      - name: Cargo cache
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          key: mise-${{ hashFiles('mise.lock') }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: just check-only secrets workflows
       # pinact's version-comment check asks the GitHub API (fnd §7.3); the job's read-only token
       # lifts the rate limit.
@@ -243,6 +251,13 @@ jobs:
           cache_save: ${{ github.ref == 'refs/heads/main' }}
           # mise.toml's [env] stays out of the gate's environment (ARCH-ci-lockstep).
           env: false
+      - name: Rust toolchain of rust-toolchain.toml
+        run: rustup toolchain install
+      - name: Cargo cache
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          key: mise-${{ hashFiles('mise.lock') }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       # The pushed commits (before..after), a pull request's commits (base..head), or the commit
       # itself on a manual run (scripts/dco-check.sh --event). A push whose `before` is all zeros
       # (a first push or a recreated main) or not in the history (a force-push) fails: main is

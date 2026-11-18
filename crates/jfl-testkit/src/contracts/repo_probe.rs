@@ -20,6 +20,7 @@ use jfl_application::{
 };
 use jfl_domain::{FileUri, RelPath};
 
+use crate::contracts::{NonUtf8Name, non_utf8_names};
 use crate::exec::block_on;
 
 /// A fresh base directory under test, with the means to change it.
@@ -42,8 +43,9 @@ pub trait Fixture {
     /// Writes a file, making its parents.
     fn write(&self, path: &str, bytes: &[u8]) -> Result<(), String>;
 
-    /// Writes a `.java` file whose name is not UTF-8 in the directory `dir`.
-    fn write_non_utf8_java(&self, dir: &str) -> Result<(), String>;
+    /// Writes a `.java` file whose name is not UTF-8 in the directory `dir`, or reports that the
+    /// platform's filesystem refused the name ([`NonUtf8Name`]).
+    fn write_non_utf8_java(&self, dir: &str) -> Result<NonUtf8Name, String>;
 
     /// Removes a file.
     fn remove(&self, path: &str) -> Result<(), String>;
@@ -436,7 +438,7 @@ fn changed_reports_working_states<X: Fixture>(fx: &X) -> Result<(), String> {
     fx.stage("main", "src/N.java")?;
     fx.remove("main/src/B.java")?;
     fx.write("main/src/with space/U.java", b"class U {}\n")?;
-    fx.write_non_utf8_java("main/src")?;
+    let unrepresentable = non_utf8_names(fx.write_non_utf8_java("main/src")?)?;
     let changed = changed(fx, &main, &base)?;
     ensure(
         parts(&changed)
@@ -444,7 +446,7 @@ fn changed_reports_working_states<X: Fixture>(fx: &X) -> Result<(), String> {
                 vec![],
                 vec!["src/A.java", "src/B.java", "src/N.java"],
                 vec!["src/with space/U.java"],
-                1,
+                unrepresentable,
             ),
         || format!("{changed:?}"),
     )
@@ -477,14 +479,15 @@ fn tracked_lists_tracked_java_only<X: Fixture>(fx: &X) -> Result<(), String> {
     let main = worktree(fx, "main")?;
     fx.write("main/gen/G.java", b"class G {}\n")?;
     fx.stage("main", "gen/G.java")?;
-    fx.write_non_utf8_java("main/src")?;
+    let unrepresentable = non_utf8_names(fx.write_non_utf8_java("main/src")?)?;
     fx.stage("main", "src")?;
     fx.commit("main")?;
     fx.write("main/src/U.java", b"class U {}\n")?;
     let tracked =
         block_on(fx.probe().tracked_java(&main)).map_err(|e: RepoProbeError| e.to_string())?;
     ensure(
-        tracked.files == rel(&["gen/G.java", "src/A.java"]) && tracked.unrepresentable == 1,
+        tracked.files == rel(&["gen/G.java", "src/A.java"])
+            && tracked.unrepresentable == unrepresentable,
         || format!("{tracked:?}"),
     )
 }
@@ -628,8 +631,10 @@ mod tests {
         fn write(&self, path: &str, bytes: &[u8]) -> Result<(), String> {
             self.fake.write(&self.at(path), bytes)
         }
-        fn write_non_utf8_java(&self, dir: &str) -> Result<(), String> {
-            self.fake.write_non_utf8_java(&self.at(dir))
+        fn write_non_utf8_java(&self, dir: &str) -> Result<NonUtf8Name, String> {
+            self.fake
+                .write_non_utf8_java(&self.at(dir))
+                .map(|()| NonUtf8Name::Written)
         }
         fn remove(&self, path: &str) -> Result<(), String> {
             self.fake.remove(&self.at(path))

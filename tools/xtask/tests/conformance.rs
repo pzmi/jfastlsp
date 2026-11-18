@@ -66,10 +66,11 @@ calls=$(cat "$FAKE_DIR/calls" 2>/dev/null || echo 0); calls=$((calls + 1)); echo
 i=0
 while [ "$i" -lt "$n" ]; do
   file=$(printf '%s' "$out" | sed "s/{seq}/$i/")
-  sed "s/STAMP/$calls/" "$FAKE_DIR/trace" > "$file"
+  drift='s/x/x/'
   if [ "$(cat "$FAKE_DIR/mode" 2>/dev/null)" = drift ] && [ "$calls" -gt 1 ]; then
-    sed -i 's/"#bigint":"6"/"#bigint":"7"/' "$file"
+    drift='s/"#bigint":"6"/"#bigint":"7"/'
   fi
+  sed -e "s/STAMP/$calls/" -e "$drift" "$FAKE_DIR/trace" > "$file"
   i=$((i + 1))
 done
 exit "$(cat "$FAKE_DIR/quint-exit" 2>/dev/null || echo 0)"

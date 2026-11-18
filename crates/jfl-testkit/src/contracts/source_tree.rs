@@ -19,6 +19,7 @@ use jfl_application::source_tree::{
 };
 use jfl_domain::{FileUri, RelPath};
 
+use crate::contracts::{NonUtf8Name, non_utf8_names};
 use crate::exec::block_on;
 use crate::poll::wait_until;
 
@@ -55,8 +56,9 @@ pub trait Fixture {
     /// A symbolic link at `path` to `target`, a path under the root.
     fn link_inside(&self, path: &str, target: &str) -> Result<(), String>;
 
-    /// A `.java` file in `dir` whose name is not UTF-8.
-    fn non_utf8_java(&self, dir: &str) -> Result<(), String>;
+    /// A `.java` file in `dir` whose name is not UTF-8, or the platform's refusal of the name
+    /// ([`NonUtf8Name`]).
+    fn non_utf8_java(&self, dir: &str) -> Result<NonUtf8Name, String>;
 
     /// Makes the directory `dir` unreadable (no effect for a superuser on a real filesystem).
     fn unreadable(&self, dir: &str) -> Result<(), String>;
@@ -313,19 +315,21 @@ fn never_follows_a_link<F: Factory>(factory: &F, _: Duration) -> Result<(), Stri
 fn reports_a_non_utf8_name<F: Factory>(factory: &F, _: Duration) -> Result<(), String> {
     let fx = factory.fixture(ROOMY)?;
     fx.write("a/A.java", b"class A {}")?;
-    fx.non_utf8_java("a")?;
+    let names = non_utf8_names(fx.non_utf8_java("a")?)?;
     let listing = list(&fx, ListMode::Paths)?;
     let gaps: Vec<(Option<&str>, UnlistedReason)> = listing
         .unlisted
         .iter()
         .map(|u| (u.path.as_ref().map(RelPath::as_str), u.why))
         .collect();
-    if paths(&listing) != ["a/A.java"]
-        || gaps != [(Some("a"), UnlistedReason::NonUtf8Name)]
-        || listing.unlisted_count != 1
-    {
+    let want: &[(Option<&str>, UnlistedReason)] = if names == 0 {
+        &[]
+    } else {
+        &[(Some("a"), UnlistedReason::NonUtf8Name)]
+    };
+    if paths(&listing) != ["a/A.java"] || gaps != want || listing.unlisted_count != names {
         return Err(format!(
-            "listed {:?} with gaps {gaps:?}, want a/A.java and one NonUtf8Name gap at a",
+            "listed {:?} with gaps {gaps:?}, want a/A.java and the gaps {want:?}",
             paths(&listing)
         ));
     }
@@ -544,12 +548,16 @@ fn watch_leaves_out_agent_worktrees<F: Factory>(
     let mut watch = block_on(fx.tree().watch(fx.root())).map_err(|e| format!("watch: {e}"))?;
     fx.write(".claude/worktrees/agent/src/A.java", b"class A {}")?;
     fx.write("w/B.java", b"class B {}")?;
-    let marker = Hint::Changed(rel("w/B.java")?);
-    let (seen, ok) = hints_until(&mut watch, deadline, "a hint for w/B.java", |h| {
-        *h == marker
-    });
+    // A rescan covers w/B.java: a recursive watch (FSEvents) may fold the path into one, for an
+    // event on a path with no name under the root, such as the root itself.
+    let (seen, ok) = hints_until(
+        &mut watch,
+        deadline,
+        "a hint for w/B.java or a rescan",
+        |h| names_or_rescans(h, "w/B.java"),
+    );
     if !ok {
-        return Err(format!("no hint for w/B.java; saw {seen:?}"));
+        return Err(format!("no hint for w/B.java and no rescan; saw {seen:?}"));
     }
     let leaked: Vec<&Hint> = seen
         .iter()
@@ -690,8 +698,8 @@ mod tests {
             let to_dir = !target.ends_with(".java") && !target.ends_with(".txt");
             self.fake.link(path, to_dir)
         }
-        fn non_utf8_java(&self, dir: &str) -> Result<(), String> {
-            self.fake.non_utf8_java(dir)
+        fn non_utf8_java(&self, dir: &str) -> Result<NonUtf8Name, String> {
+            self.fake.non_utf8_java(dir).map(|()| NonUtf8Name::Written)
         }
         fn unreadable(&self, dir: &str) -> Result<(), String> {
             self.fake.unreadable(dir)

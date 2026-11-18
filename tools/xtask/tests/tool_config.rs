@@ -150,8 +150,8 @@ fn should_refuse_naming_the_file_when_a_tool_would_read_an_implicit_configuratio
     let mut failures = Vec::new();
 
     // when
-    for file in files {
-        let tree = scratch.tree(&format!("implicit-{}", file.replace(['/', '.'], "_")))?;
+    for (i, file) in files.into_iter().enumerate() {
+        let tree = scratch.tree(&format!("implicit-{i}"))?;
         fs::write(tree.join(file), "disable=all\n")?;
         if let Err(err) = expect_refused(&tree, file) {
             failures.push(err.to_string());
@@ -194,9 +194,10 @@ fn should_refuse_any_cargo_or_nested_toolchain_file_when_it_could_steer_cargo() 
     ];
     let mut failures = Vec::new();
 
-    // when
-    for file in files {
-        let tree = scratch.tree(&format!("g2-cargo-{}", file.replace(['/', '.'], "_")))?;
+    // when: one tree per case, named by index: names derived from the files would differ only in
+    // letter case for the H6 cases, and share one directory on a case-insensitive filesystem
+    for (i, file) in files.into_iter().enumerate() {
+        let tree = scratch.tree(&format!("g2-cargo-{i}"))?;
         let path = tree.join(file);
         fs::create_dir_all(path.parent().ok_or("no parent")?)?;
         fs::write(&path, "[build]\nrustc-wrapper = \"./evil.sh\"\n")?;

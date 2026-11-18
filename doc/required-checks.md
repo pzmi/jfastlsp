@@ -54,7 +54,9 @@ fnd §7.2 rule 4), which the `tests` job already runs on Linux x86-64. `workflow
 version-comment check) and `dco-event` need the GitHub API or the pushed range, so they are
 recipes outside `check`; the lockstep test also requires `platform-tests` to depend on exactly
 `unit-tests`, `integration-tests` and `doctests`. It checks shapes it allows rather than bypasses
-it knows: every `run:` of a job is `rustup toolchain install` or exactly one line `just <recipe> [args]`, each argument a plain
+it knows: every `run:` of a job is `rustup toolchain install` or exactly one line `just <recipe> [args]`, the first `just` of a job
+after its `rustup toolchain install` (the justfile builds xtask with the pinned toolchain while it
+parses, so every recipe needs it; FND-13), each argument a plain
 word or `"$VAR"` of the step's own `env:` (so no `||`, `&&`, `&`, `;`, `set`, redirection or write
 to `$GITHUB_ENV` or `$GITHUB_PATH` can appear), except `required`'s one step, which must equal the
 text in `ci.rs` byte for byte; every `uses:` is actions/checkout, jdx/mise-action or

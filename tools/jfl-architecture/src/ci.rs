@@ -12,6 +12,9 @@
 //!   not reading `needs.*.result`;
 //! - a job other than the aggregate with an `if:`, any job or step with `continue-on-error`, a step
 //!   with an `if:`, a job that calls a reusable workflow or has no steps;
+//! - a job whose first `just` step comes before a `rustup toolchain install` step: the justfile
+//!   builds xtask with the pinned toolchain while it parses, so every recipe needs it (FND-13:
+//!   the `security` and `dco` jobs died at parse time from XT-02 on);
 //! - a `run:` that is neither one of [`SETUP_RUNS`] nor exactly one line `just <recipe> [args]`, each argument a plain
 //!   word or `"$VAR"` of the step's own `env:` (an allowed shape, so `||`, `&&`, `&`, `;`, `set`,
 //!   redirections and writes to `$GITHUB_ENV` or `$GITHUB_PATH` cannot appear); the aggregate's
@@ -100,7 +103,12 @@ pub const PLATFORM_TESTS: [&str; 3] = ["unit-tests", "integration-tests", "docte
 
 /// The `run:` lines a job may have besides `just` commands, exactly: setup that runs no stage.
 /// `rustup toolchain install` installs the toolchain rust-toolchain.toml pins.
-pub const SETUP_RUNS: [&str; 1] = ["rustup toolchain install"];
+pub const SETUP_RUNS: [&str; 1] = [TOOLCHAIN_INSTALL];
+
+/// The setup step every job runs before its first `just` command: the justfile's `mise_bins`
+/// builds xtask through `scripts/xtask.sh` while `just` parses, and the launcher requires the
+/// pinned toolchain installed (XT-02).
+pub const TOOLCHAIN_INSTALL: &str = "rustup toolchain install";
 
 /// The aggregate job's one step, exactly: every result must be `success`, so a failed,
 /// cancelled or skipped job (or none) fails it.
@@ -418,6 +426,7 @@ fn read_job(
         wf(format!("job `{id}` has no steps"));
         return job;
     };
+    let mut toolchain = false;
     for (index, step) in steps.iter().enumerate() {
         let label = step.get("name").and_then(Value::as_str).map_or_else(
             || format!("step {}", index.saturating_add(1)),
@@ -460,9 +469,19 @@ fn read_job(
                     ));
                 }
             }
-            (Some(run), None) if SETUP_RUNS.contains(&run.trim()) => {}
+            (Some(run), None) if SETUP_RUNS.contains(&run.trim()) => {
+                toolchain |= run.trim() == TOOLCHAIN_INSTALL;
+            }
             (Some(run), None) => match gating_command(run, &env_keys, recipes) {
-                Ok(invocation) => job.invocations.push(invocation),
+                Ok(invocation) => {
+                    if !toolchain && job.invocations.is_empty() {
+                        wf(format!(
+                            "{at} runs `just` before a `{TOOLCHAIN_INSTALL}` step: the justfile \
+                             builds xtask with the pinned toolchain as it parses"
+                        ));
+                    }
+                    job.invocations.push(invocation);
+                }
                 Err(problem) => wf(format!("{at}: {problem}")),
             },
             (None, Some(uses)) => {

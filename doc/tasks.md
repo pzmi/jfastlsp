@@ -40,6 +40,7 @@ CLI carrier), **SEM-07** (M4),
 | FND-10 | Toolchain 1.99.1 | FND-08 | standard | S |  | XT-01 |
 | FND-11 | Remove the private-names hashes and check | FND-04, XT-02 | standard | S |  | EVAL lane |
 | FND-12 | Delete the jdtls proxy; keep stock jdtls as a bench arm | FND-11, BENCH-03 | standard | M |  | EVAL lane |
+| FND-13 | Make CI green again on main | XT-02 | standard | M |  | FORMAL-05 |
 | XT-01 | Scaffold `tools/xtask` and port the gate composition | FND-08, FND-09 | deep | M |  | FND-10, EVAL lane |
 | XT-02 | Tool pins: `tools/versions.toml`, `cargo xtask doctor`, `install-tools` | XT-01 | standard | M |  | EVAL lane |
 | XT-03 | Security and workflow stages into xtask | XT-02 | standard | M |  | EVAL lane |
@@ -505,6 +506,30 @@ foundation piece by piece (ADR 0035).
   - [x] `just check` and `just ci-parity` are green
 - **Impact:** dependency graph (a tool crate removed); bench (the jdtls arm's launcher).
 
+#### FND-13: Make CI green again on main
+- **Depends on:** XT-02. **Model:** standard. **Size:** M. **Parallel with:** FORMAL-05.
+- **Cites:** fnd §7.2; ver §5; plan §4.3; [`required-checks.md`](required-checks.md).
+- CI on `main` has been red since XT-01. `dco` and `security` (and the weekly `security.yml`'s
+  `secrets` and `zizmor-online`) die while `just` parses: the justfile builds xtask at parse time
+  (XT-01) and the launcher needs the pinned toolchain installed (XT-02), which those jobs never
+  installed; they get the toolchain step, and `ARCH-ci-lockstep` now fails a job whose first `just`
+  precedes it. The `macos` job fails five tests that assumed Linux: `tool_config`'s per-case trees,
+  named after files that differ only in letter case (XT-01), now named by index; the fake `quint`'s
+  GNU-only `sed -i` (FORMAL-02), now one portable `sed`; the git and fs contract fixtures' file
+  whose name is not UTF-8, which APFS refuses (IDX-05, IDX-06): a fixture now reports the refusal
+  (`contracts::NonUtf8Name`) and the contract accepts it only where `PLATFORM_NON_UTF8_NAME` says
+  the platform refuses such names; `watch_leaves_out_agent_worktrees` stops on a rescan too, which
+  covers the path (IDX-06); and, a product bug, the recursive FSEvents watch never reported an
+  unreadable directory (IDX-06): it now walks the accepted directories at the start, as the
+  per-directory watch does.
+- **Reuse considered:** none needed: fixes.
+- **Accept:**
+  - [ ] `ARCH-ci-lockstep` fails a job that runs `just` without, or before, `rustup toolchain install` (`ci_lockstep.rs`)
+  - [ ] each adapter's real fixture writes or refuses a non-UTF-8 name exactly as `PLATFORM_NON_UTF8_NAME` says (`should_write_or_refuse_a_non_utf8_name_as_the_platform_does_when_the_fixture_makes_one`), and a refusal on Linux fails the case (`contracts::tests`)
+  - [ ] `just check` green; every `ci.yml` job, `macos` included, green on the landed commit
+- **Impact:** CI (two jobs gain the toolchain step; one lockstep rule); tests (macOS portability);
+  `jfl-adapter-fs` (the recursive watch reports an unreadable directory).
+
 ### Lane XT: port mayfly's `xtask`, piece by piece
 
 ADR 0035 (the owner, 2026-11-17) supersedes ADR 0030: `tools/xtask` with a `cargo xtask` surface
@@ -608,6 +633,12 @@ and Quint, and the others the gate uses today until a card decides. Tool version
 - **Accept:**
   - [ ] every case of `scripts/test-clippy-lists.sh` and the `adr_index` and DCO cases of `land_scripts.rs` pass against xtask
   - [ ] `cargo xtask adr new "Test"` in a scratch copy writes the next Nygard record with the index row
+- **Follow-up (FND-13):** since XT-01 every `just` call builds xtask while the justfile parses
+  (`mise_bins`' `shell()`), so a recipe that runs no xtask (`dco-event`, `workflows-verify`) still
+  needs the toolchain and a build. just's `set lazy` skips an unused variable but still evaluates
+  an `export`ed one, so avoiding the build means moving the `PATH` export into the recipes that run
+  pinned tools: not cheap, and once this card and XT-03 move DCO and the security stages into xtask
+  those jobs run xtask anyway. Not worth doing before XT-08 removes the justfile.
 - **Impact:** none (tooling).
 
 #### XT-05: `cargo xtask land` replaces `scripts/land.sh`

@@ -15,6 +15,8 @@
 //! **macOS (FSEvents).** FSEvents watches a whole tree with one stream and restarts the stream for
 //! every path added, so the root is watched recursively and every new directory is covered from
 //! the start; excluded directories are watched too and only `hint_excluded` filters their events.
+//! FSEvents says nothing about a directory it cannot read, so the start walks the accepted
+//! directories as Linux's does, and one that cannot be read is a `Rescan(WatcherError)` there too.
 //!
 //! Everything flows through a bounded, coalescing `jfl_application::hints` queue (no debounce
 //! timer, no unbounded channel). Access events are dropped (inotify reports every open, and the
@@ -132,7 +134,7 @@ fn settle(
     let mut failures = Vec::new();
     for start in starts {
         let (dirs, unreadable) = walk::watched_dirs(root, &start);
-        failures.extend(unreadable.into_iter().map(|_| WatchErrorKind::Io));
+        failures.extend(read_failures(&unreadable));
         let mut watcher = lock(watcher);
         for dir in dirs {
             if let Err(error) = watcher.watch(&dir, RecursiveMode::NonRecursive)
@@ -143,6 +145,11 @@ fn settle(
         }
     }
     failures
+}
+
+/// One failure per accepted directory that could not be read for its subdirectories.
+fn read_failures(unreadable: &[std::io::ErrorKind]) -> impl Iterator<Item = WatchErrorKind> + '_ {
+    unreadable.iter().map(|_| WatchErrorKind::Io)
 }
 
 /// Runs on the backend's thread.
@@ -361,7 +368,10 @@ pub fn watch<P>(root: &Path, capacity: usize, pool: P) -> Result<FsWatch<P>, Sou
         watcher
             .watch(root, RecursiveMode::Recursive)
             .map_err(|e| SourceTreeError::WatchFailed(kind(&e)))?;
-        (Vec::new(), watcher)
+        // The recursive stream reports no directory it cannot read: walk, after watching, the
+        // directories the per-directory branch would have watched, for their read failures.
+        let (_, unreadable) = walk::watched_dirs(root, root);
+        (read_failures(&unreadable).collect(), watcher)
     };
     let (failures, watcher) = failures;
     if failures.contains(&WatchErrorKind::LimitReached) {

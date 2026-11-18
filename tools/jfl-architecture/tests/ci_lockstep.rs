@@ -218,6 +218,66 @@ fn should_fail_lockstep_when_a_run_ends_in_or_true() -> TestResult {
     Ok(())
 }
 
+/// The toolchain step and the cargo cache after it, as every job of `ci.yml` writes them.
+const TOOLCHAIN_AND_CACHE: &str = "      - name: Rust toolchain of rust-toolchain.toml
+        run: rustup toolchain install
+      - name: Cargo cache
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          key: mise-${{ hashFiles('mise.lock') }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+";
+
+#[test]
+fn should_fail_lockstep_when_a_job_runs_just_without_installing_the_toolchain() -> TestResult {
+    // given: the `dco` job as it was from XT-02 to FND-13, with no toolchain step
+    let mut files = baseline()?;
+    let cache = TOOLCHAIN_AND_CACHE
+        .split_once("      - name: Cargo cache")
+        .map(|(_, rest)| format!("      - name: Cargo cache{rest}"))
+        .ok_or("no cache step")?;
+    edit(
+        &mut files.workflow,
+        &format!("{TOOLCHAIN_AND_CACHE}      # The pushed commits"),
+        &format!("{cache}      # The pushed commits"),
+    )?;
+
+    // when
+    let found = findings(&files);
+
+    // then
+    assert_reported(
+        &found,
+        WORKFLOW,
+        "job `dco`, step `Every pushed commit is signed off by its author` runs `just` before a \
+         `rustup toolchain install` step",
+    );
+    Ok(())
+}
+
+#[test]
+fn should_fail_lockstep_when_a_job_runs_just_before_installing_the_toolchain() -> TestResult {
+    // given: the `security` job's first `just` moved above its toolchain step
+    let mut files = baseline()?;
+    let just = "      - run: just check-only secrets workflows\n";
+    edit(
+        &mut files.workflow,
+        &format!("{TOOLCHAIN_AND_CACHE}{just}"),
+        &format!("{just}{TOOLCHAIN_AND_CACHE}"),
+    )?;
+
+    // when
+    let found = findings(&files);
+
+    // then
+    assert_reported(
+        &found,
+        WORKFLOW,
+        "job `security`, step 3 runs `just` before a `rustup toolchain install` step",
+    );
+    Ok(())
+}
+
 #[test]
 fn should_fail_lockstep_when_a_run_is_not_a_single_just_command() -> TestResult {
     for probe in [

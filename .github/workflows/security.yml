@@ -1,7 +1,8 @@
 # Weekly checks that can fail an unchanged tree (fnd §7.1, §7.4): new advisories and licences
 # (cargo-deny), the secret scan over the full history (gitleaks), and zizmor's online audits,
 # which ask the GitHub API about the pinned actions. Outside `Required`; a red run is reported to
-# the owner and fixed as a task.
+# the owner and fixed as a task. Every job installs the toolchain of rust-toolchain.toml before
+# its first `just`: the justfile builds xtask with it while it parses (FND-13).
 name: Security
 
 on:
@@ -68,6 +69,13 @@ jobs:
           cache_save: ${{ github.ref == 'refs/heads/main' }}
           # mise.toml's [env] stays out of the gate's environment (ARCH-ci-lockstep).
           env: false
+      - name: Rust toolchain of rust-toolchain.toml
+        run: rustup toolchain install
+      - name: Cargo cache
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          key: mise-${{ hashFiles('mise.lock') }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: just check-only secrets
 
   zizmor-online:
@@ -87,6 +95,13 @@ jobs:
           cache_save: ${{ github.ref == 'refs/heads/main' }}
           # mise.toml's [env] stays out of the gate's environment (ARCH-ci-lockstep).
           env: false
+      - name: Rust toolchain of rust-toolchain.toml
+        run: rustup toolchain install
+      - name: Cargo cache
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          key: mise-${{ hashFiles('mise.lock') }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       # zizmor's online audits (impostor commits, known-vulnerable actions, ref confusion) read
       # the GitHub API with the job's read-only token.
       - run: just workflows-online
