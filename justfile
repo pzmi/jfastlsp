@@ -282,6 +282,22 @@ bench-syntax corpus="small": _preflight
     { printf '%s\n' "$root"; git -C "$root" ls-files -z -- '*.java'; } \
       | {{cargo}} bench --locked -p jfl-composition --bench syntax
 
+# The summary store in process (IDX-08): every tracked `.java` file of the pinned corpus summarised
+# by jfl-adapter-java, then jfl-adapter-store measured in a scratch directory: encoded bytes per
+# file, a full write on 1 and 4 threads, the open and the warm load of the whole view (whole
+# summaries, and declarations plus the name postings), the postings' size and lookup time, a
+# refs-shaped read, and both tiers' memory projected to elasticsearch. With `cold`, also cold
+# loads, which drop the whole machine's page cache before each (Linux, root): off by default, since
+# they disturb everything else running. Reports, never gates. `just bench-store medium [cold]`.
+bench-store corpus="small" cold="warm": _preflight
+    #!/usr/bin/env bash
+    set -euo pipefail
+    case {{quote(cold)}} in cold|warm) ;; *) echo "bench-store: cold must be cold or warm" >&2; exit 2;; esac
+    bash scripts/bench-corpus.sh fetch {{quote(corpus)}}
+    root="$(bash scripts/bench-corpus.sh path {{quote(corpus)}})"
+    { printf '%s\n%s\n' {{quote(cold)}} "$root"; git -C "$root" ls-files -z -- '*.java'; } \
+      | {{cargo}} bench --locked -p jfl-composition --bench store
+
 # Rewrite fixtures.lock from the tree after reviewing the changed goldens (ver §4,
 # ARCH-fixtures-lock): the SHA-256 of every file under fixtures/ and each crate's tests/fixtures/.
 fixtures-lock:

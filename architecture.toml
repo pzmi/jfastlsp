@@ -151,6 +151,14 @@ jfl-bench = { blake3 = ["default"], ignore = ["default"], rayon = ["default"], s
 # features only (tree-sitter's `std`; no wasm, no bindgen). Wrapped to this crate and jfl-bench in
 # deny.toml; their build scripts are reviewed there.
 jfl-adapter-java = { tree-sitter = ["default"], tree-sitter-java-orchard = ["default"] }
+# jfl-adapter-store (IDX-08, ADR 0025): blake3 (CC0-1.0 OR Apache-2.0; its build script compiles its
+# vendored C and assembly, reviewed in deny.toml for jfl-bench at the same version) for the key
+# hasher and the entry digests; postcard 1.1 (MIT OR Apache-2.0, no build script) without default
+# features, `alloc` only, for the entries, and serde (derive, std) for its records; thiserror for the
+# typed corruption reasons (fnd §4.3). serde and thiserror are in the graph already. fst and
+# rusqlite, the other crates of ADR 0025, are not taken: the postings are a sorted table
+# (crates/jfl-adapter-store/src/postings.rs has the measurement) and DEC-03's tier needs no database.
+jfl-adapter-store = { blake3 = ["default"], postcard = ["alloc"], serde = ["derive", "std"], thiserror = ["default"] }
 
 [external.dev]
 # xtask (XT-02): toml reads tools/versions.toml, mise.toml and mise.lock in tests/versions.rs, an
@@ -182,6 +190,9 @@ jfl-adapter-git = { divan = ["help"], proptest = ["std"] }
 # only, pinned exactly; proptest for the no-panic properties on arbitrary and mutated input (ver
 # §8), with the same features as jfl-domain's.
 jfl-adapter-java = { proptest = ["std"], tree-sitter-java = ["default"] }
+# jfl-adapter-store (IDX-08): proptest for the decoders on arbitrary, flipped, cut and mutated entries
+# (ver §8), with the same features as jfl-domain's, for the same reasons.
+jfl-adapter-store = { proptest = ["std"] }
 
 [external.build]
 

@@ -602,6 +602,20 @@ impl FileSummary {
         self.parts
     }
 
+    /// This summary without its reference sites: what the large tier keeps in memory (plan §5.5).
+    /// Still valid, since nothing else in a summary points at a reference site.
+    ///
+    /// Pinned by: `summary::tests::should_keep_everything_but_reference_sites_when_they_are_dropped`.
+    #[must_use]
+    pub fn without_references(&self) -> Self {
+        Self {
+            parts: SummaryParts {
+                references: Box::new([]),
+                ..self.parts.clone()
+            },
+        }
+    }
+
     /// The string `id` names (empty for an id of another summary).
     #[must_use]
     pub fn str(&self, id: StrId) -> &str {
@@ -1189,6 +1203,21 @@ mod tests {
             summary.symbol_id(DeclId(99)),
             Err(SymbolError::NotAddressable)
         );
+    }
+
+    #[test]
+    fn should_keep_everything_but_reference_sites_when_they_are_dropped() {
+        // given
+        let whole = billing("long charge(Money m)", true, "java.util.List");
+        assert!(!whole.references().is_empty());
+        // when
+        let without = whole.without_references();
+        // then
+        assert!(without.references().is_empty());
+        let mut parts = whole.clone().into_parts();
+        parts.references = Box::new([]);
+        assert_eq!(without.parts(), &parts);
+        assert_eq!(FileSummary::from_parts(parts), Ok(without));
     }
 
     #[test]

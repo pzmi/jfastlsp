@@ -60,6 +60,8 @@ deny = [
   { crate = "tokio", wrappers = ["jfl-composition", "jfl-adapter-ipc", "tokio-util"], reason = "the async runtime is daemon-side only: composition and the IPC adapter (plan §16.2)" },
   { crate = "tokio-util", wrappers = ["jfl-composition", "jfl-adapter-ipc"], reason = "daemon-side only (plan §16.2)" },
   { crate = "rusqlite", wrappers = ["jfl-adapter-store"], reason = "storage is the store adapter's (ADR 0025)" },
+  { crate = "postcard", wrappers = ["jfl-adapter-store"], reason = "the cache's entry format is the store adapter's (ADR 0025, IDX-08)" },
+  { crate = "blake3", wrappers = ["jfl-adapter-store", "jfl-bench"], reason = "content keys and entry digests are the store adapter's (ADR 0025, IDX-08); the bench harness hashes the corpus on its own (ADR 0031)" },
   { crate = "tree-sitter", wrappers = ["jfl-adapter-java", "jfl-bench", "tree-sitter-java-orchard"], reason = "the Java grammar is the Java adapter's (ADR 0022); the bench harness runs the E1 parse pipeline on its own (ADR 0031, amended 2026-11-17)" },
   { crate = "tree-sitter-java-orchard", wrappers = ["jfl-adapter-java", "jfl-bench"], reason = "the Java grammar is the Java adapter's (ADR 0022); the bench harness runs the E1 parse pipeline on its own (ADR 0031, amended 2026-11-17)" },
   { crate = "tree-sitter-java", wrappers = ["jfl-adapter-java"], reason = "upstream tree-sitter-java is the switch-back grammar, parsed by the Java adapter's tests only (ADR 0022, amended 2026-11-17; IDX-07)" },
@@ -86,8 +88,9 @@ features = [
 [bans.build]
 # Only the crates named here may run a build script (fnd §2.2 rule 5), workspace crates included
 # (cargo-deny skips them by default). Production crates reach C only through the bypass list
-# below: since IDX-07 the tree-sitter runtime and the orchard grammar (jfl-adapter-java); bundled
-# SQLite is added by name, with the reason, by IDX-08. Pinned by tools/jfl-architecture/tests/gate_negative_cases.rs
+# below: since IDX-07 the tree-sitter runtime and the orchard grammar (jfl-adapter-java), and since
+# IDX-08 blake3 (jfl-adapter-store). IDX-08 took no rusqlite, so bundled SQLite is not here; the task
+# that adds it adds its script by name, with the reason. Pinned by tools/jfl-architecture/tests/gate_negative_cases.rs
 # ::should_fail_deny_bans_when_a_workspace_crate_has_a_build_script.
 include-workspace = true
 allow-build-scripts = []
@@ -124,7 +127,8 @@ bypass = [
   # and adds the E1 pipeline's crates. Each script below was read at the version pinned in Cargo.lock.
   # blake3: compiles its own vendored C and assembly (SSE/AVX/NEON) with the `cc` crate and sets
   # cfgs by target; no network, nothing outside the crate directory (it removes only its own stale
-  # Windows-gnu .asm copies); jfl-bench's closure.
+  # Windows-gnu .asm copies); jfl-bench's closure, and since IDX-08 jfl-adapter-store's (a production
+  # crate: the same file, checksum unchanged, at 1.8.7).
   { crate = "blake3", build-script = "9ec9b359db417071b525a459a191b810e3dd79b9708ae66be4085b2efd2ba7d9" },
   # crossbeam-deque and crossbeam-epoch (the same file): a sanitizer cfg from TARGET; rayon's and
   # ignore's closure.

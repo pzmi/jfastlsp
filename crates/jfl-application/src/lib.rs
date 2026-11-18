@@ -9,11 +9,14 @@
 //!   stat set of plan §4.3 and the files changed since a tree.
 //! - [`syntax_indexer`] (IDX-07): the `SyntaxIndexer` port and the source checks every
 //!   implementation applies first.
+//! - [`summary_store`] (IDX-08): the `SummaryStore` port, the storage tier of DEC-03 and the large
+//!   tier's [`Declarations`] and name postings.
 
 pub mod blocking;
 pub mod hints;
 pub mod repo_probe;
 pub mod source_tree;
+pub mod summary_store;
 pub mod syntax_indexer;
 
 pub use blocking::{BlockingPool, Interrupted};
@@ -26,6 +29,10 @@ pub use source_tree::{
     Exclusion, FileStat, GitEntry, GitMarker, Hint, HintSubject, Hints, ListMode, ListedFile,
     Listing, MTime, ReadBytes, Rescan, RescanReason, RescanReasons, Skipped, SourceTree,
     SourceTreeError, Unlisted, UnlistedReason, WatchErrorKind,
+};
+pub use summary_store::{
+    CountingClock, Declarations, DeclarationsError, LruClock, NamePostings, StorageTier,
+    StoreStats, SummaryStore, SummaryStoreError,
 };
 pub use syntax_indexer::{
     GrammarId, Indexed, SyntaxDiagnostic, SyntaxIndexError, SyntaxIndexer, SyntaxProblem,

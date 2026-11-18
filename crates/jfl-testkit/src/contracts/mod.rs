@@ -4,6 +4,7 @@
 pub mod process_runner;
 pub mod repo_probe;
 pub mod source_tree;
+pub mod summary_store;
 pub mod syntax_indexer;
 
 /// What a fixture did when a case asked it for a `.java` file whose name is not UTF-8

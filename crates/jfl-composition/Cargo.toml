@@ -31,3 +31,9 @@ workspace = true
 [[bench]]
 name = "syntax"
 harness = false
+
+# The summary store on the bench corpus (`just bench-store SIZE [cold]`, IDX-08); reports, never
+# gates.
+[[bench]]
+name = "store"
+harness = false

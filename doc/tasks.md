@@ -1715,11 +1715,15 @@ but follow in lane CLI (M2). Starts after the go decision.
   a `refs` query loads the files its name lists (plan §5.5). The §1.7 syntax-tier RSS budget
   (≤ 250 MB on elasticsearch) is unchanged; whole summaries in memory project to about 311 MiB
   there (325 MiB with IDX-02's final 80-byte declarations).
+- **Decided (IDX-08, 2026-11-18):** the reference-name postings are a sorted name table, not
+  `fst`, because they are rebuilt at every open and an `fst` build cost about 50 ms more on
+  spring-framework for no faster lookup (plan §5.5). `fst` stays ADR 0025's choice for
+  `workspace/symbol` (IDX-10); `rusqlite` is not taken at this tier.
 - **Accept:**
-  - [ ] contract suite green for fake and adapter; a broken fake fails it
-  - [ ] a truncated entry on disk is a miss, never a corrupt summary (integration test)
-  - [ ] the cap evicts least-recently-used entries (test on fake clock)
-  - [ ] runs on the bench corpus (small at least, `just bench`) and reports the metrics it affects; its correctness tests also run against the real-corpus cases that apply (BENCH-05)
+  - [x] contract suite green for fake and adapter; a broken fake fails it
+  - [x] a truncated entry on disk is a miss, never a corrupt summary (integration test)
+  - [x] the cap evicts least-recently-used entries (test on fake clock)
+  - [x] runs on the bench corpus (small at least, `just bench`) and reports the metrics it affects; its correctness tests also run against the real-corpus cases that apply (BENCH-05)
 - **Impact:** cache format (v1).
 
 #### IDX-09: View registry, generations and freshness (views driver)

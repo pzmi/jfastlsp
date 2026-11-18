@@ -327,6 +327,30 @@ E1 extracts no reference sites, no locals and no signatures.
 - Running the same queries through tree-sitter's query engine cost 2.0 times the parse's instructions. That is why the queries are now read as a table (ADR 0022 as amended 2026-11-18).
 - Cloning the capture lists per file kept 4 threads from scaling. Removing the clones took medium from 2.6 s to 2.1 s, and p95 from 5.1 ms to 3.3 ms.
 
+### The summary store (IDX-08, `just bench-store`)
+
+`crates/jfl-composition/benches/store.rs` summarises every tracked `.java` file with `jfl-adapter-java` (4 threads), keys each by its blake3 `SyntaxKey`, then measures `jfl-adapter-store` in a scratch directory under cargo's `CARGO_TARGET_TMPDIR` (removed at the end).
+- A full write into an empty store on 1 and 4 threads, then every entry read back and compared with what was put; the store's open (the scan its cap needs); the load of the whole view: every whole summary (the small and medium tier), and every file's declarations plus the name postings built from them (the large tier, plan §5.5).
+- With `cold` (`just bench-store medium cold`), also loads after dropping the page cache (Linux, root; it disturbs the whole machine, so only when asked).
+- The postings' size and lookup time over every name, a `refs`-shaped read of the three most used names' files, and both tiers' memory projected linearly to elasticsearch's 33,850 files.
+- Medians of three runs after a warm-up; it lives in composition because timing and threads need grants the adapter does not hold.
+
+Measured 2026-11-18 (IDX-08) on the 4 vCPU Xeon VM **while another lane was running (load 1.2 to 3.1)**; write times moved by up to 3× between runs, so read them as orders of magnitude.
+
+| corpus | encoded B/file (mean, p95, max) | on disk | full write, 4 threads | open | whole view, warm | declarations + postings, warm | in memory: whole / declarations + postings |
+|:--|:--|--:|--:|--:|--:|--:|:--|
+| small junit-framework (1,813 files) | 2,961, 10,104, 90,637 | 5.1 MiB | 115–384 ms | 4 ms | 8 ms | 7 + 6 ms | 9.0 / 6.7 MiB |
+| medium spring-framework (9,294 files) | 3,301, 11,104, 140,734 | 29.3 MiB | 177–285 ms | 17–19 ms | 44–63 ms | 36–40 + 51–54 ms | 53.6 / 38.1 MiB |
+| lombok fineract (7,301 files) | 4,015, 14,275, 261,986 | 28.0 MiB | 154 ms | 17 ms | 44 ms | 31 + 50 ms | 47.9 / 33.9 MiB |
+
+- **Real-corpus check**: every entry of all three corpora (18,408 files) reads back equal to what was put, whole and as declarations.
+- **Encoded size**: an entry is 0.55–0.58 of the summary's bytes in memory (postcard varints, ranges as start and length, reference starts as deltas).
+- **Cold** (medium): open 28 ms, whole view 85 ms, declarations and postings 119 ms. This VM's disk sits on the host's page cache, so a guest cache drop is not a cold disk; EVAL-05 measures cold on CI hardware.
+- **Postings** (medium): 44.4k names, 310k postings (33 names per file), 2.3 MiB; a lookup takes about 180 ns. A `refs`-shaped read of `String` lists 61 % of the view's files and reads them whole in 31 ms warm.
+- **Projected to elasticsearch** (linear in files, from medium; lombok in brackets): open 62 ms; whole view 160–228 ms; declarations and postings 317–343 ms (373 ms), against plan §1.7's warm reopen under 1 s with the walk and hash at about 0.1 s. Memory: whole summaries 195 MiB (222 MiB), declarations and postings 139 MiB (157 MiB; the postings scale as an upper bound, since names repeat across files), against the 250 MB syntax-tier RSS budget; the store on disk 107 MiB (130 MiB), a tenth of the default 1 GiB cap.
+- **Why the postings are a sorted table, not `fst`** (a one-off measurement, not a bench arm): on medium, a version of the postings over an `fst` map took 101–126 ms in this bench's postings step against 50–54 ms for the table, for lookups no faster (211 against 190 ns). The arm was not kept. Details are in `crates/jfl-adapter-store/src/postings.rs` and plan §5.5.
+- **What memory the large tier keeps**: declarations hold the whole string arena, reference names included, so they are about 0.7 of a whole summary; dropping the strings only reference sites use would cut that further (a later optimisation, if EVAL-05's RSS asks for it).
+
 ## Adding a suite
 
 1. A `suites/<name>.toml` with `name`, `description`, `kind` and the knobs of its kind

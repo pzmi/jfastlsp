@@ -532,7 +532,8 @@ hardware and the target.
 DEC-03 (owner, 2026-11-18) took this default: the first row for small and medium repositories and
 persisted per-file summaries for large ones. Whatever the tier, the store uses the
 same crates (ADR 0025): `blake3` content keys, `postcard` summary blobs in a content-addressed
-directory of our own, `fst` for name lookup and, from the second row, `rusqlite` (WAL) for
+directory of our own, `fst` for name lookup (`workspace/symbol`; the reference-name postings are a sorted
+table, below) and, from the second row, `rusqlite` (WAL) for
 manifests and postings. The store is a cache: deleting the state directory loses time, never
 correctness (§5.10).
 
@@ -546,6 +547,14 @@ memory holds a name → file postings index (about 60 distinct names per file); 
 loads only the files its name's postings list. Uses bound to locals and parameters are dropped at
 extraction (IDX-07's `locals.scm`): no cross-file target is ever a local, so this is sound and
 cuts the sites further. IDX-08 and IDX-11 implement it; EVAL-05 measures the RSS.
+
+**The postings are a sorted table, not `fst` (IDX-08, 2026-11-18).** The reference-name postings
+are rebuilt at every view open, so their build counts against the warm reopen. They are one sorted
+name arena with flat offset and file arrays, looked up by binary search. In a one-off measurement
+on spring-framework (4 vCPU VM, 44.4k names), an `fst` map of the names built in about 50 ms more
+(postings 101–126 ms against 50–54 ms) for lookups no faster (about 200 ns either way).
+`fst` stays the choice for `workspace/symbol`'s prefix and fuzzy search (IDX-10). DEC-03's tier
+takes no `rusqlite`: it has no manifest, and the postings fit in memory.
 
 ### 5.6 Resolver
 

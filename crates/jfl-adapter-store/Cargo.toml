@@ -12,6 +12,14 @@ description = "`SummaryStore`, `LibraryStore` and `ProjectModelCache`: the on-di
 [dependencies]
 jfl-domain = { path = "../jfl-domain" }
 jfl-application = { path = "../jfl-application" }
+blake3 = "1.8.7"
+postcard = { version = "1.1", default-features = false, features = ["alloc"] }
+serde = { version = "1", default-features = false, features = ["derive", "std"] }
+thiserror = "2"
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+jfl-testkit = { path = "../jfl-testkit" }
+proptest = { version = "1.12", default-features = false, features = ["std"] }
