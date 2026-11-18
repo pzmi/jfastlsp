@@ -4,7 +4,7 @@ Date: 2026-11-18
 
 ## Status
 
-Proposed (FORMAL-03, round 2; the owner decides at the next checkpoint).
+Accepted (owner, 2026-11-18).
 
 ## Context
 

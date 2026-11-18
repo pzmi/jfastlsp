@@ -5,7 +5,7 @@ Date: 2026-11-16
 ## Status
 
 Accepted (owner, 2026-11-17); amended 2026-11-17 (LSP-01: the in-process harness runs on byte
-pipes, not `Connection::memory()`; see the amendment below).
+pipes, not `Connection::memory()`; see the amendment below; accepted by the owner 2026-11-18).
 
 ## Context
 
@@ -48,7 +48,7 @@ type-checked against the metamodel in a test. A `gen-lsp-types` bump is its own 
   pinned to `lsp-types` 0.95.
 - `lsp-types`, `tower-lsp`: stalled or unmaintained.
 
-## Amended 2026-11-17 (LSP-01, technical correction): the in-process harness runs on bytes
+## Amended 2026-11-17 (LSP-01, technical correction; accepted by the owner 2026-11-18): the in-process harness runs on bytes
 
 The in-process tests do not use `lsp_server::Connection::memory()`. It carries
 `lsp_server::Message`, whose response result is a `serde_json::Value`, so a server on it could

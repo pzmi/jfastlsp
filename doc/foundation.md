@@ -596,6 +596,7 @@ There is no event store (ADR 0008). What persists:
 | Workflow | Trigger | Content | Task |
 |:--|:--|:--|:--|
 | `ci.yml` | push to `main`, pull request, dispatch | the gate, split into jobs (7.2), and the DCO check | FND-05 |
+| `macos.yml` | nightly, dispatch | `just platform-tests` on `macos-15`; reported, outside `required` (the owner, 2026-11-18) | BOOT-04 |
 | `security.yml` | weekly, dispatch | advisories, licences, secret scan over full history, zizmor online audits | FND-04, FND-05 |
 | `codeql.yml` | push to `main`, pull request, weekly | CodeQL for Rust and Actions | FND-05 |
 | `scorecard.yml` | push to `main`, weekly | OpenSSF Scorecard, SARIF upload | FND-05 |
@@ -621,7 +622,9 @@ There is no event store (ADR 0008). What persists:
 4. Native jobs on `ubuntu-24.04`, `ubuntu-24.04-arm` and `macos-15` (arm64) run the platform
    tests (ADR 0006): on x86-64 the `tests` job's stages, on the other two `just platform-tests`
    (the unit, integration and doctest stages), which is not a stage of `check`, so each stage
-   still runs in one job.
+   still runs in one job. The macOS job runs in `macos.yml`, nightly and by hand, outside
+   `required`: a red run is reported, not blocking (the owner's decision at the FORMAL
+   checkpoint, 2026-11-18); `ARCH-ci-lockstep` holds it to the same job rules.
 5. Scheduled workflows are outside `required`; their failures are reported and fixed as tasks.
 6. A red job is fixed, never re-run to green. One re-run is allowed only when the runner died
    before a test body ran, and the reason is written down.
@@ -857,7 +860,7 @@ needs one becomes a recipe parameter (`just conformance smoke 0x2a`).
 | `just workflows-verify` | pinact's version-comment check; needs the GitHub API, so outside `check` (§7.3) | FND-04 |
 | `just workflows-online` | zizmor with its online audits over the workflows and `dependabot.yml`; needs the GitHub API (`GH_TOKEN`), so outside `check`; `security.yml` runs it | FND-05 |
 | `just ci-parity` | the cargo stages with CI's environment: the target directory inside the checkout and `ci.yml`'s workflow `env:` (`CARGO_TERM_COLOR=always`, `NEXTEST_PROFILE=ci`); outside `check` (a second build), run before landing a change to tests that start cargo, nextest or a scratch workspace | FND-05 |
-| `just platform-tests` | the unit, integration and doctest stages; what `ci.yml`'s `linux-arm` and `macos` jobs run natively (§7.2 rule 4); not a stage of `check` | FND-05 |
+| `just platform-tests` | the unit, integration and doctest stages; what `ci.yml`'s `linux-arm` job and `macos.yml`'s `macos` job run natively (§7.2 rule 4); not a stage of `check` | FND-05 |
 | `just bench-corpus` | fetch the pinned corpus of `doc/bench-corpus.md` into the cache directory | BENCH-01 |
 | `just bench [suite] [corpus=small]` | the benchmark suites with machine facts, JSON results; reports, never gates | BENCH-02 |
 | `just bench-gate` | compare a run with the history of the same runner class; `bench.yml` only | BENCH-04 |
@@ -936,13 +939,15 @@ immediately, by a new commit. Before FND-03 the orchestrator did the same by han
 
 Nygard format in `doc/adr/NNNN-kebab-title.md`: `# NNNN. Title`, `Date:`, `## Status`
 (`Proposed`, `Accepted (owner, YYYY-MM-DD)`, `Rejected (owner, YYYY-MM-DD)`,
-`Superseded by NNNN`, with annotations such as `amended by NNNN`), `## Context`, `## Decision`,
+`Superseded by NNNN`), `## Context`, `## Decision`,
 `## Consequences`, optional `## Alternatives considered`. Records are created with `adrs new`
 (ADR 0030; `cargo xtask adr new` from XT-04, ADR 0035); the index `doc/adr/README.md` is checked against the files by the `docs` stage
-(`just adr-index`, FND-03). ADR 0001 records the practice; the ADR number is
+(`just adr-index`, FND-03). ADR 0038 (superseding 0001) records the practice; the ADR number is
 the decision id. Only the owner moves a decision to Accepted or decides a `DEC-` task. An ADR is
 written only for an important decision whose context is worth recalling later; everything else is
-recorded in the commit message and code comments (ADR 0001, amended 2026-11-17).
+recorded in the commit message and code comments. An Accepted ADR's text is never edited except
+its Status line: a changed decision is a new ADR that supersedes it, and a detail goes in this
+document, the plan or the card (ADR 0038).
 
 ---
 

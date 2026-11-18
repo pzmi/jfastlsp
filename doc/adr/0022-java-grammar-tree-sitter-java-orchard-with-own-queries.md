@@ -4,7 +4,7 @@ Date: 2026-11-16
 
 ## Status
 
-Accepted (owner, 2026-11-17); amended 2026-11-17 (owner).
+Accepted (owner, 2026-11-17); amended 2026-11-17 (owner) and 2026-11-18 (IDX-07, accepted by the owner 2026-11-18).
 
 ## Context
 
@@ -79,7 +79,7 @@ first commit rather than left to "a grammar-version change" (Consequences above)
 
 IDX-07 builds this (about 1–2 days on top of its card); EVAL-05 keeps measuring both grammars.
 
-## Amended 2026-11-18 (IDX-07; proposed, for the owner's next checkpoint): the queries as a table
+## Amended 2026-11-18 (IDX-07; accepted by the owner 2026-11-18): the queries as a table
 
 IDX-07 built the boundary above. Run with `QueryCursor`, our queries made indexing 2.3 times as
 slow as the E1 pipeline: tree-sitter's query engine cost half a parse again on the corpus

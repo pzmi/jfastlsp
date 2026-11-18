@@ -30,9 +30,9 @@ a pinned real-repository corpus (plan §1.7, ADR 0031). Reuse before building (A
 
 Citations read "plan §4.3", "fnd §3", "ver §6"; read the sections a task cites, not whole
 documents. Decisions in `doc/tasks.md` and Accepted ADRs override earlier plan text. The owner
-decided every record at the FND checkpoint (DEC-07, 2026-11-17): all are Accepted (owner) except
-0005, 0011–0013, 0027 and 0030, which are superseded; a new record is Proposed until the owner's
-next checkpoint.
+decided every record at the FND checkpoint (DEC-07, 2026-11-17) and the FORMAL checkpoint
+(2026-11-18): all are Accepted (owner) except 0001, 0005, 0011–0013, 0027 and 0030, which are
+superseded; a new record is Proposed until the owner's next checkpoint.
 
 ## Workflow
 
@@ -121,11 +121,14 @@ allowlist or a pinned shape, never a list of bad patterns (fnd §3).
 - **Speed** (ADR 0031): a product task runs on the bench corpus (small at least) and reports the
   metrics it changes; from M1 a >10 % regression fails `bench.yml`'s `bench-gate` on its fixed
   runner class (local runs report, never gate). Never loosen a budget.
-- **Decisions** (`doc/adr/README.md`, ADR 0001 as amended): an ADR only for an important
-  decision whose context is worth recalling later; otherwise the commit message says why and a
-  code comment explains a non-obvious constraint. An ADR is a record, not a rule: a change that
-  reverses one amends or supersedes it in the same commit, with the rules and tests that pin it.
-  Only the owner flips Proposed to Accepted or decides a `DEC-` task.
+- **Decisions** (`doc/adr/README.md`, ADR 0038): an ADR only for an important decision whose
+  context is worth recalling later; a detail goes in plan, foundation or the card and the commit
+  message says why, and a code comment explains a non-obvious constraint. An Accepted ADR's text
+  is never edited except its Status line (`Superseded by NNNN`): a changed decision is a new ADR
+  that supersedes the old one, in the same commit as the rules and tests that pin it; no
+  `## Amended` sections (the owner, 2026-11-18: "If you need to amend a lot it may mean you wrote
+  too many ADRs for small things"). An ADR is a record, not a rule. Only the owner flips Proposed
+  to Accepted or decides a `DEC-` task.
 
 ## Commits
 

@@ -364,7 +364,7 @@ hints that start the same reconcile early; the stat catches checkout, rebase, re
 commit without a tree walk. `jfl sync` is the explicit barrier: it returns once every pending
 change is in a published generation. A request stats `HEAD` and the index again when it pins, and
 a `complete=true` answer also needs its view's watcher trusted and caught up to the request
-(ADR 0037, Proposed: a cookie through the in-order event stream; git's racy-mtime rule in every
+(ADR 0037, Accepted 2026-11-18: a cookie through the in-order event stream; git's racy-mtime rule in every
 stat).
 
 ### 4.4 Shell edits and overlays
@@ -529,7 +529,7 @@ summary" store of the first two rows, not the third. Re-hashing is the source of
 describe the index, not a dirty working tree. DEC-03 records the tier; EVAL-05 re-runs E1 on CI
 hardware and the target.
 
-The default, until DEC-03 says otherwise, is the first row for small and medium repositories and
+DEC-03 (owner, 2026-11-18) took this default: the first row for small and medium repositories and
 persisted per-file summaries for large ones. Whatever the tier, the store uses the
 same crates (ADR 0025): `blake3` content keys, `postcard` summary blobs in a content-addressed
 directory of our own, `fst` for name lookup and, from the second row, `rusqlite` (WAL) for
@@ -785,7 +785,7 @@ models state the design, the state-machine tests the implementation, and both ar
   nested worktree's files); `SyncIsBarrier` (a finished `sync` has published what the disk held
   when it started). How `complete=true` is earned (a watched, certain view, the request's cookie
   back through the in-order event stream, a second cookie when a summary was read after the
-  first, nothing unpublished, the pin's re-stat, the racy-mtime rule) is ADR 0037 (Proposed); [`formal-models.md`](formal-models.md) holds the model's
+  first, nothing unpublished, the pin's re-stat, the racy-mtime rule) is ADR 0037 (Accepted, owner, 2026-11-18); [`formal-models.md`](formal-models.md) holds the model's
   decisions, IDX-09's obligations, the driver's observation and the budget.
 - **Driver:** `jfl-application`'s view registry over the testkit's scripted source tree, repo
   probe and store (IDX-09). **Negative control:** publishing before the last summary is stored.
@@ -1026,7 +1026,7 @@ Each open choice is a task that records an ADR; nothing here is decided by an im
 |---|---|---|
 | Target Java repository | DEC-01 (owner) | the criteria sheet of DEC-01 |
 | Go/no-go and the kill criterion | DEC-02 ⛳ (owner) | E0–E4 |
-| Storage tier | DEC-03 | E1 |
+| Storage tier | DEC-03 (owner): **decided 2026-11-18**, the §5.5 default | E1 |
 | Resolver | DEC-04 | E2 |
 | Semantic diagnostics in v1 | DEC-05 | E3 |
 | `referencesMode` default and operation priority | DEC-06 | E0 |

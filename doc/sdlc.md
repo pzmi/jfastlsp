@@ -14,7 +14,7 @@ A task in [`tasks.md`](tasks.md) is ready to start when:
 - every task it depends on has a commit on `main` (subjects are `<ID>: <summary>`, so
   `git log --oneline main | grep " <dep>:"` finds it), a `DEC-` dependency counts when it is
   **recorded as decided by the owner**: its ADR's status reads `Accepted (owner, …)`, or, where
-  no ADR was needed (ADR 0001, amended), its card is ticked and marked `Decided:` with the date
+  no ADR was needed (ADR 0038), its card is ticked and marked `Decided:` with the date
   (an agent's draft ADR, committed as `Proposed` under the `DEC-` subject, does not count:
   `grep -A2 '^## Status' doc/adr/NNNN-*.md`), and the task has no commit of its own;
 - its card states what is built, the sections to read (`Cites:`), the acceptance items and
@@ -24,7 +24,7 @@ A task in [`tasks.md`](tasks.md) is ready to start when:
   impact and any compatibility effect are stated or follow from the cited sections; a large task
   has an ADR or a design note first;
 - a new dependency, edge or authority has its architecture policy planned before code, and an
-  ADR only if it is an important decision whose context is worth recalling (ADR 0001, amended).
+  ADR only if it is an important decision whose context is worth recalling (ADR 0038).
 
 A card whose text contradicts a decision in the Decisions table is not ready until the
 contradiction is fixed; the Decision wins.
@@ -71,8 +71,10 @@ are the real procedure; this section summarises it.
    target dir (`$XDG_CACHE_HOME/jfastlsp/land-xtask`, else `~/.cache/jfastlsp/land-xtask`) is a
    cache that grows with every land: below about 10 GB free, delete it before landing.
 6. **Watch CI.** The orchestrator waits for the run of the pushed commit and reads the
-   `Required` result. Without `gh` it uses the GitHub MCP tools. The `linux-arm` and `macos`
-   jobs run only after the push (ADR 0002), so a platform failure is found there.
+   `Required` result. Without `gh` it uses the GitHub MCP tools. The `linux-arm` job runs only
+   after the push (ADR 0002), so a Linux arm64 failure is found there. macOS runs nightly and by
+   hand in `macos.yml`, outside `Required` (the owner, 2026-11-18): a red nightly run is reported
+   to the owner and fixed as a task, and blocks nothing.
 
 Agents never suppress a failing test, widen a lint exemption, remove a modelled invariant,
 loosen a budget or rewrite a golden fixture to obtain green. A missing pinned tool is an

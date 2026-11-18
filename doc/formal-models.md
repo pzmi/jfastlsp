@@ -58,7 +58,7 @@ there `recent` marks the summary as racy, taken within the tick of the file's la
 Bounds: versions up to 6, HEAD up to 3, generations up to 8. An action that would pass a bound is
 disabled.
 
-### Design decisions the model fixes (ADR 0037, Proposed)
+### Design decisions the model fixes (ADR 0037, Accepted)
 
 1. **A view is one worktree root.**
    - A request binds to the innermost worktree enclosing its file.

@@ -4,7 +4,8 @@ Date: 2026-11-16
 
 ## Status
 
-Accepted (owner, 2026-11-17); amended 2026-11-17 (twice) and 2026-11-18.
+Accepted (owner, 2026-11-17); amended 2026-11-17 (twice) and 2026-11-18 (FORMAL-02's and
+IDX-06's amendments accepted by the owner 2026-11-18).
 
 ## Context
 
@@ -70,14 +71,14 @@ decided on 2026-11-17 that it is for testing and comparison only, never a shippe
 foundation's tools move to a ported `cargo xtask` (ADR 0035, superseding 0030). The table is
 kept as the survey recorded it.
 
-## Amended 2026-11-17 (FORMAL-02): quint-connect not taken
+## Amended 2026-11-17 (FORMAL-02; accepted by the owner 2026-11-18): quint-connect not taken
 
 The engineering foundation's row names quint-connect. FORMAL-02 read it at 0.1.2 and built the
 conformance harness itself over `itf` 0.4, which it keeps: quint-connect cannot replay committed
 traces, downloads Quint's evaluator at run time and names no step in a divergence (ADR 0007,
 amended). The table is kept as the survey recorded it.
 
-## Amended 2026-11-18 (IDX-06): notify without its debouncer; inotify's ISC licence
+## Amended 2026-11-18 (IDX-06; accepted by the owner 2026-11-18): notify without its debouncer; inotify's ISC licence
 
 Plan §16.2 and IDX-06's card name `notify` 8.2 with `notify-debouncer-mini` 0.7. IDX-06 takes
 `notify` and `ignore` and not the debouncer, which loses what the card requires it to report: its

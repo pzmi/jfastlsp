@@ -4,8 +4,8 @@ Date: 2026-11-16
 
 ## Status
 
-Accepted (owner, 2026-11-16); amended 2026-11-16 (accepted by the owner on 2026-11-17) and
-2026-11-17 (owner).
+Superseded by [0038](0038-record-decisions-change-them-by-a-new-record.md) (2026-11-18, the
+owner's decision at the FORMAL checkpoint: a changed decision is a new record, not an amendment).
 
 ## Context
 

@@ -42,15 +42,15 @@ without a row, a row without a job, or any difference fails the `architecture` s
 | `static` | Static quality | `ubuntu-24.04` | `check-only fmt-check clippy nostd docs` |
 | `tests` | Tests (Linux x86-64) | `ubuntu-24.04` | `check-only unit-tests integration-tests doctests script-tests lsp-conformance` |
 | `linux-arm` | Linux (arm64) | `ubuntu-24.04-arm` | `platform-tests` |
-| `macos` | macOS (arm64) | `macos-15` | `platform-tests` |
 | `formal` | Formal models (Quint) | `ubuntu-24.04` | `doctor`, then `check-only formal-typecheck formal-test formal-freshness conformance-replay` |
 | `security` | Security | `ubuntu-24.04` | `check-only secrets workflows`, then `workflows-verify` |
 | `dco` | DCO | `ubuntu-24.04` | `dco-event` over the commits the event brought (a push's before..after; a pull request's base..head; the commit itself on a manual run; a push from the all-zero commit or a force-push fails) |
 | `required` | Required | `ubuntu-24.04` | the aggregate of every other job's result |
 
 Every stage of `just check` is in exactly one job. `platform-tests` is not a stage of `check`: it
-runs the unit, integration and doctest stages natively on Linux arm64 and macOS arm64 (ADR 0006,
-fnd §7.2 rule 4), which the `tests` job already runs on Linux x86-64. `workflows-verify` (pinact's
+runs the unit, integration and doctest stages natively on Linux arm64 here and on macOS arm64 in
+`macos.yml` (ADR 0006, fnd §7.2 rule 4; see "Reported checks"), which the `tests` job already
+runs on Linux x86-64. `workflows-verify` (pinact's
 version-comment check) and `dco-event` need the GitHub API or the pushed range, so they are
 recipes outside `check`; the lockstep test also requires `platform-tests` to depend on exactly
 `unit-tests`, `integration-tests` and `doctests`. It checks shapes it allows rather than bypasses
@@ -80,9 +80,30 @@ from `main`.
 
 CI differs from a local gate in three ways that a test can depend on: its target directory is
 `./target` inside the checkout (a scratch directory under it is inside this workspace), every
-child process inherits the workflow's `env:` (`NEXTEST_PROFILE=ci`, `CARGO_TERM_COLOR=always`), and the `linux-arm` and `macos` jobs run on other
-platforms. `just ci-parity` reproduces the first two locally; the platforms are seen only after
-the push, by design of ADR 0002, so a red `linux-arm` or `macos` job on `main` is fixed at once.
+child process inherits the workflow's `env:` (`NEXTEST_PROFILE=ci`, `CARGO_TERM_COLOR=always`), and the `linux-arm` job (and
+`macos.yml`'s `macos` job) run on other platforms. `just ci-parity` reproduces the first two
+locally; the platforms are seen only after the push, by design of ADR 0002, so a red `linux-arm`
+job on `main` is fixed at once, and a red nightly `macos` run as soon as it is reported.
+
+## Reported checks
+
+Not in `Required`: the owner's decision at the FORMAL checkpoint (2026-11-18, option B; BOOT-04)
+took the macOS job out of `ci.yml`. [`.github/workflows/macos.yml`](../.github/workflows/macos.yml)
+runs it nightly (`schedule`) and by hand (`workflow_dispatch`), never on a push or pull request; a
+red run is reported to the owner and fixed as a task (fnd §7.1), and does not block landing. The
+orchestrator may also dispatch it on a landed commit that touches macOS-specific code
+(`#[cfg(target_os = "macos")]` items, file watching, sockets, processes). Linux arm64 stays in
+`Required` (`linux-arm` above): nothing argued for moving it, it is a supported target (ADR 0006)
+on a Linux runner like the other jobs, and it is the only native arm64 check on pushes.
+
+`ARCH-ci-lockstep` reads `macos.yml` too and holds its jobs to `ci.yml`'s job, step, action,
+`env:`, shell and `run:` rules; its `on:` must be exactly `schedule` (`cron` entries only) and a
+bare `workflow_dispatch`; no job may be named `required`, have `needs:` or run a stage of
+`check`; and the table below must match its jobs as the table above matches `ci.yml`'s.
+
+| Job id | Display name | Runner | Runs (`just ...`) |
+|:--|:--|:--|:--|
+| `macos` | macOS (arm64) | `macos-15` | `platform-tests` |
 
 ## Planned checks
 
@@ -105,6 +126,7 @@ Not in `required`:
 | `codeql.yml` | push to `main`, pull request, weekly, dispatch | CodeQL for Rust and Actions (`build-mode: none`), results in code scanning |
 | `scorecard.yml` | push to `main`, weekly, dispatch | OpenSSF Scorecard, SARIF to code scanning, results published |
 | `.github/dependabot.yml` | weekly | cargo and github-actions, minor and patch grouped, a 7-day cooldown |
+| `macos.yml` | nightly, dispatch | `just platform-tests` on `macos-15` (see "Reported checks") |
 | `formal.yml` | weekly, dispatch | `just formal-verify <model>`, one job per model of `formal/models.toml` (Apalache's bounded verification and a Quint simulation; a JVM per model, so outside `check`); `crates/jfl-conformance/tests/models.rs` keeps the matrix equal to the registry (FORMAL-01) |
 
 Planned: `bench.yml` (the corpus suites on one fixed runner class, history upload, and its

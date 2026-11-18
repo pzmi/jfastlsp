@@ -4,7 +4,7 @@ Date: 2026-11-16
 
 ## Status
 
-Accepted (owner, 2026-11-17); amended 2026-11-18 (IDX-05). Settles the open
+Accepted (owner, 2026-11-17); amended 2026-11-18 (IDX-05; accepted by the owner 2026-11-18). Settles the open
 question plan §14 gave to IDX-05; IDX-05 may amend it with measurements.
 
 ## Context
@@ -38,7 +38,7 @@ monthly breaking releases) documents that "the interplay between `GIT_COMMON_DIR
 - `gix`: pure Rust and fast, but the linked-worktree gap hits our main case.
 - `git2`: a C build for capability the CLI already gives.
 
-## Amended 2026-11-18 (IDX-05): no user or system configuration, no configured commands; the numbers
+## Amended 2026-11-18 (IDX-05; accepted by the owner 2026-11-18): no user or system configuration, no configured commands; the numbers
 
 "Always right for the user's git version and configuration" no longer holds for configuration.
 The indexed repository is untrusted input (plan §11), its `.git/config` included: a repository

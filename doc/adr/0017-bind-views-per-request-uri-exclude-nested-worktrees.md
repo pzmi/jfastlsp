@@ -4,7 +4,7 @@ Date: 2026-11-16
 
 ## Status
 
-Accepted (owner, 2026-11-17); amended 2026-11-18 (IDX-05).
+Accepted (owner, 2026-11-17); amended 2026-11-18 (IDX-05; accepted by the owner 2026-11-18).
 
 ## Context
 
@@ -27,7 +27,7 @@ directories holding a `.git` file or directory are skipped, and `.claude/worktre
 it. `NoCrossView` in `views.qnt`, the nested-worktree fixture and the 10-worktree e2e test of
 IDX-15 pin it.
 
-## Amended 2026-11-18 (IDX-05): the root is cached, the walk to it is not
+## Amended 2026-11-18 (IDX-05; accepted by the owner 2026-11-18): the root is cached, the walk to it is not
 
 "Cached per directory prefix" is narrowed to "confirmed once per root". `jfl-adapter-git` walks up
 from a request's directory with one `stat` per level on every call and caches only Git's

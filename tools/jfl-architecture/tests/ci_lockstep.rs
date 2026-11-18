@@ -1,19 +1,20 @@
 //! `ARCH-ci-lockstep`'s negative cases (fnd §7.2 rule 3, §3.4): each case is the repository's own
-//! `ci.yml`, justfile, stage catalog (`bash scripts/xtask.sh list --json`, since XT-01) and
+//! `ci.yml`, `macos.yml` (BOOT-04), justfile, stage catalog (`bash scripts/xtask.sh list --json`, since XT-01) and
 //! `doc/required-checks.md` with one small change that must produce the rule at its path with its
 //! reason; the unchanged files must produce nothing.
 
 use std::error::Error;
 use std::path::Path;
 
-use jfl_architecture::ci::{self, REQUIRED_CHECKS, RULE, WORKFLOW};
+use jfl_architecture::ci::{self, NIGHTLY, REQUIRED_CHECKS, RULE, WORKFLOW};
 use jfl_architecture::{Finding, tree::MemoryTree};
 
 type TestResult = Result<(), Box<dyn Error>>;
 
-/// The three files the rule reads and the stage catalog, as the repository has them.
+/// The four files the rule reads and the stage catalog, as the repository has them.
 struct Files {
     workflow: String,
+    nightly: String,
     justfile: String,
     doc: String,
     catalog: String,
@@ -32,6 +33,7 @@ fn baseline() -> Result<Files, Box<dyn Error>> {
         .map_err(|finding| finding.to_string())?;
     Ok(Files {
         workflow: repo_file(WORKFLOW)?,
+        nightly: repo_file(NIGHTLY)?,
         justfile: repo_file(ci::JUSTFILE)?,
         doc: repo_file(REQUIRED_CHECKS)?,
         catalog,
@@ -49,7 +51,15 @@ fn edit(text: &mut String, from: &str, to: &str) -> TestResult {
 }
 
 fn findings(files: &Files) -> Vec<Finding> {
-    ci::check_files(&files.workflow, &files.justfile, &files.doc, &files.catalog)
+    ci::check_files(
+        &ci::Workflows {
+            gate: &files.workflow,
+            nightly: &files.nightly,
+        },
+        &files.justfile,
+        &files.doc,
+        &files.catalog,
+    )
 }
 
 /// Fails unless a finding of the rule is at `at` and its message contains `reason`.
@@ -437,8 +447,8 @@ fn should_fail_lockstep_when_just_is_given_a_variable_override_or_an_unknown_rec
     ] {
         // given: the doc row edited to match, so only the shape can catch it
         let mut files = baseline()?;
-        let at = "    runs-on: macos-15";
-        let start = files.workflow.find(at).ok_or("no macos job")?;
+        let at = "    runs-on: ubuntu-24.04-arm";
+        let start = files.workflow.find(at).ok_or("no linux-arm job")?;
         let from = files
             .workflow
             .get(start..)
@@ -805,7 +815,12 @@ fn should_fail_lockstep_when_a_file_is_missing_or_names_no_stages() -> TestResul
     let files = baseline()?;
     let without_doc = MemoryTree::new()
         .with(WORKFLOW, &files.workflow)
+        .with(NIGHTLY, &files.nightly)
         .with(ci::JUSTFILE, &files.justfile);
+    let without_nightly = MemoryTree::new()
+        .with(WORKFLOW, &files.workflow)
+        .with(ci::JUSTFILE, &files.justfile)
+        .with(REQUIRED_CHECKS, &files.doc);
     let mut no_stages = baseline()?;
     no_stages.catalog = "[\n]\n".to_owned();
     let mut garbled = baseline()?;
@@ -823,15 +838,182 @@ fn should_fail_lockstep_when_a_file_is_missing_or_names_no_stages() -> TestResul
 
     // when
     let missing = ci::check(&without_doc, &files.catalog);
+    let missing_nightly = ci::check(&without_nightly, &files.catalog);
     let unknown = findings(&no_stages);
     let unparsed = findings(&garbled);
     let outside = findings(&quick_only);
 
     // then
     assert_reported(&missing, REQUIRED_CHECKS, "the file is missing");
+    assert_reported(&missing_nightly, NIGHTLY, "the file is missing");
     assert_reported(&unknown, ci::CATALOG, "names no stage of `check`");
     assert_reported(&unparsed, ci::CATALOG, "does not parse");
     assert_reported(&outside, ci::CATALOG, "`quick` runs only stages of `check`");
+    Ok(())
+}
+
+#[test]
+fn should_keep_macos_out_of_required_when_the_repository_s_own_files_are_read() -> TestResult {
+    // given: the owner's FORMAL-checkpoint decision (BOOT-04): macOS is reported, not blocking
+    let files = baseline()?;
+
+    // when
+    let gate_has_macos = files.workflow.contains("runs-on: macos");
+    let nightly_has_macos = files.nightly.contains("runs-on: macos-15");
+    let found = findings(&files);
+
+    // then
+    assert!(
+        !gate_has_macos,
+        "ci.yml runs a macOS job, which would gate every push"
+    );
+    assert!(nightly_has_macos, "macos.yml has no macos-15 job");
+    assert!(found.is_empty(), "{found:?}");
+    Ok(())
+}
+
+#[test]
+fn should_fail_lockstep_when_the_nightly_workflow_could_gate_a_push() -> TestResult {
+    // given: a push, a pull request, a filtered dispatch and a missing schedule
+    let edits = [
+        (
+            "  workflow_dispatch:\n",
+            "  workflow_dispatch:\n  push:\n    branches: [main]\n",
+        ),
+        (
+            "  workflow_dispatch:\n",
+            "  workflow_dispatch:\n  pull_request:\n",
+        ),
+        (
+            "  workflow_dispatch:\n",
+            "  workflow_dispatch:\n    inputs:\n      ref:\n        type: string\n",
+        ),
+        ("  schedule:\n    - cron: \"23 2 * * *\"\n", ""),
+        (
+            "    - cron: \"23 2 * * *\"\n",
+            "    - cron: \"23 2 * * *\"\n      timezone: UTC\n",
+        ),
+    ];
+
+    // when
+    let mut found = Vec::new();
+    for (from, to) in edits {
+        let mut files = baseline()?;
+        edit(&mut files.nightly, from, to)?;
+        found.push(findings(&files));
+    }
+
+    // then
+    for findings in found {
+        assert_reported(&findings, NIGHTLY, "`on:` must be exactly `schedule`");
+    }
+    Ok(())
+}
+
+#[test]
+fn should_fail_lockstep_when_the_nightly_job_leaves_the_gate_s_job_shape() -> TestResult {
+    // given: each a rule ci.yml's jobs keep, applied to macos.yml's
+    let cases = [
+        (
+            "    runs-on: macos-15\n",
+            "    runs-on: macos-15\n    continue-on-error: true\n",
+            "job `macos` has `continue-on-error`",
+        ),
+        (
+            "      - run: just platform-tests",
+            "      - run: just platform-tests || true",
+            "must be exactly one line",
+        ),
+        (
+            "      - name: Rust toolchain of rust-toolchain.toml\n        run: rustup toolchain install\n",
+            "",
+            "runs `just` before a `rustup toolchain install` step",
+        ),
+        (
+            "          env: false\n",
+            "          env: true\n",
+            "input `env` must be `false`",
+        ),
+        (
+            "  NEXTEST_PROFILE: ci\n",
+            "  NEXTEST_PROFILE: ci\n  RUSTFLAGS: -Awarnings\n",
+            "sets `RUSTFLAGS`",
+        ),
+        (
+            "    shell: bash\n",
+            "    shell: sh\n",
+            "`defaults.run.shell` is not `bash`",
+        ),
+        (
+            "      - run: just platform-tests",
+            "      - run: just check-only unit-tests",
+            "runs stage `unit-tests` of `just check`, which runs in ci.yml only",
+        ),
+        (
+            "    runs-on: macos-15\n",
+            "    runs-on: macos-15\n    needs: [other]\n",
+            "job `macos` has `needs:`",
+        ),
+        (
+            "  macos:\n",
+            "  required:\n",
+            "job `required` is the gate's aggregate",
+        ),
+    ];
+
+    for (from, to, reason) in cases {
+        // given
+        let mut files = baseline()?;
+        edit(&mut files.nightly, from, to)?;
+
+        // when
+        let found = findings(&files);
+
+        // then
+        assert_reported(&found, NIGHTLY, reason);
+    }
+    Ok(())
+}
+
+#[test]
+fn should_fail_lockstep_when_the_doc_and_the_nightly_workflow_disagree() -> TestResult {
+    // given: the macOS row moved back into the gate's table, a renamed job, and an extra row
+    let mut moved = baseline()?;
+    edit(
+        &mut moved.doc,
+        "| `required` | Required |",
+        "| `macos` | macOS (arm64) | `macos-15` | `platform-tests` |\n| `required` | Required |",
+    )?;
+    let mut renamed = baseline()?;
+    edit(
+        &mut renamed.nightly,
+        "name: macOS (arm64)\n",
+        "name: macOS\n",
+    )?;
+    let mut dropped = baseline()?;
+    edit(
+        &mut dropped.doc,
+        "| `macos` | macOS (arm64) | `macos-15` | `platform-tests` |\n",
+        "",
+    )?;
+
+    // when
+    let moved_found = findings(&moved);
+    let renamed_found = findings(&renamed);
+    let dropped_found = findings(&dropped);
+
+    // then
+    assert_reported(
+        &moved_found,
+        REQUIRED_CHECKS,
+        "row `macos` names a job ci.yml does not have",
+    );
+    assert_reported(&renamed_found, REQUIRED_CHECKS, "job `macos`: the row says");
+    assert_reported(
+        &dropped_found,
+        REQUIRED_CHECKS,
+        "job `macos` of macos.yml has no row",
+    );
     Ok(())
 }
 

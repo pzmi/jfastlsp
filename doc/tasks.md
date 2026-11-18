@@ -1382,8 +1382,15 @@ target repository is private, only aggregated reports under `doc/eval/` are comm
   blake3 with Git blob ids as a pre-filter above about 10–15k files or 50 MB of Java; the draft may
   be written from the spike and confirmed by EVAL-05's run.
 - **Accept:**
-  - [ ] the draft ADR committed, citing the E1 numbers
-  - [ ] (owner) the ADR accepted, overridden or rejected; the Decisions table updated
+  - [x] ~~the draft ADR committed, citing the E1 numbers~~ not needed: the owner took the default (ADR 0038: the tier is a detail of plan §5.5, recorded there and on this card)
+  - [x] (owner) the tier decided; plan §5.5 and §14 updated
+- **Decided:** 2026-11-18 (owner, at the FORMAL checkpoint), the default of plan §5.5 without
+  waiting for EVAL-05. Small and medium repositories: a per-view in-memory index rebuilt at open
+  from a flat on-disk summary cache keyed by `SyntaxKey` (an LRU size cap, no snapshots or GC).
+  Large repositories (above about 10–15k files or 50 MB of Java): persisted per-file summaries,
+  reference sites kept on disk, and an in-memory name → file postings index (plan §5.5 as
+  amended by the IDX-02 review). EVAL-05's numbers are recorded when they come; they reopen the
+  choice only if they move a repository across a row of §5.5's table.
 - **Impact:** none (decision).
 
 #### DEC-04: Resolver and the SCIP baseline (from E2)
@@ -1692,8 +1699,11 @@ but follow in lane CLI (M2). Starts after the go decision.
 #### IDX-08: Summary store at the DEC-03 tier
 - **Depends on:** IDX-02, DEC-03. **Model:** standard. **Size:** M. **Parallel with:** IDX-07.
 - **Cites:** plan §5.4, §5.5, §5.10; fnd §6; ver §5; ADR 0025.
-- `SummaryStore` port; `jfl-adapter-store` at the tier DEC-03 chose (by default: a flat on-disk
-  cache keyed by `SyntaxKey` with an LRU size cap) on the crates of ADR 0025 (`blake3` keys,
+- `SummaryStore` port; `jfl-adapter-store` at the tier DEC-03 chose (decided 2026-11-18: for
+  small and medium repositories a flat on-disk cache keyed by `SyntaxKey` with an LRU size cap,
+  read into a per-view in-memory index at open; for large ones, above about 10–15k files or 50 MB
+  of Java, persisted per-file summaries with reference sites on disk and an in-memory
+  name → file postings index) on the crates of ADR 0025 (`blake3` keys,
   `postcard` blobs in our content-addressed directory, `fst` for names, `rusqlite` from the second
   tier): a versioned header (a different version is
   discarded, never migrated), atomic writes (temporary file and rename), a torn or corrupt entry
@@ -1722,7 +1732,7 @@ but follow in lane CLI (M2). Starts after the go decision.
   the `views` conformance driver in `jfl-conformance` over the registry with testkit fakes, then
   the code; the negative control (publish before the last summary is stored) fails at its named
   step.
-- **Obligations from `formal/views.qnt` and ADR 0037 (Proposed; doc/formal-models.md lists
+- **Obligations from `formal/views.qnt` and ADR 0037 (Accepted, owner, 2026-11-18; doc/formal-models.md lists
   them with the model's names):** watch, then scan, then publish (at open, start and every
   re-established watch); scan each new directory after adding its watch; treat an `add_watch`
   error (ENOSPC, EMFILE), `IN_IGNORED`, `IN_DELETE_SELF`, `IN_UNMOUNT`, `IN_Q_OVERFLOW` (every
@@ -2129,7 +2139,7 @@ so citations stay valid; IDX-15 is M2's gate.
 - **Accept:**
   - [ ] without the opt-in, no Gradle process starts (integration test watching `jfl-process`)
   - [ ] models of the multi-module and Lombok fixtures match their goldens; two worktrees with the same build files share one model
-  - [ ] contract suite green for fake and adapter; the `compilerArgs` finding recorded (and an amendment of ADR 0026 if the mechanism changes)
+  - [ ] contract suite green for fake and adapter; the `compilerArgs` finding recorded (and a new ADR superseding 0026 if the mechanism changes, ADR 0038)
   - [ ] runs on the bench corpus (small at least, `just bench`) and reports the metrics it affects; its correctness tests also run against the real-corpus cases that apply (BENCH-05)
 - **Impact:** new adapter; config (opt-in key).
 

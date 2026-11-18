@@ -143,12 +143,14 @@ production paths; no unbounded channel; no lock held across `.await`.
 
 **Plan fidelity and ADRs**: behaviour matches the cited sections and every `Accept:` item; a
 deviation is recorded in `doc/plan.md`/`doc/tasks.md` in the same commit or is a finding. ADRs
-are records, not rules (ADR 0001, amended): only an important decision whose context is worth
+are records, not rules (ADR 0038): only an important decision whose context is worth
 recalling later needs one, and everything else needs its reason in the commit message (and a code
 comment for a non-obvious constraint). An important decision with no ADR, or any decision whose
 reason is recorded nowhere, is MEDIUM; do not flag a missing ADR for a decision the commit message
-explains. Code contradicting an Accepted ADR without amending or superseding it is MEDIUM, HIGH
-if it loosens a security or architecture rule. A Proposed decision flipped to Accepted by an
+explains. Code contradicting an Accepted ADR without a new record that supersedes it is MEDIUM,
+HIGH if it loosens a security or architecture rule. An Accepted ADR whose text (anything but its
+Status line) is edited, or a new `## Amended` section, is MEDIUM: a changed decision is a new
+superseding ADR, a detail goes in plan, foundation or the card. A Proposed decision flipped to Accepted by an
 agent is MEDIUM. A `DEC-` outcome written by anyone but the owner is HIGH.
 
 **Tests** (ver §2): each `Accept:` item has a test that would fail without the change, at the
@@ -180,8 +182,8 @@ repositories site-preview and mayfly where a design is ported is allowed.
 (`/// Pinned by: <test path>::<name>`), and that test exists; a behavioural claim in the README,
 `AGENTS.md`, the skill shipped to agents, a commit body or a task report is checked against the
 code and either names its test or is written as planned or a limitation (MEDIUM); an ADR changed
-without the rules, fixtures and tests that pin it, or code drifting from an ADR without an
-amendment or a superseding record, is MEDIUM; stale docs are findings; no unrelated files;
+without the rules, fixtures and tests that pin it, or code drifting from an ADR without a
+superseding record, is MEDIUM; stale docs are findings; no unrelated files;
 commit subject `<ID>: summary`, an `Impact:` line, the trailer block last (`Signed-off-by`,
 `Co-Authored-By`, `Claude-Session`), author `Patryk Żmigrodzki <pzmi@users.noreply.github.com>`.
 

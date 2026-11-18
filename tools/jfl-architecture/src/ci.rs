@@ -1,6 +1,6 @@
-//! `ARCH-ci-lockstep` (fnd §7.2 rule 3): `ci.yml`, the `justfile`, xtask's stage catalog and
-//! `required-checks.md` say the same thing, and no job of `ci.yml` can fail without failing
-//! `Required`.
+//! `ARCH-ci-lockstep` (fnd §7.2 rule 3): `ci.yml`, `macos.yml`, the `justfile`, xtask's stage
+//! catalog and `required-checks.md` say the same thing, and no job of `ci.yml` can fail without
+//! failing `Required`.
 //!
 //! What fails, each a finding of [`RULE`]:
 //!
@@ -37,7 +37,12 @@
 //!   display name, runner or the `just` invocations it runs, in order;
 //! - `on:` other than exactly [`TRIGGERS`]: `push` to `main` with no other filter, and bare
 //!   `pull_request` and `workflow_dispatch` (a `paths-ignore`, a `branches-ignore` or a dropped
-//!   `push` would let a landed commit skip CI; FND-08).
+//!   `push` would let a landed commit skip CI; FND-08);
+//! - in [`NIGHTLY`] (the macOS job, reported and not blocking since BOOT-04): the same job, step,
+//!   action, `env:`, shell and `run:` rules as `ci.yml`; an `on:` other than `schedule` (one or
+//!   more `cron` entries) and a bare `workflow_dispatch`, so it can never gate a push; a job named
+//!   [`AGGREGATE`]; a job that runs a stage of `check` (each stage runs in `ci.yml` only); and
+//!   `required-checks.md`'s table under "## Reported checks" disagreeing with its jobs.
 //!
 //! A stage hidden in a recipe that is not a stage (`platform-tests` excepted, checked above) is not
 //! counted, and the doc comparison fails because the doc names each recipe a job runs.
@@ -61,6 +66,13 @@ pub const JUSTFILE: &str = "justfile";
 pub const CATALOG: &str = "tools/xtask/src/catalog.rs";
 /// The page that documents the jobs.
 pub const REQUIRED_CHECKS: &str = "doc/required-checks.md";
+/// The workflow whose jobs run natively on a platform outside `Required` (macOS arm64, ADR 0006;
+/// the owner's FORMAL-checkpoint decision, BOOT-04): nightly and by hand, reported, not blocking.
+pub const NIGHTLY: &str = ".github/workflows/macos.yml";
+/// The heading of `required-checks.md`'s table of [`NIGHTLY`]'s jobs.
+pub const NIGHTLY_SECTION: &str = "## Reported checks";
+/// The heading of `required-checks.md`'s table of `ci.yml`'s jobs.
+pub const GATE_SECTION: &str = "## The checks";
 /// The aggregate job's id.
 pub const AGGREGATE: &str = "required";
 
@@ -217,7 +229,7 @@ pub fn install_args_problem(value: &str) -> Option<String> {
 /// and every pull request and manual dispatch, unfiltered.
 pub const TRIGGERS: &str = "push:\n  branches: [main]\npull_request:\nworkflow_dispatch:\n";
 
-/// Runs the rule over the three files of `tree` and the stage catalog `catalog` (the JSON of
+/// Runs the rule over the four files of `tree` and the stage catalog `catalog` (the JSON of
 /// `xtask list --json`).
 pub fn check(tree: &dyn Tree, catalog: &str) -> Vec<Finding> {
     let mut findings = Vec::new();
@@ -228,18 +240,44 @@ pub fn check(tree: &dyn Tree, catalog: &str) -> Vec<Finding> {
         }
         text
     };
-    let (Some(workflow), Some(justfile), Some(doc)) =
-        (read(WORKFLOW), read(JUSTFILE), read(REQUIRED_CHECKS))
-    else {
+    let (Some(workflow), Some(nightly), Some(justfile), Some(doc)) = (
+        read(WORKFLOW),
+        read(NIGHTLY),
+        read(JUSTFILE),
+        read(REQUIRED_CHECKS),
+    ) else {
         return findings;
     };
-    findings.extend(check_files(&workflow, &justfile, &doc, catalog));
+    findings.extend(check_files(
+        &Workflows {
+            gate: &workflow,
+            nightly: &nightly,
+        },
+        &justfile,
+        &doc,
+        catalog,
+    ));
     findings
 }
 
-/// Runs the rule over the texts of `ci.yml`, the `justfile` and `required-checks.md`, and the stage
-/// catalog `catalog` (the JSON of `xtask list --json`).
-pub fn check_files(workflow: &str, justfile: &str, doc: &str, catalog: &str) -> Vec<Finding> {
+/// The texts of the two workflows the rule reads.
+#[derive(Clone, Copy, Debug)]
+pub struct Workflows<'a> {
+    /// `ci.yml`, the gate.
+    pub gate: &'a str,
+    /// `macos.yml`, reported and not blocking.
+    pub nightly: &'a str,
+}
+
+/// Runs the rule over the texts of `ci.yml`, `macos.yml`, the `justfile` and
+/// `required-checks.md`, and the stage catalog `catalog` (the JSON of `xtask list --json`).
+pub fn check_files(
+    workflows: &Workflows<'_>,
+    justfile: &str,
+    doc: &str,
+    catalog: &str,
+) -> Vec<Finding> {
+    let workflow = workflows.gate;
     let mut findings = Vec::new();
     let stages = match check_stages(catalog) {
         Ok(stages) => stages,
@@ -261,28 +299,7 @@ pub fn check_files(workflow: &str, justfile: &str, doc: &str, catalog: &str) -> 
     };
     let mut wf = |message: String| findings.push(Finding::new(RULE, WORKFLOW, message));
 
-    let shell = root
-        .get("defaults")
-        .and_then(|d| d.get("run"))
-        .and_then(|r| r.get("shell"))
-        .and_then(Value::as_str);
-    if shell != Some("bash") {
-        wf(
-            "`defaults.run.shell` is not `bash`: only an explicit bash shell runs with -o pipefail"
-                .to_owned(),
-        );
-    }
-    if root
-        .get("defaults")
-        .and_then(|d| d.get("run"))
-        .and_then(|r| r.get("working-directory"))
-        .is_some()
-    {
-        wf("`defaults.run.working-directory` is set: the gate runs at the root".to_owned());
-    }
-    for problem in allowed_env(root.get("env"), "the workflow", Level::Workflow) {
-        wf(problem);
-    }
+    workflow_defaults(&root, &mut wf);
     let triggers: Option<Value> = serde_norway::from_str(TRIGGERS).ok();
     if root.get("on").is_none() || root.get("on") != triggers.as_ref() {
         wf(format!(
@@ -320,8 +337,11 @@ pub fn check_files(workflow: &str, justfile: &str, doc: &str, catalog: &str) -> 
             )),
         }
     }
+    let mut nightly_findings = Vec::new();
+    let nightly_jobs = check_nightly(workflows.nightly, &recipes, &stages, &mut nightly_findings);
     if seen
         .values()
+        .chain(nightly_jobs.values())
         .any(|job| job.invocations.iter().any(|i| i == "platform-tests"))
     {
         let deps = recipe_dependencies(justfile, "platform-tests");
@@ -342,8 +362,135 @@ pub fn check_files(workflow: &str, justfile: &str, doc: &str, catalog: &str) -> 
     }
     let mut wf = |message: String| findings.push(Finding::new(RULE, WORKFLOW, message));
     aggregate(&seen, &mut wf);
-    findings.extend(compare_doc(doc, &seen));
+    findings.extend(compare_doc(doc, GATE_SECTION, "ci.yml", &seen));
+    findings.extend(nightly_findings);
+    findings.extend(compare_doc(
+        doc,
+        NIGHTLY_SECTION,
+        "macos.yml",
+        &nightly_jobs,
+    ));
     findings
+}
+
+/// The workflow-level rules both workflows keep: an explicit `bash` default shell, no
+/// `working-directory` default, and only [`ALLOWED_ENV`]'s workflow entries.
+fn workflow_defaults(root: &Value, wf: &mut impl FnMut(String)) {
+    let shell = root
+        .get("defaults")
+        .and_then(|d| d.get("run"))
+        .and_then(|r| r.get("shell"))
+        .and_then(Value::as_str);
+    if shell != Some("bash") {
+        wf(
+            "`defaults.run.shell` is not `bash`: only an explicit bash shell runs with -o pipefail"
+                .to_owned(),
+        );
+    }
+    if root
+        .get("defaults")
+        .and_then(|d| d.get("run"))
+        .and_then(|r| r.get("working-directory"))
+        .is_some()
+    {
+        wf("`defaults.run.working-directory` is set: the gate runs at the root".to_owned());
+    }
+    for problem in allowed_env(root.get("env"), "the workflow", Level::Workflow) {
+        wf(problem);
+    }
+}
+
+/// The problem with [`NIGHTLY`]'s `on:`, if any: exactly `schedule` (a non-empty list of
+/// mappings that hold only a `cron` string) and a bare `workflow_dispatch`. An allowed shape, so a
+/// `push` or `pull_request` (which would make a reported job look like a gate) cannot appear.
+fn nightly_triggers_problem(on: Option<&Value>) -> Option<String> {
+    let refuse = || {
+        Some(format!(
+            "`on:` must be exactly `schedule` (`cron` entries only) and a bare `workflow_dispatch`, not {}",
+            on.map(scalar).unwrap_or_default().replace('\n', " ")
+        ))
+    };
+    let Some(map) = on.and_then(Value::as_mapping) else {
+        return refuse();
+    };
+    let keys: BTreeSet<String> = map.keys().map(scalar).collect();
+    if keys != BTreeSet::from(["schedule".to_owned(), "workflow_dispatch".to_owned()]) {
+        return refuse();
+    }
+    if !map
+        .get("workflow_dispatch")
+        .is_some_and(|v| matches!(v, Value::Null))
+    {
+        return refuse();
+    }
+    let crons = map
+        .get("schedule")
+        .and_then(Value::as_sequence)
+        .filter(|s| !s.is_empty());
+    let Some(crons) = crons else {
+        return refuse();
+    };
+    let shaped = crons.iter().all(|entry| {
+        entry
+            .as_mapping()
+            .is_some_and(|m| m.len() == 1 && m.get("cron").and_then(Value::as_str).is_some())
+    });
+    if shaped { None } else { refuse() }
+}
+
+/// Checks [`NIGHTLY`] and returns its jobs; its findings go to `findings`, at [`NIGHTLY`].
+fn check_nightly(
+    text: &str,
+    recipes: &BTreeSet<String>,
+    stages: &[String],
+    findings: &mut Vec<Finding>,
+) -> BTreeMap<String, Job> {
+    let mut wf = |message: String| findings.push(Finding::new(RULE, NIGHTLY, message));
+    let mut jobs = BTreeMap::new();
+    let root: Value = match serde_norway::from_str(text) {
+        Ok(value) => value,
+        Err(error) => {
+            wf(format!("does not parse: {error}"));
+            return jobs;
+        }
+    };
+    workflow_defaults(&root, &mut wf);
+    if let Some(problem) = nightly_triggers_problem(root.get("on")) {
+        wf(problem);
+    }
+    let Some(map) = root.get("jobs").and_then(Value::as_mapping) else {
+        wf("no `jobs:` mapping".to_owned());
+        return jobs;
+    };
+    for (key, body) in map {
+        let Some(id) = key.as_str() else {
+            wf("a job id that is not a string".to_owned());
+            continue;
+        };
+        if id == AGGREGATE {
+            wf(format!(
+                "job `{id}` is the gate's aggregate: macos.yml is reported, never a gate"
+            ));
+            continue;
+        }
+        let job = read_job(id, body, recipes, &mut wf);
+        if !job.needs.is_empty() {
+            wf(format!("job `{id}` has `needs:`: each job runs on its own"));
+        }
+        for invocation in &job.invocations {
+            let mut ignore = |_: String| {};
+            for stage in invocation_stages(invocation, stages, &mut ignore, id) {
+                wf(format!(
+                    "job `{id}` runs stage `{stage}` of `just check`, which runs in ci.yml only"
+                ));
+            }
+        }
+        jobs.insert(id.to_owned(), job);
+    }
+    if jobs.is_empty() {
+        wf("no job".to_owned());
+    }
+    jobs
 }
 
 /// What the lockstep reads of one job.
@@ -840,15 +987,16 @@ struct Row {
     invocations: Vec<String>,
 }
 
-fn compare_doc(doc: &str, jobs: &BTreeMap<String, Job>) -> Vec<Finding> {
+/// Compares the table under `heading` with the jobs of the workflow `file`.
+fn compare_doc(doc: &str, heading: &str, file: &str, jobs: &BTreeMap<String, Job>) -> Vec<Finding> {
     let mut findings = Vec::new();
     let mut fail = |message: String| findings.push(Finding::new(RULE, REQUIRED_CHECKS, message));
     let Some(section) = doc
-        .split("\n## The checks")
+        .split(&format!("\n{heading}\n"))
         .nth(1)
         .and_then(|rest| rest.split("\n## ").next())
     else {
-        fail("no `## The checks` section".to_owned());
+        fail(format!("no `{heading}` section"));
         return findings;
     };
     let mut rows: BTreeMap<String, Row> = BTreeMap::new();
@@ -884,7 +1032,7 @@ fn compare_doc(doc: &str, jobs: &BTreeMap<String, Job>) -> Vec<Finding> {
     }
     for (id, job) in jobs {
         let Some(row) = rows.remove(id) else {
-            fail(format!("job `{id}` of ci.yml has no row"));
+            fail(format!("job `{id}` of {file} has no row"));
             continue;
         };
         let actual = Row {
@@ -894,12 +1042,12 @@ fn compare_doc(doc: &str, jobs: &BTreeMap<String, Job>) -> Vec<Finding> {
         };
         if row != actual {
             fail(format!(
-                "job `{id}`: the row says {row:?} but ci.yml has {actual:?}"
+                "job `{id}`: the row says {row:?} but {file} has {actual:?}"
             ));
         }
     }
     for id in rows.keys() {
-        fail(format!("row `{id}` names a job ci.yml does not have"));
+        fail(format!("row `{id}` names a job {file} does not have"));
     }
     findings
 }

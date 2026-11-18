@@ -31,7 +31,7 @@ GitHub Actions run or job URL (a failure to fix), or nothing (the next ready tas
 2. A task is **ready** when every dependency has a commit and the task has none yet. Subjects
    are `<ID>: summary`, so: `git log --oneline main | grep " <dep>:"`. A `DEC-` dependency counts
    only when it is recorded as decided: its ADR's status reads `Accepted (owner, …)`
-   (`grep -A2 '^## Status'` on the record), or, where no ADR was needed (ADR 0001, amended), its
+   (`grep -A2 '^## Status'` on the record), or, where no ADR was needed (ADR 0038), its
    card is ticked and marked `Decided:` with the date: an agent's draft, committed as `Proposed` under the `DEC-` subject, does not make
    the dependants ready. A `DEC-` task is the owner's: prepare what its card says an agent prepares, then put the decision to the owner;
    never decide it. An acceptance item marked `(owner)` is never run by an agent; a task whose
@@ -188,7 +188,9 @@ resetting the worktree"; never discard its uncommitted change without reading it
   `completed`, then `get_job_logs` with `failed_only` and `tail_lines` 60 to 120 (a large log
   lands in a file: grep it). Red is work now: name the failing line, hand the fix to a work
   agent (or the owning lane), land it. Never skip, `#[ignore]`, or retry a test to green; a
-  macOS-only or arm64-only failure is fixed from the log and said so. Extract a long CI log
+  macOS-only or arm64-only failure is fixed from the log and said so. macOS is not in
+  `Required` (`macos.yml`, nightly and dispatch, since 2026-11-18): read its latest run at each
+  ⛳ and report a red one to the owner as a fix task; it never holds a land. Extract a long CI log
   through a subagent and act on its verbatim summary of the failing lines, not on the raw dump.
 - **Before cancelling a run, read every job's state.** A run that looks stuck may have
   recovered; cancelling it throws away its green jobs and, on `main`, its signal.
@@ -225,6 +227,12 @@ resetting the worktree"; never discard its uncommitted change without reading it
   branch ruleset) into that report, rather than saving them for the end of the plan. Show the
   document before asking for acceptance; never invent facts about the owner's repositories,
   machines or results.
+- **ADRs change by supersession, not amendment** (ADR 0038; the owner, 2026-11-18: "If you need
+  to amend a lot it may mean you wrote too many ADRs for small things"). A lane commit that edits
+  an Accepted ADR's text (anything but its Status line `Superseded by NNNN`) or adds an
+  `## Amended` section goes back for a fix: a changed decision is a new ADR (reserve its number),
+  a detail goes in plan, foundation, verification or the card and the commit message. When
+  dispatching, say so in the prompt of any task that touches a decision.
 - Ask only what is the owner's to decide (spend, an account, a destructive or outward step, a
   product choice, the target repository, an evaluation run). Recommend one option. Everything
   else: decide, do, report.

@@ -5,7 +5,7 @@ Date: 2026-11-16
 ## Status
 
 Accepted (owner, 2026-11-17); amended 2026-11-17 (orchestrator: detached children are not
-put in a process group by the launcher).
+put in a process group by the launcher; accepted by the owner 2026-11-18).
 
 ## Context
 
@@ -50,7 +50,7 @@ unchanged. `daemon.qnt` is unaffected.
 - `fs2` (2018), `fd-lock`, `fs4`: unnecessary since Rust 1.89. `daemonize`/`fork`: `fork()` in a
   multi-threaded process is unsafe in practice. `interprocess`: only if Windows becomes a target.
 
-## Amended 2026-11-17 (orchestrator, technical correction under the owner's delegation): no launcher-made group
+## Amended 2026-11-17 (orchestrator, technical correction under the owner's delegation; accepted by the owner 2026-11-18): no launcher-made group
 
 `process_group(0)` and `setsid` conflict: `process_group(0)` makes the child the leader of a new
 process group, and POSIX `setsid()` fails with `EPERM` for a process group leader, so the daemon's
