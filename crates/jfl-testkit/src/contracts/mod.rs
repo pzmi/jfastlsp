@@ -2,3 +2,4 @@
 //! run against the testkit fake here and against the real adapter from the adapter's crate.
 
 pub mod process_runner;
+pub mod source_tree;

@@ -694,6 +694,7 @@ fake and a contract suite run against the fake and the real adapter (ver §5).
 | `ProjectModelSource` | `jfl-adapter-gradle` | the fixture builds' models, fingerprint stability, refusal without opt-in |
 | `Compiler` | `jfl-adapter-javac` | diagnostics of the fixture files, cancellation, crash and restart, version tags |
 | `Clock` | composition (system clock) | monotonic deadlines |
+| `BlockingPool` | composition (Tokio's bounded blocking pool) | a job runs off the runtime to its end; a dropped future discards the result (IDX-06: an fs adapter holds no `spawn` grant, so fnd §4.4 rule 3's pool is injected; testkit's `InlinePool` runs jobs in place) |
 
 Inbound: the daemon's request handler (in `jfl-adapter-ipc`) calls application queries; the
 proxies (`jfl lsp`, CLI) speak `jfl-protocol` through the IPC client.
@@ -1070,7 +1071,7 @@ that adds a subsystem says on its card what reuse it considered.
 | `tree-sitter`, `tree-sitter-java-orchard` | 0.27.2, 0.5.25 (2026-11-15) | MIT | `jfl-adapter-java` | C via `cc` |
 | `cafebabe`, `zip` | 0.9.0 (then the fix commit, ADR 0023), 9.6.1 | 0BSD, MIT | `jfl-adapter-classfile` | `zip` without default features, `deflate` on |
 | `ristretto_jimage` | =0.35.0 | Apache-2.0 OR MIT | `jfl-adapter-classfile` | `lib/modules`; needs Rust 1.99.1 (FND-10) |
-| `notify`, `notify-debouncer-mini`, `ignore` | 8.2.2, 0.7.0, 0.4.34 | CC0-1.0, MIT OR Apache-2.0, Unlicense OR MIT | `jfl-adapter-fs` | `notify` 9 when final |
+| `notify`, `ignore` | 8.2.2, 0.4.34 | CC0-1.0 (its Linux backend `inotify`: ISC, a per-crate exception), Unlicense OR MIT | `jfl-adapter-fs` | `notify` 9 when final; `notify-debouncer-mini` not taken (ADR 0019, amended 2026-11-18) |
 | `rusqlite` (bundled), `fst`, `postcard`, `blake3` | 0.43.0, 0.4.7, 1.1.3, 1.8.7 | MIT, Unlicense OR MIT, MIT OR Apache-2.0, CC0-1.0 OR Apache-2.0 | `jfl-adapter-store` | tier by DEC-03 |
 | `scip` | 0.10.0 | Apache-2.0 | `jfl-oracle`, SEM-08 | pins `protobuf` =3.7.2 exactly |
 | `clap`, `serde`, `serde_json`, `schemars`, `camino`, `thiserror`, `anyhow` | 4.6, 1, 1, 1.2, 1.2, 2, 1 | MIT OR Apache-2.0 (schemars MIT) | CLI, protocol | `anyhow` only in binaries and tools |

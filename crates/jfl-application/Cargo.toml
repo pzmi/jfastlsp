@@ -11,6 +11,7 @@ description = "Use cases and queries, the view registry and generations, the dia
 
 [dependencies]
 jfl-domain = { path = "../jfl-domain" }
+thiserror = "2"
 
 [lints]
 workspace = true

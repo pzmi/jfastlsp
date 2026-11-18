@@ -19,6 +19,7 @@ jfl-bench compare a/e1-small.json b/e1-small.json     # two runs of one suite (d
 just bench-domain small            # jfl-domain's position conversions in process (divan), after a corpus round-trip check
 just bench-domain-envelope         # jfl-domain's envelope assembly, completeness, summary build and API digests (divan, synthetic)
 just bench-protocol                # jfl-protocol's encode, frame decode and envelope decode of a 1k- and 10k-location response (divan, synthetic)
+just bench-fs small [cold]         # jfl-adapter-fs's walk (paths, paths and stat; 1 and 4 threads; warm, and cold only when asked: it drops the page cache) and a watch's start (divan), after checking the listing is git ls-files' set
 just bench-lsp                     # jfl-adapter-lsp's round trip of one request through a session in memory, and a 1k- and 10k-location answer on the typed path and through a JSON value (divan, synthetic)
 ```
 
@@ -221,6 +222,30 @@ What needs a product arrives with it: freshness lag after an edit and `initializ
 daemon with LSP-06 (the M1 gate) for `jfl`; the marginal cost of 1, 3 and 10 worktrees (the
 corpus helper `scripts/bench-corpus.sh worktrees` creates them) with LSP-06 for `jfl` and with E4 (EVAL-06) for
 jdtls; BENCH-03 added the comparison arms beside `rg`.
+
+### The walk (IDX-06, `just bench-fs`)
+
+`jfl-adapter-fs`'s `list`, measured 2026-11-18 on the 4-vCPU VM above (divan medians of 100
+samples warm; 3 samples cold, each after a page-cache drop; the `bench` profile; another build
+lane was running, so read them as an upper bound). Each corpus's listing equals
+`git ls-files '*.java'` before anything is timed.
+
+| Corpus (files) | Paths, 1 thread | Paths, 4 threads | Paths and stat, 1 thread | Paths and stat, 4 threads | Cold, paths / and stat, 4 threads | Watch start (watched directories) |
+|:--|--:|--:|--:|--:|--:|--:|
+| small, junit-framework (1,813) | 9.0 ms | 5.5 ms | 10.8 ms | 6.1 ms | 25.6 / 25.0 ms | 29.4 ms (801) |
+| medium, spring-framework (9,294) | 39.3 ms | 16.5 ms | 52.1 ms | 19.7 ms | 65.8 / 78.2 ms | 101.4 ms (2,802) |
+| lombok, fineract (7,301) | 37.1 ms | 15.2 ms | 48.1 ms | 17.9 ms | 65.0 / 74.2 ms | 120.4 ms (2,861) |
+
+Watch start is the IDX-06 review's design: the walk of the directories the exclusion rules accept
+and one non-recursive inotify watch for each, every one a round trip to `notify`'s thread (about
+35 µs a directory); `notify`'s recursive watch of the whole tree, `.git` included, took 9.6, 55
+and 53 ms. The walk columns are the first run's; a rerun on 2026-11-18 gave the same within the
+noise (medium, 4 threads: 19.0 ms paths, 22.4 ms with stat). Cold runs only with
+`just bench-fs SIZE cold`.
+
+For comparison, `e1`'s serial walk (`list_ms`, hidden directories skipped) took 41–83 ms on
+medium and 54–71 ms on lombok, and the `incremental` suite's `reopen/proxy/walk_ms` 58 ms
+(medium) and 71 ms (lombok).
 
 ## Adding a suite
 

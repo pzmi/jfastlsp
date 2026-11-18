@@ -127,6 +127,18 @@ jfl-adapter-lsp = { gen-lsp-types = [], lsp-server = [], serde = ["default", "de
 # frames in the transcript runner; in the graph already.
 jfl-testkit = { serde_json = ["default"] }
 
+# jfl-application (IDX-06): thiserror for the port's typed refusals (fnd §4.3); in the graph already.
+jfl-application = { thiserror = ["default"] }
+# jfl-adapter-fs (IDX-06, plan §16.2): ignore (ripgrep's parallel, .gitignore-aware walker; Unlicense
+# OR MIT) and notify (inotify, FSEvents; CC0-1.0) with its default features (FSEvents on macOS).
+# notify-debouncer-mini, which the card named, was weighed and not taken: it drops the backend's
+# overflow event and feeds its thread through an unbounded channel (jfl_application::hints).
+# libc (IDX-06 review): the O_NONBLOCK flag for opening a file to read, so a FIFO swapped in for it
+# never blocks the read; no default features, in the graph already (notify, rustix), its build
+# script reviewed in deny.toml. notify's event-loop thread is notify's own, started and stopped with
+# a watch: the crate holds no `spawn` grant and starts no thread itself (fnd §2.4).
+jfl-adapter-fs = { ignore = ["default"], libc = [], notify = ["default"] }
+
 jfl-bench = { blake3 = ["default"], ignore = ["default"], rayon = ["default"], serde = ["default", "derive"], serde_json = ["default"], toml = ["default"], tree-sitter = ["default"], tree-sitter-java-orchard = ["default"] }
 
 [external.dev]
@@ -147,6 +159,9 @@ jfl-protocol = { divan = ["help"], proptest = ["std"] }
 # traffic (ver §2, §8), divan for the in-process round trip and the typed path's benchmark; the same
 # features as jfl-protocol's, for the same reasons.
 jfl-adapter-lsp = { divan = ["help"], proptest = ["std"] }
+# jfl-adapter-fs (IDX-06): divan for the in-process walk benchmark (`just bench-fs`), with the same
+# features as jfl-domain's, for the same reasons.
+jfl-adapter-fs = { divan = ["help"] }
 
 [external.build]
 

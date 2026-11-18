@@ -241,6 +241,21 @@ bench-protocol: _preflight
 bench-lsp: _preflight
     {{cargo}} bench --locked -p jfl-adapter-lsp --bench lsp
 
+# jfl-adapter-fs's walk in process (IDX-06, divan): `list` with paths and with a stat per file on 1
+# and 4 walker threads, warm, and a watch's start, on the pinned corpus's checkout (its path and
+# `git ls-files` on stdin, so the benchmark first checks that the listing is Git's file set). With
+# `cold`, also cold runs, which drop the whole machine's page cache before each sample (Linux,
+# root): off by default, since they disturb everything else running. Reports, never gates.
+# `just bench-fs small`, `just bench-fs medium cold`.
+bench-fs corpus="small" cold="warm": _preflight
+    #!/usr/bin/env bash
+    set -euo pipefail
+    case {{quote(cold)}} in cold|warm) ;; *) echo "bench-fs: cold must be cold or warm" >&2; exit 2;; esac
+    bash scripts/bench-corpus.sh fetch {{quote(corpus)}}
+    root="$(bash scripts/bench-corpus.sh path {{quote(corpus)}})"
+    { printf '%s\n%s\n' {{quote(cold)}} "$root"; git -C "$root" ls-files -z -- '*.java'; } \
+      | {{cargo}} bench --locked -p jfl-adapter-fs --bench walk
+
 # Every tool of tools/versions.toml on the stages' PATH at its pinned version (xtask's cache first,
 # then mise's install directories), and versions.toml agreeing with mise.toml and mise.lock;
 # fails naming each missing or wrong tool and the fix (XT-02, fnd §8).

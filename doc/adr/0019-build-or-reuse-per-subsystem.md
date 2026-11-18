@@ -4,7 +4,7 @@ Date: 2026-11-16
 
 ## Status
 
-Accepted (owner, 2026-11-17); amended 2026-11-17 (twice).
+Accepted (owner, 2026-11-17); amended 2026-11-17 (twice) and 2026-11-18.
 
 ## Context
 
@@ -76,3 +76,18 @@ The engineering foundation's row names quint-connect. FORMAL-02 read it at 0.1.2
 conformance harness itself over `itf` 0.4, which it keeps: quint-connect cannot replay committed
 traces, downloads Quint's evaluator at run time and names no step in a divergence (ADR 0007,
 amended). The table is kept as the survey recorded it.
+
+## Amended 2026-11-18 (IDX-06): notify without its debouncer; inotify's ISC licence
+
+Plan §16.2 and IDX-06's card name `notify` 8.2 with `notify-debouncer-mini` 0.7. IDX-06 takes
+`notify` and `ignore` and not the debouncer, which loses what the card requires it to report: its
+debounce map is keyed by path, so the backend's overflow event (no path, `Flag::Rescan`) is
+dropped in it; its watcher feeds its thread through an unbounded channel; and it carries
+`tempfile` as a normal dependency for its own tests. A bounded, coalescing hint queue in
+`jfl-application` (`hints.rs`) replaces it: a path waits once until taken, an overflow or a
+watcher error becomes one rescan, and no timer delays the first hint.
+
+`notify`'s Linux backend, `inotify` and `inotify-sys`, are ISC-licensed, which `deny.toml`'s
+allowlist did not name. ISC is permissive and equivalent to MIT, so each is a per-crate exception
+in `deny.toml` (fnd §7.4) rather than a widened allowlist; `inotify-sys`'s build script (it links
+`libinotify` only on NetBSD and OpenBSD) is reviewed in its bypass list.

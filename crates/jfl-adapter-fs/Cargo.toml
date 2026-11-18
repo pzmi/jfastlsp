@@ -12,6 +12,19 @@ description = "`SourceTree` over the filesystem: scanning with nested-worktree e
 [dependencies]
 jfl-domain = { path = "../jfl-domain" }
 jfl-application = { path = "../jfl-application" }
+ignore = "0.4.34"
+notify = "8.2.2"
+libc = { version = "0.2.191", default-features = false }
+
+[dev-dependencies]
+divan = { version = "0.1.21", default-features = false, features = ["help"] }
+jfl-testkit = { path = "../jfl-testkit" }
 
 [lints]
 workspace = true
+
+# The walk on the bench corpus, warm and cold, and a watch's start (`just bench-fs SIZE`);
+# reports, never gates.
+[[bench]]
+name = "walk"
+harness = false

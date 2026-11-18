@@ -2,5 +2,8 @@
 //! only.
 
 pub mod contracts;
+pub mod exec;
+pub mod fakes;
+pub mod fixtures;
 pub mod lsp_transcript;
 pub mod poll;

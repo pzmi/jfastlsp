@@ -1452,11 +1452,31 @@ but follow in lane CLI (M2). Starts after the go decision.
 - **Reuse considered:** `notify` and `ignore` (ripgrep's walker); `watchman_client` (old
   dependencies, needs watchman) only as a later optional backend; `notify` 9 when final (REL-02).
 - **Accept:**
-  - [ ] contract suite green for fake and adapter; a broken fake fails it
-  - [ ] the nested-worktree fixture (a main checkout with three `.claude/worktrees/*`) lists each file once, under its own root
-  - [ ] a symlink to a directory outside the root is not followed (integration test)
-  - [ ] CC0-1.0 (`notify`) and Unlicense (`ignore`) accepted by `deny.toml` as plan §16.2 lists
-  - [ ] runs on the bench corpus (small at least, `just bench`) and reports the metrics it affects; its correctness tests also run against the real-corpus cases that apply (BENCH-05)
+  - [x] contract suite green for fake and adapter; a broken fake fails it (`jfl_testkit::contracts::source_tree`, 20 cases; nine broken implementations in its tests; `crates/jfl-adapter-fs/tests/contract.rs`)
+  - [x] the nested-worktree fixture (a main checkout with three `.claude/worktrees/*`) lists each file once, under its own root (`crates/jfl-adapter-fs/tests/worktrees.rs`, real `git worktree add`)
+  - [x] a symlink to a directory outside the root is not followed (integration test: `tests/symlinks.rs`, the walk and the watcher)
+  - [x] CC0-1.0 (`notify`) and Unlicense (`ignore`) accepted by `deny.toml` as plan §16.2 lists; `notify`'s Linux backend `inotify`/`inotify-sys` is ISC, a per-crate exception (ADR 0019, amended 2026-11-18)
+  - [x] runs on the bench corpus (small at least, `just bench`) and reports the metrics it affects; its correctness tests also run against the real-corpus cases that apply (BENCH-05): BENCH-05 has no cases yet, so `just bench-fs SIZE` first checks that the listing of the corpus checkout is exactly `git ls-files '*.java'` (small, medium and lombok agree), then times it
+- **Decided (IDX-06):** no `notify-debouncer-mini`: it drops the backend's overflow event (no path)
+  and feeds its thread through an unbounded channel; a bounded, coalescing hint queue in
+  `jfl-application` replaces it (ADR 0019, amended 2026-11-18). The port is a native `async fn`
+  trait (fnd §4.4) whose adapter runs its blocking jobs on an injected `BlockingPool` (plan §6.4).
+  Build output is `build`, `target`, `out` or `bin` only beside a build file, plus `.gradle`:
+  spring-framework has a package named `build`.
+- **Decided (IDX-06 review, orchestrator):** watch, then hint. On Linux the adapter keeps one
+  non-recursive inotify watch per directory the exclusion rules accept (none for `.git`, nested
+  worktrees and repositories, `.claude/worktrees/` or build output) and watches a new directory
+  (and what the rules accept below it) before its hint is handed out; a directory it cannot watch
+  is a `Rescan(WatcherError)`. macOS keeps one recursive FSEvents stream. A pending rescan keeps
+  every reason, and the end of a watch is a last `Rescan(WatchEnded)`. The extension rule of
+  `hint_excluded` applies to files only (`java.base` is a directory).
+- **Left to IDX-09 (IDX-06):** the walk honours `.gitignore` as ripgrep does, so a tracked `.java`
+  file that also matches a `.gitignore` pattern is neither listed nor reported as a gap (Git keeps
+  tracking it), and neither is a tracked file under a skipped build-output directory (`bin/`,
+  `out/` beside a build file). The view unions the listing with the repository's tracked files
+  (`RepoProbe`), skipped `BuildOutput` directories included, before it can answer
+  `complete=true`; `just bench-fs` shows the corpus has no such file. The watcher's own gaps are
+  IDX-09's obligations (its card).
 - **Impact:** dependency graph.
 
 #### IDX-07: Syntax adapter: tree-sitter summaries and the golden Java corpus
@@ -1549,6 +1569,22 @@ but follow in lane CLI (M2). Starts after the go decision.
   - [ ] component tests: a request pinned to N while N+1 publishes answers wholly from N; a `sed -i`-style write seen by the stat is in the answer without `sync`
   - [ ] a `proptest-state-machine` test of the registry (open, reconcile, publish, pin, `sync`) against a reference machine (ADR 0007, amended; ver §6.4)
   - [ ] runs on the bench corpus (small at least, `just bench`) and reports the metrics it affects; its correctness tests also run against the real-corpus cases that apply (BENCH-05)
+- **Obligations from the watcher (IDX-06 review), with FORMAL-03's (watch, then scan; a loss on a
+  watch error; a filesystem-type check; racy mtimes):** hints are not a complete record, so a view
+  answers `complete=true` only from what it scanned or stat'ed, never from the absence of a hint.
+  - Watch, then scan: open a view by `watch` and then `list`; on a new directory's hint, scan it
+    (the adapter has watched it by then); on any `Rescan`, rescan the view.
+  - A `Rescan` whose reasons `degrade_the_watch()` (a directory that could not be watched, the
+    watch ended) leaves the view unwatched in part: treat it as unwatched (restart the watch,
+    rescan, and stat on every request) until a fresh watch has been established.
+  - Gaps the backend does not report: `notify` ignores inotify's `IN_UNMOUNT` and `IN_IGNORED`
+    (a watched directory's filesystem unmounted, a watch the kernel dropped); FSEvents never
+    reports the root moved or deleted (`notify` does not ask for `RootChanged`); network and FUSE
+    filesystems may deliver no events (refuse to rely on the watcher there, after a `statfs`
+    filesystem-type check); and a directory created during the first walk is seen by the listing
+    that follows the watch, not by a hint.
+  - The union of the listing with the repository's tracked files (IDX-06's card), skipped
+    build-output directories included.
 - **Impact:** none (internal); model conformance.
 
 #### IDX-10: Queries: `sym`, `def`, `hover`

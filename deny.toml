@@ -35,8 +35,13 @@ unused-allowed-license = "allow"
 # unconditionally, so no feature choice of ours avoids it; it is never linked into a binary
 # (`cargo tree -e normal -i foldhash` is empty). ADR 0031, amended 2026-11-17 (BENCH-02); IDX-07
 # meets the same crate through jfl-adapter-java.
+# inotify and inotify-sys (ISC, a permissive licence equivalent to MIT) are notify's Linux backend,
+# which jfl-adapter-fs's watcher cannot do without (plan §16.2 lists notify, not its backends); ADR
+# 0019, amended 2026-11-18 (IDX-06).
 exceptions = [
   { allow = ["Zlib"], crate = "foldhash" },
+  { allow = ["ISC"], crate = "inotify" },
+  { allow = ["ISC"], crate = "inotify-sys" },
 ]
 
 [bans]
@@ -59,6 +64,8 @@ deny = [
   { crate = "tree-sitter-java-orchard", wrappers = ["jfl-adapter-java", "jfl-bench"], reason = "the Java grammar is the Java adapter's (ADR 0022); the bench harness runs the E1 parse pipeline on its own (ADR 0031, amended 2026-11-17)" },
   { crate = "lsp-server", wrappers = ["jfl-adapter-lsp", "jfl-adapter-ipc"], reason = "LSP framing lives in the LSP and IPC adapters (ADR 0020, ADR 0021)" },
   { crate = "gen-lsp-types", wrappers = ["jfl-adapter-lsp"], reason = "LSP types are the LSP adapter's (ADR 0020)" },
+  { crate = "notify", wrappers = ["jfl-adapter-fs"], reason = "watcher hints are the fs adapter's (plan §6.1, IDX-06)" },
+  { crate = "ignore", wrappers = ["jfl-adapter-fs", "jfl-bench"], reason = "the walk is the fs adapter's (plan §6.1, IDX-06); the bench harness walks the corpus on its own (ADR 0031)" },
   { crate = "anyhow", wrappers = ["jfl-cli", "jfl-architecture", "jfl-oracle", "jfl-eval", "jfl-bench"], reason = "anyhow only in binaries and tools (ARCH-anyhow-in-library)" },
   { crate = "lsp-types", use-instead = "gen-lsp-types", reason = "stalled since 2024 (plan §16.3)" },
   { crate = "tower-lsp", use-instead = "lsp-server", reason = "unmaintained (plan §16.3)" },
@@ -148,6 +155,11 @@ bypass = [
   # rustversion: runs `$RUSTC --version` (its build/rustc.rs parses the output, read too) and
   # writes the version into OUT_DIR, cfgs only; dashu-int's closure.
   { crate = "rustversion", build-script = "4438b108d5b198ca43ef0a78509da89861020674abd05166addd1c3058afbfa6" },
+  # IDX-06: jfl-adapter-fs's watcher (notify) brings one more, read at the version pinned in
+  # Cargo.lock. inotify-sys: reads CARGO_CFG_TARGET_OS and, only for NetBSD and OpenBSD (none of
+  # ADR 0006's targets), asks pkg-config for libinotify's directory and links it; on our targets
+  # it prints nothing.
+  { crate = "inotify-sys", build-script = "8070368f4661803c760dc05c9946f654af5ca54a0b224abc3c10f01e5e295a3a" },
 ]
 
 [sources]
