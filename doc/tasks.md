@@ -1001,10 +1001,28 @@ before LSP-04.
   at once; a crash with open documents and a reconnect; idle exit racing a new connection.
   Broken-model controls: release the lock before removing the socket; keep overlays across a
   restart. Regression traces, registered; `doc/formal-models.md` section for `daemon`.
+- **As built (FORMAL-04):** `formal/daemon.qnt` with a state directory (the lock an flock on the
+  inode `daemon.lock` names, the socket file and its binder, the spawn lock), two proxies, three
+  daemon and three connection slots, two documents, and an initial state clean or with a crash's
+  stale socket. The card's four invariants, plus `OwnerReachable` (plan §7.2's own control,
+  release before unlink, breaks none of the four: the new owner becomes unreachable) and
+  `ReconnectRestores` (documents and request re-sent, plan §5.2); four scenarios, the card's
+  three plus `sigtermAfterStaleStart`; nine controls, at least one per invariant, and a liveness
+  control. `EventuallyServed` is a `temporal` with fairness spelled out for Apalache, which
+  accepts it but cannot check it at a bound that reaches its counterexamples; the model's
+  `Progress` simulation checks what it reduces to, and fails on the liveness control. The start
+  and shutdown orders and IDX-12's obligations are in `doc/formal-models.md`; `daemon` is pending
+  on IDX-12.
+  - **Review round (FIX FIRST, one MEDIUM):** `Progress` ran by hand only. The registry now takes
+    an optional `progress` entry (step, invariant, control, steps, samples); `formal-verify` runs
+    the liveness simulation after the safety one and then its control, which must report a
+    violation, so `formal.yml` checks liveness weekly (`tools/xtask/src/formal.rs`, its pin
+    moved). The review's LOWs are IDX-12 obligations: close-on-exec for every descriptor and
+    workers that die with the daemon, the proxy's deadlines, the lock-path check, `setsid` first.
 - **Accept:**
-  - [ ] typecheck, tests and simulation green; each control violates its named invariant
-  - [ ] `just formal-verify daemon` passes at the documented bound, or the report names the tooling blocker (never a fabricated pass)
-  - [ ] regression traces committed and fresh
+  - [x] typecheck, tests and simulation green; each control violates its named invariant
+  - [x] `just formal-verify daemon` passes at the documented bound, or the report names the tooling blocker (never a fabricated pass)
+  - [x] regression traces committed and fresh
 - **Impact:** none (model).
 
 #### FORMAL-05: ⛳ `diagnostics.qnt`: staleness
@@ -1748,6 +1766,22 @@ but follow in lane CLI (M2). Starts after the go decision.
   (`tracing-subscriber`'s default `tracing-log` feature does it), keep the `lsp_server` target below
   DEBUG. The daemon host in `jfl-composition`
   is the first to install a subscriber.
+- **From FORMAL-04:** the driver's obligations are `doc/formal-models.md`'s "IDX-12's
+  obligations" (the daemon section): the start order lock, unlink, bind, ready; the shutdown order
+  stop accepting, unlink, release; the lock file never removed nor its descriptor inherited; a
+  crash (the host's abort) that closes descriptors without the shutdown; overlays and requests
+  keyed by connection; the spawn lock's second check and the bounded handshake; re-sent documents
+  and request on every connection; a host the driver can step one action at a time. The
+  `proptest-state-machine` test also checks `EventuallyServed`'s reduction against the host: once
+  faults stop, a waiting client is served within a bounded number of steps. Decide whether the
+  daemon notices its socket file removed under it (a tmp cleaner on plan §5.3's `/tmp` fallback)
+  and stops; the model does not cover that yet, so it changes first (ADR 0007). From the FORMAL-04
+  review: close-on-exec for every descriptor (the lock, the listener, connections, the proxy's
+  spawn lock; only the notify socket is inherited) and workers that die with the daemon
+  (`PR_SET_PDEATHSIG` or a pipe-close watch); deadlines on the proxy's wait for the accept, the
+  handshake and each reply, an expiry treated as a reset; after locking and on every idle tick,
+  the lock path still names the locked inode (device and inode), else shut down; `setsid` as the
+  daemon's first act, before the lock.
 - **Reuse considered:** std file locks (Rust 1.89), `rustix`, Tokio's `UnixListener`, `lsp-server`'s
   message type; sccache's spawn handshake, Biome's `lsp-proxy` and buck2's version check copied as
   designs (ADR 0021).

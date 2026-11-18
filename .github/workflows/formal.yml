@@ -1,5 +1,6 @@
 # Apalache's bounded verification and a Quint simulation of every model of formal/models.toml
-# (FORMAL-01, ver §6.3, ADR 0007): one job per model, weekly and by hand. A JVM per model, so it is
+# (FORMAL-01, ver §6.3, ADR 0007), and for a model with a `progress` entry its liveness simulation
+# and liveness control (FORMAL-04): one job per model, weekly and by hand. A JVM per model, so it is
 # outside `check` and `Required`; the `formal` job of ci.yml typechecks and tests the models on
 # every push. crates/jfl-conformance/tests/models.rs keeps the matrix equal to the registry. A red
 # run is reported to the owner and fixed as a task; its counterexample becomes a regression trace.
@@ -32,7 +33,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        model: [smoke, views]
+        model: [smoke, views, daemon]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

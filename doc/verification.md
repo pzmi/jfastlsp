@@ -160,7 +160,7 @@ on it). The product's models:
 | Model | Invariants | Model task | Driver task |
 |:--|:--|:--|:--|
 | `views.qnt` | `NoMixedGeneration`, `GenerationsIncrease`, `AtomicPublish`, `FreshAfterStat`, `CompleteIsHonest`, `NoCrossView`, `SyncIsBarrier` | FORMAL-03 | IDX-09 |
-| `daemon.qnt` | `AtMostOneOwner`, `ServedOnlyByOwner`, `NoGhostBuffers`, `ShutdownReleases`; liveness `EventuallyServed` | FORMAL-04 | IDX-12 |
+| `daemon.qnt` | `AtMostOneOwner`, `ServedOnlyByOwner`, `NoGhostBuffers`, `ShutdownReleases`, `OwnerReachable`, `ReconnectRestores`; liveness `EventuallyServed`, checked by the `Progress` simulation `formal-verify` runs from the `progress` entry (Apalache cannot reach its counterexamples) | FORMAL-04 | IDX-12 |
 | `diagnostics.qnt` | `NeverOlderOverNewer`, `PublishedMatchesVersion`, `ClosedPublishesNothing` | FORMAL-05 | LSP-04 |
 
 Each model has named scenarios (`run`s) for the interleavings that matter (a checkout during a
@@ -228,7 +228,11 @@ with `--out` and checked whole: Quint's stdout to a pipe is cut at 64 KiB) in a 
 directory, then a Quint simulation of the same invariant (20000 samples of the model's
 `sim_steps` steps on the TypeScript backend, its seed printed). Apalache's time grows steeply with
 its bound, so the simulation's depth is the model's own number: the FORMAL-03 review's 13-step
-counterexample lay beyond any affordable Apalache bound and within a 30-step simulation. It runs weekly and by hand (`formal.yml`, one job per model), not in
+counterexample lay beyond any affordable Apalache bound and within a 30-step simulation. A
+model whose registry entry has a `progress` key (FORMAL-04: a liveness property Apalache cannot
+check at a useful bound, reduced to an invariant of a dedicated step) then gets a third run: its
+liveness simulation, which must hold, and the same run of its liveness control, which must report
+a violation or the stage fails. It runs weekly and by hand (`formal.yml`, one job per model), not in
 `check`. On a violation the scratch directory is kept and named, and its counterexample
 (`violation1.itf.json`) becomes a regression trace.
 

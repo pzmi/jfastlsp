@@ -9,6 +9,11 @@
 # generated traces; at least `steps`). Apalache's time grows steeply with its bound, so a model's
 # simulation reaches the interleavings its bound cannot (FORMAL-03's review). Every model declares
 # `init`, `step` and `val allInvariants`, and at least one Quint test (a `run <name>Test`).
+# Optionally `progress = { step = "<step>", invariant = "<invariant>", control = "<step>",
+# steps = <1..9999>, samples = <1..999999> }`, on one line, its keys in that order: a liveness
+# property Apalache cannot check, reduced to an invariant of a dedicated step (FORMAL-04).
+# `formal-verify` runs `samples` samples of `steps` steps of `step` after the safety simulation and
+# fails on a violation of `invariant`, then the same of `control` and fails unless it violates it.
 
 # The toolchain's own check: a counter (FORMAL-01). FORMAL-02 proves the conformance harness on it.
 [models.smoke]
@@ -24,3 +29,12 @@ file = "formal/views.qnt"
 main = "views"
 steps = 5
 sim_steps = 30
+
+# The daemon lifecycle: the lock, the socket, spawn, reconnect and overlays (FORMAL-04, plan §5.2,
+# §7.2, doc/formal-models.md, which holds the measured budget). Its driver lands with IDX-12.
+[models.daemon]
+file = "formal/daemon.qnt"
+main = "daemon"
+steps = 8
+sim_steps = 40
+progress = { step = "progressStep", invariant = "allProgress", control = "progressStepStaleBlocks", steps = 92, samples = 3000 }

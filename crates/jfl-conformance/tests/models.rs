@@ -28,8 +28,36 @@ fn registry(text: &str) -> Result<Vec<Model>, Box<dyn Error>> {
         for (name, model) in value.as_table().ok_or("models is not a table")? {
             let model = model.as_table().ok_or("a model is not a table")?;
             let keys: BTreeSet<&str> = model.keys().map(String::as_str).collect();
-            if keys != BTreeSet::from(["file", "main", "sim_steps", "steps"]) {
+            let required = BTreeSet::from(["file", "main", "sim_steps", "steps"]);
+            let optional = BTreeSet::from(["progress"]);
+            if !required.is_subset(&keys)
+                || !keys
+                    .iter()
+                    .all(|k| required.contains(k) || optional.contains(k))
+            {
                 return Err(format!("models.{name} has the keys {keys:?}").into());
+            }
+            if let Some(progress) = model.get("progress") {
+                let progress = progress.as_table().ok_or("progress is not a table")?;
+                let keys: BTreeSet<&str> = progress.keys().map(String::as_str).collect();
+                if keys != BTreeSet::from(["control", "invariant", "samples", "step", "steps"]) {
+                    return Err(format!("models.{name}.progress has the keys {keys:?}").into());
+                }
+                for key in ["step", "invariant", "control"] {
+                    progress
+                        .get(key)
+                        .and_then(toml::Value::as_str)
+                        .ok_or("a progress name is not a string")?;
+                }
+                for key in ["steps", "samples"] {
+                    let n = progress
+                        .get(key)
+                        .and_then(toml::Value::as_integer)
+                        .ok_or("a progress bound is not an integer")?;
+                    if n < 1 {
+                        return Err(format!("models.{name}.progress.{key} is {n}").into());
+                    }
+                }
             }
             let text = |k: &str| {
                 model
@@ -116,6 +144,47 @@ fn should_register_every_model_file_when_the_registry_is_read() -> TestResult {
         );
         for declared in ["action init", "action step", "val allInvariants", "Test ="] {
             assert!(source.contains(declared), "{file}: no `{declared}`");
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn should_declare_the_liveness_steps_when_a_model_has_a_progress_entry() -> TestResult {
+    // given
+    let table: toml::Table = std::fs::read_to_string(root().join("formal/models.toml"))?.parse()?;
+    let models = table
+        .get("models")
+        .and_then(toml::Value::as_table)
+        .ok_or("no models table")?;
+
+    // when
+    let live: Vec<(&String, &toml::Value)> = models
+        .iter()
+        .filter_map(|(name, model)| model.get("progress").map(|p| (name, p)))
+        .collect();
+
+    // then: the daemon model has one, and every name it gives is declared in its file
+    assert!(live.iter().any(|(name, _)| *name == "daemon"));
+    for (name, progress) in live {
+        let file = models
+            .get(name)
+            .and_then(|m| m.get("file"))
+            .and_then(toml::Value::as_str)
+            .ok_or("no file")?;
+        let source = std::fs::read_to_string(root().join(file))?;
+        let name_of = |key: &str| {
+            progress
+                .get(key)
+                .and_then(toml::Value::as_str)
+                .unwrap_or_default()
+        };
+        for declared in [
+            format!("action {} =", name_of("step")),
+            format!("val {} =", name_of("invariant")),
+            format!("action {} =", name_of("control")),
+        ] {
+            assert!(source.contains(&declared), "{file}: no `{declared}`");
         }
     }
     Ok(())

@@ -786,15 +786,28 @@ models state the design, the state-machine tests the implementation, and both ar
 
 ### 7.2 `daemon.qnt`: daemon lifecycle
 
-- **Stimuli:** proxy connect, proxy spawn (racing), daemon start, lock acquire/fail, daemon crash,
-  idle exit, SIGTERM, proxy reconnect, `didOpen`/`didClose`, connection drop.
-- **Invariants:** `AtMostOneOwner` (at most one daemon holds the lock); `ServedOnlyByOwner`;
-  `NoGhostBuffers` (every overlay belongs to a live connection of the current daemon);
-  `ShutdownReleases` (after stop, no socket and no lock remain). **Liveness** (under fairness):
-  a proxy that keeps retrying is eventually served.
+- **Stimuli:** a state directory clean or with a stale socket from a crash; proxy connect
+  (queued, refused), the spawn lock, the second check under it, spawn (racing), the notify
+  handshake and its bounded wait; daemon lock acquire/fail, unlink of a stale socket, bind,
+  accept (with the reconnecting proxy's documents and request re-sent), answer, reading a closed
+  connection's EOF, crash, idle exit (racing a connection in the backlog), SIGTERM, the
+  shutdown's unlink and release; `didOpen`/`didClose`, a request, a client quitting.
+- **Invariants:** `AtMostOneOwner` (at most one daemon holds the lock); `ServedOnlyByOwner`
+  (every accepted connection is the serving owner's); `NoGhostBuffers` (every overlay belongs to
+  a live connection of the current daemon); `ShutdownReleases` (after stop, no socket and no
+  lock remain); `OwnerReachable` (a serving owner's socket is the file at the path: the negative
+  control below breaks only this); `ReconnectRestores` (a reconnected proxy's documents and
+  unanswered request are on its connection). **Liveness** (under fairness, once faults stop):
+  a proxy that keeps retrying is eventually served (`EventuallyServed`). Apalache cannot check
+  it at a bound that reaches its counterexamples, so `formal-verify` (weekly in `formal.yml`)
+  runs a simulation of what it reduces to (no deadlock and no livelock once faults stop), from
+  the model's `progress` entry in `formal/models.toml`, and fails unless the liveness control
+  (bind without unlinking a stale socket) violates it. [`formal-models.md`](formal-models.md) holds the
+  start and shutdown orders the model fixes, IDX-12's obligations, the driver's observation and
+  the budget.
 - **Driver:** `jfl-composition`'s daemon host in-process, with real Unix sockets and lock files in
-  a tempdir; a crash is an abort of the host (IDX-12). **Negative control:** a lock released
-  before the socket is removed.
+  a tempdir; a crash is an abort of the host that closes its descriptors without the shutdown
+  (IDX-12). **Negative control:** a lock released before the socket is removed.
 
 ### 7.3 `diagnostics.qnt`: diagnostics staleness
 

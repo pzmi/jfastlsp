@@ -717,6 +717,7 @@ mod tests {
             main: "smoke".to_owned(),
             steps: 10,
             sim_steps: 25,
+            progress: None,
         }];
 
         // when

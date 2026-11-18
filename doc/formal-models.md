@@ -427,3 +427,346 @@ second cookie adds 2. **The depth guarantee rests on the simulation,** run weekl
 The registry's simulation depth is what made the review's counterexamples findable. Raise either
 number only with a measurement, while `formal.yml`'s 60-minute job stays well under its limit.
 Never trim a bound to fit (ver §12).
+
+## `daemon`: the lock, the socket, spawn, reconnect and overlays
+
+`formal/daemon.qnt` (FORMAL-04; plan §5.2, §5.3, §7.2; ADR 0016, ADR 0021). The driver is
+IDX-12's, over `jfl-composition`'s daemon host and launcher in-process, with real Unix sockets and
+lock files in a tempdir. `daemon` is pending on IDX-12 until then.
+
+### The world
+
+- **One state directory**, mode `0700` (plan §5.3: the access control; its modes and the peer-uid
+  check are IDX-12's integration tests, not the model's). In it:
+  - `daemon.lock`, the owner's lock: an flock on the file's inode. The file is created by the
+    first lock and never removed. The kernel drops an flock when the last descriptor of its open
+    file description closes, so a dead daemon never holds it.
+  - `sock`, the socket file: present or not, and which daemon bound it. A file nobody listens on
+    is stale: connecting to it fails (`ECONNREFUSED`), and binding over it fails
+    (`EADDRINUSE`). Plan §5.3's fallback path under `/tmp/jfl-<euid>/` behaves the same.
+  - `spawn.lock`, the proxies' spawn lock, another flock.
+- **Two proxies**, `p1` and `p2`: client sessions (`jfl lsp`, or a CLI call), each with its open
+  documents and at most one unanswered request.
+- **Three daemon slots**, `d1` to `d3`: processes. A slot is reused once its process is dead and
+  nothing refers to it (no socket file it bound, no connection, no proxy waiting on it).
+- **Three connection slots**, `c1` to `c3`, and two documents, `a` and `b`.
+- **The initial state** is a state directory either clean, or as a crash left it: a stale socket
+  file and the lock file (the pick `stale`).
+
+### Design decisions the model fixes
+
+1. **The owner is the daemon holding the flock on the inode `daemon.lock` names.** A pid file is
+   never trusted (ADR 0021). The lock file is never unlinked: a daemon that removed it, or broke
+   a lock it took for stale, would let a second daemon lock a new inode while the first still
+   holds the old one (control `lockBreakingStale`).
+2. **Start order: lock, unlink, bind, ready.** A daemon tries the lock first; if it is held, it
+   reports the error on the notify socket and exits 1. As owner it removes any socket file it
+   finds (stale: only the owner binds, and an owner removes its socket before it releases the
+   lock), then binds, sets `0600`, listens, and reports ready. Binding before the lock serves
+   clients from a daemon that is not the owner (control `listenBeforeLock`); not unlinking a
+   stale file makes every later bind fail (the liveness control).
+3. **Shutdown order: stop accepting, unlink, release.** On SIGTERM or an idle exit the daemon
+   closes its listener (a connection still in the backlog is reset), cancels its queries, closes
+   every connection and drops its overlays, stops its workers, removes the socket file, and only
+   then releases the lock and exits 0. Releasing first lets the next owner bind before the old
+   one's unlink, which then removes the new socket (plan §7.2's own negative control,
+   `releaseBeforeUnlink`, which only `OwnerReachable` catches).
+4. **Idle means no accepted connection.** The daemon cannot see its listener's backlog, so the
+   idle exit can race a new connection; the reset proxy reconnects, spawning if it must, and a
+   spawn that meets the stopping daemon's lock fails and is retried.
+5. **Overlays belong to connections.** They are keyed by connection and die with it: when the
+   daemon reads a closed connection's EOF, when it stops, and when it crashes. A new daemon
+   starts with none; nothing is persisted for it to restore (control `crashKeepingOverlays`).
+6. **Spawn: spawn lock, check again, spawn, handshake.** A proxy that finds no daemon takes the
+   spawn lock (another proxy holding it: wait, then connect again), checks again under it (a
+   racing proxy's daemon may listen by now), binds its notify socket, starts `jfl daemon`
+   detached in its own session, and waits with a bounded budget. Ready, an error, a dead child
+   or an expired wait all end the same way: release the spawn lock and connect again.
+7. **Reconnect re-sends.** On every new connection the proxy re-sends its open documents and
+   its client's unanswered request (or the client's retry of it, after the proxy answered the
+   lost one with a retryable error; the model does not tell the two apart). A request is never
+   silently dropped: a ready proxy's waiting client always has its request on the connection
+   (`ReconnectRestores`, control `acceptWithoutResend`).
+
+### IDX-12's obligations
+
+These are the design above as IDX-12 must build it; the driver checks each against the model.
+
+1. **The lock:** std `File::try_lock` on `<state>/daemon.lock`. Never unlink the lock file,
+   never break a held lock. After the lock is taken, and again on every idle tick, check that the
+   path still names the locked file (`stat` of the path against `fstat` of the descriptor, device
+   and inode); if not (the file or the state directory was deleted from outside), shut down: a
+   second daemon could lock a new file there.
+2. **Close-on-exec for every descriptor**, not only the lock's: the lock, the listener, every
+   accepted connection, and in the proxy the spawn lock it holds across the spawn. The only
+   descriptor a child may inherit is the notify socket the proxy hands `jfl daemon`. A worker that
+   outlives the daemon with the lock's descriptor keeps the flock held (control
+   `exitLeakingLock`); one holding an inherited listener keeps a crashed daemon's socket
+   accepting into a backlog nobody serves, which the model's crash (the kernel resets the
+   backlog) assumes cannot happen. **Workers die with the daemon:** a parent-death signal
+   (`PR_SET_PDEATHSIG`) or a watch on a pipe whose other end only the daemon holds, since ADR
+   0021's amendment leaves each worker its own process group, out of reach of a crash.
+3. **`setsid` first:** the daemon's first act, before the lock, so a signal to the launcher's
+   group can only reach a daemon that holds nothing yet (the model counts either as a crash).
+4. **The start order** of decision 2, and the error reported on the notify socket when the lock
+   is held or the bind fails.
+5. **The shutdown order** of decision 3, the unlink before the release; on SIGTERM and on the
+   idle exit alike. The idle exit counts accepted connections only.
+6. **A crash leaves the socket file and releases the lock.** The driver's crash is an abort of
+   the in-process host that closes every descriptor (the lock, the listener, the connections)
+   without running the shutdown: the socket file stays. So the host's cleanup must be explicit
+   shutdown steps, never a `Drop` that an abort would run.
+7. **Per-connection state:** overlays and requests keyed by connection, dropped when the daemon
+   reads EOF, on stop and on crash; nothing persisted across a restart.
+8. **The proxy:** the spawn lock, the second check under it, the notify handshake with a bounded
+   wait; on a refused connect, a reset backlog connection, a failed or timed-out spawn: connect
+   again. On a new connection: the version handshake, then the open documents, then the
+   unanswered request. **The proxy's waits have deadlines:** for the accept and handshake, and
+   for each reply. An expired one is a reset (close the connection, answer the client's request
+   with a retryable error, connect again), so a daemon that is alive but hung cannot hold a
+   client forever; the model's proxies wait without one (`connecting`, `ready`), as `spawnTimeout`
+   is the only deadline it models.
+9. **The driver can step the host.** Each model action is one step the driver applies: accept
+   one queued connection, answer one request, read one EOF, take one shutdown step. The host
+   needs a test hook that runs these one at a time (a manual accept loop), or the observation
+   cannot be compared after every step.
+10. **The observation is exact all the way down**, as for `views` (`deny_unknown_fields` and a
+   derived `PartialEq` on every nested type).
+
+### Not modelled
+
+- **The version handshake's mismatch** (ADR 0021: the proxy asks the old daemon to stop and
+  respawns): to the model it is a SIGTERM followed by a spawn.
+- **Socket and directory modes, the peer-uid check, the socket path's length limit** (plan
+  §5.3): IDX-12's integration tests.
+- **The socket file removed by someone else** while its daemon serves, such as a tmp cleaner
+  under `/tmp/jfl-<euid>/` (plan §5.3's fallback path) or a user's `rm`. No proxy can reach the
+  daemon then, and a spawned daemon fails the lock, so no client is served until that daemon
+  exits; it never idles out while it has connections. IDX-12 should have the daemon notice that
+  its path no longer names its socket (a stat on its idle tick, comparing the inode) and stop;
+  modelling that is a change to this model first (ADR 0007).
+- **The lock file or the state directory deleted from outside** while a daemon holds the lock:
+  a second daemon then locks a new file, and two own the directory. The model has this only as a
+  code bug (`lockBreakingStale`); obligation 1's path check makes the old daemon stop.
+- **Requests' contents, cancellation and deadlines:** one request per proxy, answered or not;
+  obligation 8's proxy deadlines are not modelled.
+- **Workers:** only through the lock-leak control.
+
+### Stimuli: the driver's actions
+
+`step` picks one of three equally likely groups, `clientStep`, `proxyStep` and `daemonStep`,
+then an enabled action in it; the faults (`faultStep`) are one branch of `daemonStep`, so they are
+rarer than the steps that recover from them. `--mbt` records the innermost action taken, so the
+groups never appear in a trace. Each parameter is a nondeterministic pick named as the parameter
+(`proxy`, `daemon`, `conn`, `doc`); a pick the action did not use is `None`.
+
+| Action | Picks | What the driver does to the real code |
+|:--|:--|:--|
+| `init`, `initClean`, `initStale` | `stale` | A fresh tempdir state directory; with `stale`, a socket file nobody listens on (bind a listener and drop it) and the lock file, unlocked. The scenario traces start from `initClean` or `initStale`, `init` with the pick fixed; the driver treats all three as `init`. |
+| `request` | `proxy` | The client asks; a ready proxy sends the request. |
+| `didOpen`, `didClose` | `proxy`, `doc` | The client opens or closes a document; a ready proxy forwards it. |
+| `quit` | `proxy` | The client session ends and a new one takes the slot: the proxy closes its connection and releases the spawn lock if it holds it. |
+| `connect` | `proxy` | The proxy connects to the socket path: queued in the backlog of a listening daemon, or refused. |
+| `takeSpawnLock` | `proxy` | The proxy tries the spawn lock; held by the other: it will connect again. |
+| `spawn` | `proxy` | Under the spawn lock, the second check: connect again if a daemon listens, else spawn a daemon in the first free slot. |
+| `handshake` | `proxy` | The notify socket answers (ready, or the error of a failed or dead daemon); the proxy releases the spawn lock. |
+| `spawnTimeout` | `proxy` | The bounded wait expires while the daemon still starts. |
+| `notice` | `proxy` | The proxy reads its connection's EOF. |
+| `lock` | `daemon` | The daemon tries the lock; held: it reports the error and exits 1. |
+| `unlinkStale` | `daemon` | The owner removes the socket file it found. |
+| `listen` | `daemon` | Bind, `0600`, listen, report ready. |
+| `accept` | `daemon`, `conn` | Accept the queued connection: the version handshake, then the re-sent documents and request. |
+| `answer` | `daemon`, `conn` | Answer the request on the connection. |
+| `reap` | `daemon`, `conn` | Read the EOF of a connection its proxy closed; drop its overlays. |
+| `sigterm`, `idleExit` | `daemon` | The shutdown's first step: stop accepting, close every connection. The idle exit only with no accepted connection. |
+| `unlink` | `daemon` | The shutdown removes the socket file. |
+| `exit` | `daemon` | The shutdown releases the lock; the daemon exits 0. |
+| `crash` | `daemon` | Abort the daemon (obligation 6). |
+
+Connection and daemon slots are taken first free in order (`d1`, `d2`, `d3`; `c1`, `c2`, `c3`), so
+an action has one outcome; the driver numbers its processes and connections the same way.
+
+### Observation: what the driver produces after every step
+
+The model has seven variables:
+
+| Variable | Type | Observed from |
+|:--|:--|:--|
+| `daemons` | slot → `{ phase, lock }` | Each slot's process: `phase` one of `none`, `started`, `locked`, `serving`, `stopping` (stopped accepting), `unlinked` (socket removed, lock held), `exited`, `failed` (exited 1: the lock was held, or a control's failed bind), `crashed`; `lock` the inode of `daemon.lock` it holds an flock on, as a number (below), or 0. |
+| `lockFile` | int | The inode at `<state>/daemon.lock`, 0 while there is none. The driver numbers inodes 1, 2, … in the order it first sees them. |
+| `sock` | `{ present, owner }` | Whether `<state>/sock` exists, and the slot whose bound socket has its inode (`""` for the initial stale file). |
+| `spawnLock` | string | The proxy holding `spawn.lock`, or `""`. |
+| `conns` | slot → `{ state, proxy, daemon, overlays, inflight }` | `state` one of `free`, `backlog` (connected, not accepted), `open`, `peerClosed` (the proxy closed it, the daemon has not read EOF), `closed` (the daemon closed it, the proxy has not noticed); the daemon's overlays (document names) and whether it holds an unanswered request. |
+| `t` | int | The steps taken since `init`: the driver's step index. It is the liveness simulation's clock (`Progress`, below), in the model because Apalache cannot read a file holding a second module that imports the first. |
+| `proxies` | proxy → `{ phase, conn, daemon, docs, want }` | `phase` one of `disconnected`, `noDaemon`, `spawning`, `awaiting`, `connecting`, `ready`; its connection slot and the daemon slot it waits on (or `""`); the client's open documents and whether the client waits for an answer. |
+
+The `released` phase appears only in the `releaseBeforeUnlink` control.
+
+### Invariants
+
+`val allInvariants` is the conjunction of these six. Apalache and the simulation check it.
+
+| Invariant | States |
+|:--|:--|
+| `AtMostOneOwner` | At most one process holds an flock on `daemon.lock`, on any inode the path ever named. |
+| `ServedOnlyByOwner` | Every connection a daemon has accepted and not closed belongs to the owner, and the owner is serving. |
+| `NoGhostBuffers` | Every overlay belongs to a live connection (open, or closed by its proxy and not yet read to EOF) of the owner, and an open connection holds only documents its proxy has open. |
+| `ShutdownReleases` | A daemon that exited holds no flock and left no socket file of its own. |
+| `OwnerReachable` | A serving owner's socket is the file at the path. |
+| `ReconnectRestores` | A ready proxy's open connection holds every document its client has open, and its client's unanswered request. |
+
+The first four are plan §7.2's. Plan §7.2's own negative control, releasing the lock before
+removing the socket, violates none of them: the old daemon has stopped serving before it
+releases, and when it exits it leaves no socket of its own, having removed the new owner's. What
+breaks is that the new owner can no longer be reached: `OwnerReachable`. `ReconnectRestores` is
+plan §5.2's reconnect promise (re-sent documents, no request silently dropped), the other half of
+"no ghost buffers": no buffer the client closed, none it still has open missing.
+
+### Liveness: `EventuallyServed`
+
+Plan §7.2: a proxy that keeps retrying is eventually served. `temporal EventuallyServed` states
+it: under weak fairness of every proxy, daemon and connection move (`fairness`), and once faults
+stop (`faultsStop`: crashes, SIGTERM, idle exits and expired waits happen finitely often), a
+client waiting for an answer eventually gets one. The clients stay free: they ask, open, close
+and quit as they like, but one waiting for an answer does not quit.
+
+**Apalache cannot check it at a useful bound.** What the property needs, and what was measured:
+
+- Apalache has no `ENABLED` and rejects Quint's `weakFair` ("Handling fairness is not supported
+  yet"). Each fairness condition is written `always(eventually(not(enabled) or action))` with the
+  action's own guard definition, which Apalache accepts (the action formula is checked on the
+  loop's transitions).
+- It cannot quantify over a temporal formula (a variable bound by `forall` outside an `always` is
+  left unassigned), so the conditions are spelled out per proxy, daemon and connection. One per
+  proxy, daemon and connection suffices (each enables at most one of its moves at a time), eight
+  in all instead of 52.
+- Its temporal pass cannot inline a fold in the model (an internal type error), so the first free
+  slot is spelled out instead of folded.
+- With all that, the check runs, but its cost rules it out: on the model without the clock `t`,
+  length 3 took 735 s and 4.5 GB, more than length 8 of the safety check (and with all 52
+  conditions spelled out singly, length 3 had not finished after 10 minutes). The liveness
+  control's counterexample, a lasso from a stale start through a spawn whose bind fails back to
+  the same state, needs length 10; length 8 of the safety check alone takes about 8 minutes.
+- Now that the model carries the clock `t`, no state repeats, so Apalache would find no lasso at
+  any bound: a temporal check of this model passes vacuously, and `formal-verify` does not run
+  one. `EventuallyServed` stays in the model as the statement of what `Progress` checks.
+
+**So `EventuallyServed` is covered by what it reduces to**, with the model's `progressStep` and
+`Progress`. Under that fairness, once faults and clients stop, a waiting client goes unserved only
+if the system can stop with it still waiting (a deadlock) or move forever without serving it (a
+livelock). A run takes 30 random steps of `step` (faults and clients included), then only system
+moves, each picked at random among the enabled ones; `Progress` fails unless, after 60 more
+steps, nothing is enabled and no client waits.
+
+It stops the clients too, which the temporal property does not. There, another client that keeps
+connecting and quitting holds at most two connection slots (one open, one awaiting its EOF,
+which the daemon reads as a fair move), so a third comes free for the waiting proxy; but while
+the other client churns, the waiting proxy's `connect` is enabled only now and then, which weak
+fairness does not force (that takes strong fairness). This starvation is an artifact of the
+model's bounded slots: the real system has no slot bound, so its `connect` is never disabled
+that way. That step of the argument is by hand.
+
+**What runs where:**
+
+- **`formal-verify daemon`** (weekly in `formal.yml`, and by hand) runs it after the safety
+  simulation, from the model's `progress` entry in `formal/models.toml`: 3000 samples of 92 steps
+  of `progressStep` keeping `allProgress`, which must find no violation; then the same of the
+  liveness control `progressStepStaleBlocks` (`listenWithoutUnlinkingStale` in place of
+  `unlinkStale` and `listen`), which must report a violation, or the stage fails. A step or an
+  invariant that does not exist fails the run (closed); `jfl-conformance`'s
+  `should_declare_the_liveness_steps_when_a_model_has_a_progress_entry` checks in every `check`
+  that the three names are declared.
+- **Every `check`** runs the Quint test `listenWithoutUnlinkingStaleNeverServesTest`, the
+  control's cycle as named actions, and xtask's `should_see_a_violation_only_when_quint_reports_one`
+  (what counts as the control's violation).
+- **By hand, once, at a larger budget:** 20000 samples at seed `0x5d` found no violation (608 s);
+  the control fails in its first samples (under 1 s). The commands:
+
+```
+quint run --backend typescript --main daemon --step progressStep --invariant allProgress \
+  --max-steps 92 --max-samples 20000 formal/daemon.qnt
+quint run --backend typescript --main daemon --step progressStepStaleBlocks --invariant Progress \
+  --max-steps 92 --max-samples 2000 formal/daemon.qnt
+```
+
+IDX-12's `proptest-state-machine` test should assert the same reduction against the host: after
+its last fault, a waiting client is served within a bounded number of steps.
+
+### Scenarios and regression traces
+
+Each scenario is a scripted step whose guards enable exactly one action in each state, from
+`initClean` or `initStale`. Each, run at six seeds from `0x1` to `0xdead`, gave one action
+sequence, and stops after its last step. Its regression trace, at seed `0x3`, is in
+`formal/traces/regression/manifest.toml`, and its test takes the same steps as named actions.
+
+| Scenario (`--step`) | Steps | What it shows |
+|:--|:--|:--|
+| `twoProxiesSpawnAtOnce` | 19 | Both proxies find no daemon. `p1` takes the spawn lock and spawns `d1`; `p2` is refused the spawn lock, connects again before `d1` listens, and when it takes the lock its second check finds `d1`, so it spawns nothing. One daemon serves both. |
+| `crashWithOpenDocuments` | 26 | `d1` crashes while `p1` has `a` open and a request in flight, and `p2`'s closed connection still holds `b` awaiting its EOF. The stale socket refuses `p1`; `p1` spawns `d2`, which unlinks the stale file and binds; `p1` re-sends `a` and its request; `d2` holds no overlay of either dead connection, and answers. |
+| `idleExitRacesConnect` | 32 | `d1`'s last connection closes; as its idle period ends, `p2` connects and sits in the backlog, and the idle exit resets it. `p2` is refused while `d1` stops, its spawned `d2` fails the lock `d1` still holds, and once `d1` has unlinked its socket and released the lock, `p2`'s next spawn (slot `d1` again) serves it. |
+| `sigtermAfterStaleStart` | 14 | From a stale start: `p1` is refused and spawns; the daemon takes the existing lock file, unlinks the stale socket and binds. SIGTERM stops it with `p1` connected: `p1` reads EOF, the daemon unlinks and releases, nothing is left, and `p1` finds no socket. |
+
+More tests without a trace: `spawnLockRefusedTest`, `idleExitWaitsForOpenConnectionsTest` (the
+idle exit is refused while a connection is open), `secondDaemonFailsTheLockTest` (a daemon spawned
+after a timed-out wait fails the lock, and its spawner's handshake reports it),
+`didCloseDropsTheOverlayTest`, and `unlinkBeforeReleaseKeepsOwnerReachableTest` (the real
+shutdown order on the control's interleaving).
+
+### Broken-model controls
+
+Each control is an action variant with a Quint test that expects its invariant to be false:
+
+| Control | Fault | Violates |
+|:--|:--|:--|
+| `lockBreakingStale` | On a held lock, unlinks `daemon.lock` and locks a new file. | `AtMostOneOwner` |
+| `listenBeforeLock` | Binds and serves before taking the lock. | `ServedOnlyByOwner` |
+| `crashKeepingOverlays` | A dead daemon's overlays survive it, for the next daemon to restore. | `NoGhostBuffers` |
+| `reapKeepingOverlays` | Reads a closed connection's EOF but keeps its overlays. | `NoGhostBuffers` |
+| `exitWithoutUnlink` | Exits from the shutdown without removing the socket. | `ShutdownReleases` |
+| `exitLeakingLock` | Exits while a surviving child holds the lock's descriptor. | `ShutdownReleases` |
+| `releaseBeforeUnlink`, `unlinkAfterRelease` | Plan §7.2's control: releases the lock, then removes the socket. | `OwnerReachable` |
+| `acceptWithoutResend` | Accepts a reconnecting proxy without its documents and request. | `ReconnectRestores` |
+| `listenWithoutUnlinkingStale` | Binds without removing a stale socket file: the bind fails. | `EventuallyServed` (`Progress`) |
+
+Plan §7.2 names IDX-12's own negative control: a host that releases the lock before removing the
+socket. It must diverge in a trace with a shutdown (`idleExitRacesConnect` and
+`sigtermAfterStaleStart` have one, and `conformance-replay`'s generated traces must include one),
+at the first step after which the model's daemon still holds its lock and the faulty host has
+released it.
+
+### Budget
+
+Measured in the sandbox: 4 CPUs, Quint 0.33.1 on the TypeScript backend, Apalache 0.62.4 on the
+Temurin JDK 21.
+
+| Check | Budget | Time |
+|:--|:--|:--|
+| `formal-test` (18 daemon tests) | every `check` | under a second |
+| `formal-freshness`: four traces regenerated | every `check` | about 2 s per trace |
+| `conformance-replay` | 10 traces of `sim_steps` (40), generated twice, every `check` | a few seconds. Read, not replayed, until IDX-12. |
+| `formal-verify daemon`: Apalache | `steps = 8` | 462 s |
+| `formal-verify daemon`: simulation | 20000 samples of `sim_steps` (40) | 194 s (170 s without the other lane running) |
+| `formal-verify daemon`: liveness and its control | 3000 samples of 92 steps, each | 89 s, then the control fails within seconds |
+| `formal-verify daemon` in all | weekly in `formal.yml` (60-minute job) | 762 s, with another lane building beside it; perhaps twice that on a CI runner |
+
+**Apalache's time grows steeply with the bound:** 24 s at length 4, 63 s at 6 and 467 s at 8;
+length 10 did not finish in 10 minutes. Length 8 covers every interleaving of a start (from a
+clean or a stale state directory, two proxies racing to connect, take the spawn lock and spawn)
+up to the first daemon's bind and the first connect; a crash and a respawn take about 20 steps
+and are the simulation's. **The depth rests on the simulation**, run weekly in `formal-verify`
+and at a fresh seed in every `conformance-replay`. Each of these witness states is found by
+`quint run --invariant 'not(<witness>)' --max-steps 30 --max-samples 20000` at seed `0x77`:
+
+| Witness (`val`) | State | Found after |
+|:--|:--|:--|
+| `witnessLockRefused` | a spawned daemon failed the lock while another owns it | under 1 s |
+| `witnessBacklogReset` | a backlog connection reset by a stopping daemon | under 1 s |
+| `witnessSecondCheck` | a proxy under the spawn lock finds a daemon listening | under 1 s |
+| `witnessStaleFromCrash` | an owner about to unlink a socket left by a crash in the run | under 1 s |
+| `witnessEofPending` | a closed connection's overlays await the daemon's read of its EOF | 1 s |
+| `witnessServingAfterShutdown` | a daemon serves after another shut down cleanly | 4 s |
+| `witnessRespawnHoldsOverlays` | a connection to a daemon started after a crash holds overlays | 15 s (4 s at 40 steps) |
+| `witnessAnsweredAfterCrash` | a client answered, documents open, after a crash | 50 s, about 9000 samples (21 s at 40 steps) |
+
+The rarest is an answer after a crash, which is why `sim_steps` is 40, not 30. Raise either
+number only with a measurement, while `formal.yml`'s 60-minute job stays well under its limit.

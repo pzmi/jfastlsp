@@ -388,6 +388,7 @@ fn should_refuse_the_manifest_when_it_and_the_directory_disagree() -> TestResult
     assert_eq!(manifest::parse(&text, &present)?, read);
     assert!(read.iter().any(|r| r.model == "smoke"));
     assert!(read.iter().any(|r| r.model == "views"));
+    assert!(read.iter().any(|r| r.model == "daemon"));
     Ok(())
 }
 
@@ -395,7 +396,12 @@ fn should_refuse_the_manifest_when_it_and_the_directory_disagree() -> TestResult
 fn should_refuse_the_registry_when_a_model_has_no_driver() -> TestResult {
     // given
     let registered = registry::models(&root())?;
-    let one_more = vec!["smoke".to_owned(), "views".to_owned(), "daemon".to_owned()];
+    let one_more = vec![
+        "smoke".to_owned(),
+        "views".to_owned(),
+        "daemon".to_owned(),
+        "diagnostics".to_owned(),
+    ];
     let unregistered = vec!["other".to_owned()];
 
     // when
@@ -415,13 +421,21 @@ fn should_refuse_the_registry_when_a_model_has_no_driver() -> TestResult {
             .map(|e| e.to_string())
             .unwrap_or_default()
     };
-    assert!(error(1).contains("daemon is registered"), "{}", error(1));
+    assert!(
+        error(1).contains("diagnostics is registered"),
+        "{}",
+        error(1)
+    );
     assert!(error(2).contains("other is registered"), "{}", error(2));
     assert!(error(2).contains("no driver"), "{}", error(2));
     assert!(error(3).contains("smoke has a driver"), "{}", error(3));
     assert!(
         registry::check(&["smoke".to_owned()]).is_err(),
         "views is pending, so registered"
+    );
+    assert!(
+        registry::check(&["smoke".to_owned(), "views".to_owned()]).is_err(),
+        "daemon is pending, so registered"
     );
     Ok(())
 }
@@ -448,8 +462,11 @@ fn should_report_a_harness_error_when_a_model_has_no_regression_trace() -> TestR
     // then
     let err = String::from_utf8_lossy(&err);
     assert_eq!(code, cli::HARNESS, "{err}");
+    // the first registered model in the harness's order is named, whichever that is
     assert!(
-        err.contains("smoke has no committed regression trace"),
+        registry::models(&root())?
+            .iter()
+            .any(|m| err.contains(&format!("{m} has no committed regression trace"))),
         "{err}"
     );
     Ok(())

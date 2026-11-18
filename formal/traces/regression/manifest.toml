@@ -88,3 +88,42 @@ step = "concurrentEditsDuringRequest"
 invariant = "allInvariants"
 max_steps = 10
 seed = "0x3"
+
+# The daemon model's scenarios (FORMAL-04, doc/formal-models.md): scripted steps like the views
+# scenarios, each from an initial state with its pick fixed (`initClean`: no socket file;
+# `initStale`: one left by a crash). Read, not replayed, until IDX-12 brings the daemon driver.
+[traces.daemon-two-proxies-spawn-at-once]
+model = "daemon"
+main = "daemon"
+init = "initClean"
+step = "twoProxiesSpawnAtOnce"
+invariant = "allInvariants"
+max_steps = 19
+seed = "0x3"
+
+[traces.daemon-crash-with-open-documents]
+model = "daemon"
+main = "daemon"
+init = "initClean"
+step = "crashWithOpenDocuments"
+invariant = "allInvariants"
+max_steps = 26
+seed = "0x3"
+
+[traces.daemon-idle-exit-races-connect]
+model = "daemon"
+main = "daemon"
+init = "initClean"
+step = "idleExitRacesConnect"
+invariant = "allInvariants"
+max_steps = 32
+seed = "0x3"
+
+[traces.daemon-sigterm-after-stale-start]
+model = "daemon"
+main = "daemon"
+init = "initStale"
+step = "sigtermAfterStaleStart"
+invariant = "allInvariants"
+max_steps = 14
+seed = "0x3"

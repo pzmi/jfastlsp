@@ -16,7 +16,8 @@
 //!   time (fnd §8 rule 5).
 //! - **`formal-verify [MODEL]`**: per model (or the one named), Apalache's bounded verification of
 //!   `allInvariants` for `steps` steps, then a Quint simulation of the same invariant ([`SAMPLES`]
-//!   samples of `sim_steps` steps, its seed printed). Apalache runs on Quint's JSON IR (`quint
+//!   samples of `sim_steps` steps, its seed printed); for a model with a `progress` entry, then
+//!   its liveness simulation and its liveness control ([`Progress`]). Apalache runs on Quint's JSON IR (`quint
 //!   compile --target json --out`, checked whole before use: Quint's stdout to a pipe is cut at
 //!   64 KiB) directly, in a scratch directory outside the repository (removed on success, kept and named on
 //!   failure, for the counterexample): `quint verify` would start Apalache as a gRPC server on a
@@ -78,10 +79,33 @@ pub(crate) struct Model {
     /// generated traces: deep enough for the model's interleavings, which Apalache's bound may
     /// not reach.
     pub(crate) sim_steps: u32,
+    /// The liveness simulation `formal-verify` runs after the safety one, if the model has one.
+    pub(crate) progress: Option<Progress>,
+}
+
+/// A model's liveness simulation (FORMAL-04, doc/formal-models.md): a temporal property Apalache
+/// cannot check at a useful bound, reduced to an invariant of a dedicated step. `formal-verify`
+/// runs `samples` samples of `steps` steps of `step` against `invariant` and requires no violation,
+/// then the same of `control` and requires a violation (a liveness check that cannot fail is
+/// caught). Pinned by `tests::should_parse_a_model_when_the_shape_holds` and
+/// `tests::should_see_a_violation_only_when_quint_reports_one`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Progress {
+    /// The step of the liveness run, e.g. `progressStep`.
+    pub(crate) step: String,
+    /// The invariant it must keep, e.g. `allProgress`.
+    pub(crate) invariant: String,
+    /// The broken step whose run must violate it.
+    pub(crate) control: String,
+    /// The run's depth (`--max-steps`).
+    pub(crate) steps: u32,
+    /// Its sample count (`--max-samples`).
+    pub(crate) samples: u32,
 }
 
 /// Parses the registry in its pinned shape: comments, blanks and `[models.<name>]` tables, each
-/// with `file`, `main`, `steps` and `sim_steps` exactly once; at least one model; no file twice.
+/// with `file`, `main`, `steps` and `sim_steps` exactly once and `progress` at most once; at least
+/// one model; no file twice.
 pub(crate) fn parse(text: &str) -> Result<Vec<Model>, String> {
     let r = |p: &str| Regex::new(p).map_err(|e| format!("{REGISTRY}: pattern {p}: {e}"));
     let blank = r(r"^[ \t]*(#.*)?$")?;
@@ -90,12 +114,13 @@ pub(crate) fn parse(text: &str) -> Result<Vec<Model>, String> {
     let main = r(r#"^main = "([A-Za-z_][A-Za-z0-9_]*)"$"#)?;
     let steps = r(r"^steps = ([1-9][0-9]{0,3})$")?;
     let sim_steps = r(r"^sim_steps = ([1-9][0-9]{0,3})$")?;
+    let progress = r(&format!("^progress = {PROGRESS}$"))?;
     let mut models: Vec<Model> = Vec::new();
-    let mut open: Option<(usize, String, [Option<String>; 4])> = None;
-    let close = |open: Option<(usize, String, [Option<String>; 4])>,
+    let mut open: Option<(usize, String, [Option<String>; 5])> = None;
+    let close = |open: Option<(usize, String, [Option<String>; 5])>,
                  models: &mut Vec<Model>|
      -> Result<(), String> {
-        let Some((at, name, [file, main, steps, sim_steps])) = open else {
+        let Some((at, name, [file, main, steps, sim_steps, liveness])) = open else {
             return Ok(());
         };
         let missing = |key: &str| format!("{REGISTRY}:{at}: models.{name} has no `{key}`");
@@ -115,6 +140,10 @@ pub(crate) fn parse(text: &str) -> Result<Vec<Model>, String> {
                 .ok_or_else(|| missing("sim_steps"))?
                 .parse()
                 .map_err(|e| format!("{REGISTRY}:{at}: models.{name}.sim_steps: {e}"))?,
+            progress: liveness
+                .map(|line| parse_progress(&line))
+                .transpose()
+                .map_err(|e| format!("{REGISTRY}:{at}: models.{name}.progress: {e}"))?,
             file,
             name,
         });
@@ -127,7 +156,7 @@ pub(crate) fn parse(text: &str) -> Result<Vec<Model>, String> {
         if let Some(caps) = header.captures(line) {
             close(open.take(), &mut models)?;
             let name = caps.get(1).map_or("", |m| m.as_str()).to_owned();
-            open = Some((number, name, [None, None, None, None]));
+            open = Some((number, name, [None, None, None, None, None]));
             continue;
         }
         let Some((_, _, fields)) = open.as_mut() else {
@@ -136,25 +165,24 @@ pub(crate) fn parse(text: &str) -> Result<Vec<Model>, String> {
             ));
         };
         let (slot, value) = if let Some(c) = file.captures(line) {
-            (0, c.get(1))
+            (0, c.get(1).map(|m| m.as_str()))
         } else if let Some(c) = main.captures(line) {
-            (1, c.get(1))
+            (1, c.get(1).map(|m| m.as_str()))
         } else if let Some(c) = steps.captures(line) {
-            (2, c.get(1))
+            (2, c.get(1).map(|m| m.as_str()))
         } else if let Some(c) = sim_steps.captures(line) {
-            (3, c.get(1))
+            (3, c.get(1).map(|m| m.as_str()))
+        } else if progress.is_match(line) {
+            (4, line.strip_prefix("progress = "))
         } else {
             return Err(format!(
-                "{REGISTRY}:{number}: outside the pinned shape (file = \"formal/<name>.qnt\", main = \"<module>\", steps = <1..9999>, sim_steps = <1..9999>): {line}"
+                "{REGISTRY}:{number}: outside the pinned shape (file = \"formal/<name>.qnt\", main = \"<module>\", steps = <1..9999>, sim_steps = <1..9999>, optionally progress = {{ step = \"<step>\", invariant = \"<invariant>\", control = \"<step>\", steps = <1..9999>, samples = <1..999999> }}): {line}"
             ));
         };
         let Some(field) = fields.get_mut(slot) else {
             return Err(format!("{REGISTRY}:{number}: no such field"));
         };
-        if field
-            .replace(value.map_or("", |m| m.as_str()).to_owned())
-            .is_some()
-        {
+        if field.replace(value.unwrap_or("").to_owned()).is_some() {
             return Err(format!("{REGISTRY}:{number}: a key twice in one table"));
         }
     }
@@ -163,6 +191,26 @@ pub(crate) fn parse(text: &str) -> Result<Vec<Model>, String> {
         return Err(format!("{REGISTRY}: no model registered"));
     }
     Ok(models)
+}
+
+/// The pinned shape of a `progress` entry's value, an inline table with its keys in this order.
+const PROGRESS: &str = r#"\{ step = "([A-Za-z_][A-Za-z0-9_]*)", invariant = "([A-Za-z_][A-Za-z0-9_]*)", control = "([A-Za-z_][A-Za-z0-9_]*)", steps = ([1-9][0-9]{0,3}), samples = ([1-9][0-9]{0,5}) \}"#;
+
+/// A `progress` entry's value, in [`PROGRESS`]'s shape.
+fn parse_progress(text: &str) -> Result<Progress, String> {
+    let shape = Regex::new(&format!("^{PROGRESS}$")).map_err(|e| e.to_string())?;
+    let caps = shape
+        .captures(text)
+        .ok_or_else(|| format!("outside the pinned shape: {text}"))?;
+    let at = |i: usize| caps.get(i).map_or("", |m| m.as_str()).to_owned();
+    let number = |i: usize| at(i).parse::<u32>().map_err(|e| e.to_string());
+    Ok(Progress {
+        step: at(1),
+        invariant: at(2),
+        control: at(3),
+        steps: number(4)?,
+        samples: number(5)?,
+    })
 }
 
 /// The registry of the working directory.
@@ -511,34 +559,107 @@ fn verify_in(context: &Context, models: &[&Model], scratch: &Path) -> i32 {
             "{stage}: {}: simulation, {SAMPLES} samples of {sim_steps} steps",
             model.name
         );
-        let simulate = Call::new(
-            "quint",
-            &[
-                "run",
-                "--backend",
-                "typescript",
-                "--main",
-                &model.main,
-                "--init",
-                INIT,
-                "--step",
-                STEP,
-                "--invariant",
-                INVARIANT,
-                "--max-steps",
-                &sim_steps,
-                "--max-samples",
-                SAMPLES,
-                &file,
-            ],
-        )
-        .in_dir(&dir);
-        let code = simulate.run(context);
+        let code = simulate(model, STEP, INVARIANT, &sim_steps, SAMPLES)
+            .in_dir(&dir)
+            .run(context);
         if code != 0 {
+            return code;
+        }
+        if let Some(progress) = &model.progress
+            && let Err(code) = liveness(context, model, progress, &dir)
+        {
             return code;
         }
     }
     0
+}
+
+/// `quint run` of `model` from `init`: `samples` samples of `steps` steps of `step`, checking
+/// `invariant`, on the TypeScript backend (its seed printed).
+fn simulate(model: &Model, step: &str, invariant: &str, steps: &str, samples: &str) -> Call {
+    let root = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let file = root.join(&model.file).to_string_lossy().into_owned();
+    Call::new(
+        "quint",
+        &[
+            "run",
+            "--backend",
+            "typescript",
+            "--main",
+            &model.main,
+            "--init",
+            INIT,
+            "--step",
+            step,
+            "--invariant",
+            invariant,
+            "--max-steps",
+            steps,
+            "--max-samples",
+            samples,
+            &file,
+        ],
+    )
+}
+
+/// The model's liveness simulation, which must hold, then its control, which must violate it:
+/// a liveness check its control cannot fail is no check. Fails closed: a run that cannot start
+/// (an unknown step or invariant) fails the first, and a control that ends without Quint's
+/// violation report fails the second.
+fn liveness(context: &Context, model: &Model, progress: &Progress, dir: &Path) -> Result<(), i32> {
+    let stage = "formal-verify";
+    let steps = progress.steps.to_string();
+    let samples = progress.samples.to_string();
+    eprintln!(
+        "{stage}: {}: liveness, {samples} samples of {steps} steps of {} keeping {}",
+        model.name, progress.step, progress.invariant
+    );
+    let code = simulate(model, &progress.step, &progress.invariant, &steps, &samples)
+        .in_dir(dir)
+        .run(context);
+    if code != 0 {
+        eprintln!(
+            "{stage}: {}: the liveness simulation failed (exit {code})",
+            model.name
+        );
+        return Err(code);
+    }
+    eprintln!(
+        "{stage}: {}: liveness control, {} must violate {}",
+        model.name, progress.control, progress.invariant
+    );
+    match simulate(
+        model,
+        &progress.control,
+        &progress.invariant,
+        &steps,
+        &samples,
+    )
+    .in_dir(dir)
+    .output(context)
+    {
+        Ok((code, out)) if code != 0 && violated(&String::from_utf8_lossy(&out)) => Ok(()),
+        Ok((code, out)) => {
+            let text = String::from_utf8_lossy(&out);
+            eprintln!(
+                "{stage}: {}: the liveness control {} did not violate {} (exit {code}):\n{text}",
+                model.name, progress.control, progress.invariant
+            );
+            Err(1)
+        }
+        Err(message) => {
+            eprintln!("{message}");
+            Err(1)
+        }
+    }
+}
+
+/// Whether Quint's run output reports an invariant violation (and not some other failure).
+/// Pinned by `tests::should_see_a_violation_only_when_quint_reports_one`.
+pub(crate) fn violated(output: &str) -> bool {
+    output
+        .lines()
+        .any(|l| l.trim_start().starts_with("[violation]"))
 }
 
 /// Whether `text` is one whole JSON value: its brackets balance (outside strings, escapes
@@ -586,6 +707,7 @@ mod tests {
     use super::*;
 
     const ONE: &str = "# c\n[models.smoke]\nfile = \"formal/smoke.qnt\"\nmain = \"smoke\"\nsteps = 10\nsim_steps = 25\n";
+    const PROGRESS_LINE: &str = "progress = { step = \"progressStep\", invariant = \"allProgress\", control = \"progressStepBroken\", steps = 92, samples = 3000 }";
 
     #[test]
     fn should_take_only_a_whole_ir_when_its_json_is_checked() {
@@ -645,8 +767,37 @@ mod tests {
                 main: "smoke".to_owned(),
                 steps: 10,
                 sim_steps: 25,
+                progress: None,
             }])
         );
+        let live = parse(&format!("{ONE}{PROGRESS_LINE}\n"));
+        assert_eq!(
+            live.map(|m| m.into_iter().next().and_then(|m| m.progress)),
+            Ok(Some(Progress {
+                step: "progressStep".to_owned(),
+                invariant: "allProgress".to_owned(),
+                control: "progressStepBroken".to_owned(),
+                steps: 92,
+                samples: 3000,
+            }))
+        );
+    }
+
+    #[test]
+    fn should_see_a_violation_only_when_quint_reports_one() {
+        // given: Quint's report of a violated invariant, of a clean run, and of an error
+        let reports = [
+            "An example execution:\n...\n[violation] Found an issue (92ms at 11 traces/second).\n",
+            "[ok] No violation found (3054ms at 98 traces/second).\n",
+            "error: [QNT404] Name 'progressStepBroken' not found\n",
+            "",
+        ];
+
+        // when
+        let verdicts = reports.map(violated);
+
+        // then
+        assert_eq!(verdicts, [true, false, false, false]);
     }
 
     #[test]
@@ -700,6 +851,22 @@ mod tests {
         let twice =
             format!("{ONE}[models.other]\nfile = \"formal/smoke.qnt\"\nmain = \"o\"\nsteps = 1\n");
         assert!(parse(&twice).is_err_and(|e| e.contains("repeats")));
+        let progress_refusals = [
+            PROGRESS_LINE.replace("control = \"progressStepBroken\", ", ""),
+            PROGRESS_LINE.replace("samples = 3000", "samples = 0"),
+            PROGRESS_LINE.replace("steps = 92, samples", "samples = 3000, steps"),
+        ];
+        for line in &progress_refusals {
+            assert!(
+                parse(&format!("{ONE}{line}\n"))
+                    .is_err_and(|e| e.contains("outside the pinned shape")),
+                "{line}"
+            );
+        }
+        assert!(
+            parse(&format!("{ONE}{PROGRESS_LINE}\n{PROGRESS_LINE}\n"))
+                .is_err_and(|e| e.contains("twice"))
+        );
     }
 
     #[test]
