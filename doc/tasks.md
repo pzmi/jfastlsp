@@ -1464,11 +1464,43 @@ but follow in lane CLI (M2). Starts after the go decision.
 - **Reuse considered:** the `git` CLI (ADR 0024); `gix` (linked-worktree gap) and `git2` (C build)
   rejected for now.
 - **Accept:**
-  - [ ] contract suite green for fake and adapter; a broken fake fails it
-  - [ ] integration tests: a path in a nested linked worktree resolves to it, not the parent; checkout, stash, reset and commit each change the stat and the changed-file set
-  - [ ] the spawn cost per command measured on the fixtures and the small bench corpus, recorded in the commit body (and an amendment of ADR 0024 if it changes the decision)
-  - [ ] runs on the bench corpus (small at least, `just bench`) and reports the metrics it affects; its correctness tests also run against the real-corpus cases that apply (BENCH-05)
+  - [x] contract suite green for fake and adapter; a broken fake fails it (`jfl_testkit::contracts::repo_probe`, 20 cases against `FakeRepoProbe` and, in `crates/jfl-adapter-git/tests/contract.rs`, real `git`; seven broken implementations each fail exactly their cases)
+  - [x] integration tests: a path in a nested linked worktree resolves to it, not the parent; checkout, stash, reset and commit each change the stat and the changed-file set (`tests/worktrees.rs`, `tests/stat_set.rs`; staging moves the stat only)
+  - [x] the spawn cost per command measured on the fixtures and the small bench corpus, recorded in the commit body (and an amendment of ADR 0024 if it changes the decision): `just bench-git SIZE`, numbers in `doc/bench/README.md`; they do not change the decision (ADR 0024 amended 2026-11-18 for the configuration it reads, not the numbers)
+  - [x] runs on the bench corpus (small at least, `just bench`) and reports the metrics it affects; its correctness tests also run against the real-corpus cases that apply (BENCH-05): BENCH-05 has no cases yet, so `just bench-git SIZE` first checks that `tracked_java` of the corpus checkout is exactly `git ls-files '*.java'`, that a tracked file resolves to the checkout and that a status leaves the stat set unmoved (small and medium agree)
 - **Impact:** dependency graph.
+- **Decided (IDX-05):** the stat set is `$GIT_DIR/HEAD`, each loose ref a symbolic `HEAD` leads to
+  (a commit or `reset --soft` moves only the branch's ref), the common directory's `packed-refs`
+  and `$GIT_DIR/index`; absent files are recorded as absent. Each file is stat'ed before it is read,
+  and only one stat calls regular is opened. A reftable repository is refused
+  (`ReftableUnsupported`) until a pinned git lets a test pin its set. `StatRecord` carries device, inode,
+  size, mtime and ctime with nanoseconds, and `settled_before` is the racy-mtime rule.
+- **Decided (IDX-05):** the directory walk to the innermost root is redone on every call (one
+  `lstat` per level, about 20 µs on the corpus, crossing filesystem boundaries); only Git's
+  confirmation of a root is cached per root, keyed by a `.git` directory's (or a linked
+  directory's) device, inode and `config` stat (never its times, which every `git add` moves) or a
+  `.git` file's whole stat. Before any spawn, a `.git` that Git could not open (no regular `HEAD`,
+  a missing gitdir, a FIFO, a dangling link) is refused, re-checked by stat on every request. A
+  refusal the repository's structure decides is cached; a deadline or a failed or killed `git` is
+  retried on the 1st, 2nd, 4th, 8th, … request after it (at most every 1024), with no clock. A directory holding a `.git` entry of any type, links not followed, is a nested root:
+  `jfl_application::source_tree::nested_root`, the one rule the fs walk and resolution share. A cached directory prefix would miss a `git init`
+  or `git worktree add` inside it, which no hint announces (ADR 0017, amended 2026-11-18).
+- **Decided (IDX-05):** `git` runs with no system or user configuration, ignore or attributes
+  file, `GIT_OPTIONAL_LOCKS=0`, `GIT_NO_REPLACE_OBJECTS=1`, and no command the repository's
+  configuration names (`core.fsmonitor`, hooks, every filter driver turned off before `diff` and
+  `status`, external diff, textconv, lazy fetch, bare-repository discovery); `jfl-adapter-git`'s
+  `cli` module lists each (ADR 0024, amended 2026-11-18). A user's global `safe.directory` no
+  longer applies.
+- **Left to IDX-09 (IDX-05):** take `snapshot` before `changed_since` (the port doc says why); read
+  the wall clock before `snapshot` and compare with `GitSnapshot::settled_before` (on NFS or SMB,
+  cover the server's clock skew or treat the files as never settled); pass the last `head_tree` back as the base; treat
+  `ChangedFiles::everything`, an error or `unrepresentable > 0` as a rescan; union the listing with
+  `tracked_java`. `status` with optional locks off cannot refresh a racy index, so it rehashes those
+  entries on each call; `--untracked-files=all` is three quarters of its cost on medium (39 ms
+  against 10 ms with `no`): if the watcher's hints and the listing are trusted for untracked files,
+  a parameter can drop it. The `repo_probe` fake cannot yet be told to fail with an I/O error as ver
+  §5 asks: add that when the views driver needs it. A reftable repository is refused today; IDX-09
+  or IDX-15 lifts the refusal once a pinned git (≥ 2.45) lets a test pin the stacks' `tables.list`.
 
 #### IDX-06: FS adapter: scanning, nested-worktree exclusion, watcher hints
 - **Depends on:** IDX-01. **Model:** standard. **Size:** M. **Parallel with:** IDX-03, IDX-05.
@@ -1632,6 +1664,13 @@ but follow in lane CLI (M2). Starts after the go decision.
     that follows the watch, not by a hint.
   - The union of the listing with the repository's tracked files (IDX-06's card), skipped
     build-output directories included.
+- **Obligations from the git adapter (IDX-05 and its review):** take `RepoProbe::snapshot` before
+  `changed_since`; apply `settled_before` with a wall-clock reading taken before the snapshot
+  (network filesystems: cover server clock skew, or never settled); rescan on
+  `ChangedFiles::everything`, an error or `unrepresentable > 0`; union the listing with
+  `tracked_java`. A reftable repository is refused (`ReftableUnsupported`) until a pinned git lets
+  a test pin its stat set (here or IDX-15). The `repo_probe` fake cannot yet be told to fail with
+  an I/O error (ver §5): add it with the views driver.
 - **Impact:** none (internal); model conformance.
 
 #### IDX-10: Queries: `sym`, `def`, `hover`

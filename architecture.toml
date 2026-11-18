@@ -138,6 +138,11 @@ jfl-application = { thiserror = ["default"] }
 # script reviewed in deny.toml. notify's event-loop thread is notify's own, started and stopped with
 # a watch: the crate holds no `spawn` grant and starts no thread itself (fnd §2.4).
 jfl-adapter-fs = { ignore = ["default"], libc = [], notify = ["default"] }
+# jfl-adapter-git (IDX-05, ADR 0024): no Git crate; libc only for the O_NONBLOCK flag when the hot path
+# reads HEAD and loose refs, so a FIFO planted in a Git directory never blocks a request (as
+# jfl-adapter-fs does); no default features, in the graph already, its build script reviewed in
+# deny.toml.
+jfl-adapter-git = { libc = [] }
 
 jfl-bench = { blake3 = ["default"], ignore = ["default"], rayon = ["default"], serde = ["default", "derive"], serde_json = ["default"], toml = ["default"], tree-sitter = ["default"], tree-sitter-java-orchard = ["default"] }
 
@@ -162,6 +167,10 @@ jfl-adapter-lsp = { divan = ["help"], proptest = ["std"] }
 # jfl-adapter-fs (IDX-06): divan for the in-process walk benchmark (`just bench-fs`), with the same
 # features as jfl-domain's, for the same reasons.
 jfl-adapter-fs = { divan = ["help"] }
+# jfl-adapter-git (IDX-05): proptest for the parsers of git's output on arbitrary bytes (ver §8) and
+# divan for the per-call benchmark (`just bench-git`), with the same features as jfl-domain's, for
+# the same reasons.
+jfl-adapter-git = { divan = ["help"], proptest = ["std"] }
 
 [external.build]
 

@@ -4,7 +4,7 @@ Date: 2026-11-16
 
 ## Status
 
-Accepted (owner, 2026-11-17).
+Accepted (owner, 2026-11-17); amended 2026-11-18 (IDX-05).
 
 ## Context
 
@@ -26,3 +26,15 @@ directories holding a `.git` file or directory are skipped, and `.claude/worktre
 `workspace/symbol` returns one copy per symbol; a request from a nested worktree is answered from
 it. `NoCrossView` in `views.qnt`, the nested-worktree fixture and the 10-worktree e2e test of
 IDX-15 pin it.
+
+## Amended 2026-11-18 (IDX-05): the root is cached, the walk to it is not
+
+"Cached per directory prefix" is narrowed to "confirmed once per root". `jfl-adapter-git` walks up
+from a request's directory with one `stat` per level on every call and caches only Git's
+confirmation of a root (`rev-parse`, keyed by the `.git` entry's identity). The reason: a
+`git init` or `git worktree add` inside a directory that was already resolved makes it a new
+innermost root, and nothing announces it (the watcher leaves `.git` paths out of its hints), so a
+cached directory-to-root answer would keep binding its requests to the parent, which skips the new
+worktree when it scans. The walk costs about 20 µs a request on the medium corpus (`just bench-git`).
+Pinned by `crates/jfl-adapter-git/tests/worktrees.rs::should_resolve_to_a_new_nested_repository_when_it_appears_after_a_resolve`;
+plan §4.1 says the same.

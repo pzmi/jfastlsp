@@ -256,6 +256,20 @@ bench-fs corpus="small" cold="warm": _preflight
     { printf '%s\n%s\n' {{quote(cold)}} "$root"; git -C "$root" ls-files -z -- '*.java'; } \
       | {{cargo}} bench --locked -p jfl-adapter-fs --bench walk
 
+# jfl-adapter-git's cost per call in process (IDX-05, divan): `resolve` cold and cached, the stat
+# set alone, and each `git` command of the reconcile path (`rev-parse`, `diff --name-only` between
+# two pinned trees 100 files apart, `status -z`, `ls-files -z`) on the pinned corpus's checkout
+# (its path and `git ls-files` on stdin, so the benchmark first checks the adapter's tracked files
+# against Git's). The corpus is only read: the second tree is made in a shared clone under cargo's
+# scratch directory. Reports, never gates. `just bench-git small`, `just bench-git medium`.
+bench-git corpus="small": _preflight
+    #!/usr/bin/env bash
+    set -euo pipefail
+    bash scripts/bench-corpus.sh fetch {{quote(corpus)}}
+    root="$(bash scripts/bench-corpus.sh path {{quote(corpus)}})"
+    { printf '%s\n' "$root"; git -C "$root" ls-files -z -- '*.java'; } \
+      | {{cargo}} bench --locked -p jfl-adapter-git --bench probe
+
 # Every tool of tools/versions.toml on the stages' PATH at its pinned version (xtask's cache first,
 # then mise's install directories), and versions.toml agreeing with mise.toml and mise.lock;
 # fails naming each missing or wrong tool and the fix (XT-02, fnd §8).

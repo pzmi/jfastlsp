@@ -29,8 +29,8 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 use ignore::{DirEntry, ParallelVisitor, ParallelVisitorBuilder, WalkBuilder, WalkState};
 use jfl_application::source_tree::{
-    BUILD_FILES, Exclusion, GitEntry, ListMode, ListedFile, Listing, Skipped, Unlisted,
-    UnlistedReason, exclusion, is_git_metadata,
+    BUILD_FILES, Exclusion, GitEntry, GitMarker, ListMode, ListedFile, Listing, Skipped, Unlisted,
+    UnlistedReason, exclusion, is_git_metadata, nested_root,
 };
 use jfl_domain::RelPath;
 
@@ -87,13 +87,14 @@ fn relative(root: &Path, path: &Path) -> Result<RelPath, UnlistedReason> {
     })
 }
 
+/// `jfl_application::source_tree::nested_root` on what `lstat` finds at `dir/.git`: any entry,
+/// links not followed (the same rule `jfl-adapter-git`'s root resolution applies).
 fn git_entry(dir: &Path) -> Option<GitEntry> {
-    let meta = fs::symlink_metadata(dir.join(".git")).ok()?;
-    Some(if meta.is_dir() {
-        GitEntry::Dir
-    } else {
-        GitEntry::File
-    })
+    let found = fs::symlink_metadata(dir.join(".git")).ok().map(|meta| {
+        let kind = meta.file_type();
+        GitMarker::of(kind.is_dir(), kind.is_file(), kind.is_symlink())
+    });
+    nested_root(found)
 }
 
 fn has_build_file(dir: &Path) -> bool {

@@ -406,6 +406,49 @@ pub enum GitEntry {
     Dir,
 }
 
+/// What `lstat` found at `<dir>/.git`, symbolic links not followed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum GitMarker {
+    /// A directory.
+    Dir,
+    /// A regular file.
+    File,
+    /// A symbolic link, dangling or not.
+    Symlink,
+    /// Anything else: a FIFO, a socket, a device.
+    Other,
+}
+
+impl GitMarker {
+    /// The marker for an entry of this type (from `std::fs::FileType`, which this crate may not
+    /// name).
+    #[must_use]
+    pub fn of(is_dir: bool, is_file: bool, is_symlink: bool) -> Self {
+        match (is_dir, is_file, is_symlink) {
+            (true, _, _) => Self::Dir,
+            (_, true, _) => Self::File,
+            (_, _, true) => Self::Symlink,
+            _ => Self::Other,
+        }
+    }
+}
+
+/// Whether a directory holding `found` at `.git` is a nested root, and of which kind: **any**
+/// entry counts, whatever its type and wherever a link points (plan §4.2). The one rule the
+/// listing (`jfl-adapter-fs`, which skips such a directory) and root resolution
+/// (`jfl-adapter-git`, which binds a request below it to it, never to the parent) share, so a file
+/// a view never lists is never answered from that view. A directory is a repository; anything else
+/// a linked worktree (or a broken one, which resolution refuses).
+///
+/// Pinned by: `source_tree::tests::should_call_any_git_entry_a_nested_root_when_one_is_found`.
+#[must_use]
+pub fn nested_root(found: Option<GitMarker>) -> Option<GitEntry> {
+    found.map(|marker| match marker {
+        GitMarker::Dir => GitEntry::Dir,
+        GitMarker::File | GitMarker::Symlink | GitMarker::Other => GitEntry::File,
+    })
+}
+
 /// The rule for one directory below the root (never the root itself): `None` to walk into it.
 ///
 /// `parent` is its parent's name (`None` when the parent is the root, whose name is not part of
@@ -516,6 +559,33 @@ mod tests {
                 Some(Exclusion::NestedRepository),
                 Some(Exclusion::BuildOutput),
                 Some(Exclusion::BuildOutput),
+            ]
+        );
+    }
+
+    #[test]
+    fn should_call_any_git_entry_a_nested_root_when_one_is_found() {
+        // given
+        let found = [
+            None,
+            Some(GitMarker::of(true, false, false)),
+            Some(GitMarker::of(false, true, false)),
+            Some(GitMarker::of(false, false, true)),
+            Some(GitMarker::of(false, false, false)),
+        ];
+
+        // when
+        let roots = found.map(nested_root);
+
+        // then
+        assert_eq!(
+            roots,
+            [
+                None,
+                Some(GitEntry::Dir),
+                Some(GitEntry::File),
+                Some(GitEntry::File),
+                Some(GitEntry::File)
             ]
         );
     }

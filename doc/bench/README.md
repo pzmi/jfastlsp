@@ -247,6 +247,29 @@ For comparison, `e1`'s serial walk (`list_ms`, hidden directories skipped) took 
 medium and 54–71 ms on lombok, and the `incremental` suite's `reopen/proxy/walk_ms` 58 ms
 (medium) and 71 ms (lombok).
 
+### The git adapter (IDX-05, `just bench-git`)
+
+`jfl-adapter-git`'s calls, measured 2026-11-18 on the 4-vCPU VM above (divan medians, the `bench`
+profile). Each command runs through `jfl-process` with the adapter's hardening. Before anything is
+timed, the adapter's tracked `.java` files must equal `git ls-files '*.java'`, a tracked file must
+resolve to the checkout, and a status must leave the stat set unmoved. The diff compares two pinned
+trees 100 files apart, made in a shared clone under cargo's scratch directory. The corpus
+checkouts are detached, so their stat set is `HEAD` and the index.
+
+| Corpus (files) | Stat set | Resolve, cached | Resolve, first | `rev-parse` | `diff --name-only` | `ls-files -z` | `status -z` | `changed_since` |
+|:--|--:|--:|--:|--:|--:|--:|--:|--:|
+| synthetic (2,000, an agent worktree) | 6.7 µs | 25 µs | 1.62 ms | 1.64 ms | 2.10 ms | 2.36 ms | 10.7 ms | 13.7 ms |
+| small, junit-framework (1,813) | 2.9 µs | 19 µs | 1.97 ms | 1.72 ms | 2.18 ms | 3.13 ms | 10.9 ms | 14.3 ms |
+| medium, spring-framework (9,294) | 3.1 µs | 23 µs | 1.76 ms | 1.83 ms | 2.97 ms | 9.30 ms | 40.9 ms | 44.0 ms |
+
+`changed_since` is `rev-parse`, the `git config` listing of filter drivers (about 1.7 ms, so they
+can be turned off) and `status`; the base is `HEAD`'s tree, so there is no diff. These are the
+numbers after the IDX-05 review.
+Measured by hand on medium, `--untracked-files=no` instead of `all` takes `status` from 30–40 ms to
+10 ms. With `GIT_OPTIONAL_LOCKS=0`, `status` cannot refresh an index whose entries are racy, so it
+rehashes them on every call: on the freshly made synthetic repository that is all of its 10 ms,
+and it drops below 5 ms once a plain `git status` has refreshed the index.
+
 ## Adding a suite
 
 1. A `suites/<name>.toml` with `name`, `description`, `kind` and the knobs of its kind

@@ -335,9 +335,10 @@ real worktrees produce (likely 1 to 3). Whether semantic diagnostics ship in v1 
 ### 4.1 Binding per URI
 
 Each request's file resolves to the innermost enclosing worktree root (the directory holding a
-`.git` file or directory, confirmed once with the repository probe and cached per directory
-prefix). One connection never implies one view: a subagent's request may name another worktree's
-file. A **view** is the daemon's state for one worktree root (ADR 0017).
+`.git` file or directory, confirmed once with the repository probe and cached per root; the walk
+up to it is a `stat` per directory, redone per request so that a worktree or repository created
+inside a resolved directory is seen at once). One connection never implies one view: a subagent's
+request may name another worktree's file. A **view** is the daemon's state for one worktree root (ADR 0017).
 
 ### 4.2 Nested worktrees
 

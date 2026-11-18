@@ -133,3 +133,39 @@ fn should_skip_a_linked_worktree_when_it_sits_outside_claude_worktrees() {
         [("nested/wt", Exclusion::NestedWorktree)]
     );
 }
+
+#[test]
+fn should_skip_a_directory_when_its_git_entry_is_a_dangling_link_or_a_fifo() {
+    // given
+    let scratch = Scratch::new("oddgit");
+    let main = checkout(&scratch, &[]).unwrap();
+    write(&main, "dangling/D.java", b"class D {}").unwrap();
+    write(&main, "fifo/F.java", b"class F {}").unwrap();
+    std::os::unix::fs::symlink("/nonexistent/gitdir", main.join("dangling/.git")).unwrap();
+    jfl_testkit::fixtures::fifo(&main.join("fifo/.git")).unwrap();
+
+    // when
+    let listing = list(&main).unwrap();
+
+    // then
+    let listed: Vec<&str> = listing.files.iter().map(|f| f.path.as_str()).collect();
+    assert!(
+        !listed
+            .iter()
+            .any(|p| p.starts_with("dangling/") || p.starts_with("fifo/")),
+        "{listed:?}"
+    );
+    let skipped: Vec<(&str, Exclusion)> = listing
+        .skipped
+        .iter()
+        .map(|s| (s.path.as_str(), s.why))
+        .collect();
+    assert!(
+        skipped.contains(&("dangling", Exclusion::NestedWorktree)),
+        "{skipped:?}"
+    );
+    assert!(
+        skipped.contains(&("fifo", Exclusion::NestedWorktree)),
+        "{skipped:?}"
+    );
+}

@@ -652,9 +652,13 @@ dependencies = [
 name = "jfl-adapter-git"
 version = "0.1.0"
 dependencies = [
+ "divan",
  "jfl-application",
  "jfl-domain",
  "jfl-process",
+ "jfl-testkit",
+ "libc",
+ "proptest",
 ]
 
 [[package]]

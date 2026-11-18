@@ -13,6 +13,18 @@ description = "`RepoProbe` over the `git` CLI: worktree roots, common directory,
 jfl-domain = { path = "../jfl-domain" }
 jfl-application = { path = "../jfl-application" }
 jfl-process = { path = "../jfl-process" }
+libc = { version = "0.2.191", default-features = false }
+
+[dev-dependencies]
+divan = { version = "0.1.21", default-features = false, features = ["help"] }
+jfl-testkit = { path = "../jfl-testkit" }
+proptest = { version = "1.12.0", default-features = false, features = ["std"] }
 
 [lints]
 workspace = true
+
+# The hot path and each `git` command of the reconcile path, on a synthetic repository or the
+# bench corpus (`just bench-git SIZE`); reports, never gates.
+[[bench]]
+name = "probe"
+harness = false
