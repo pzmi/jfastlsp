@@ -41,6 +41,7 @@ CLI carrier), **SEM-07** (M4),
 | FND-11 | Remove the private-names hashes and check | FND-04, XT-02 | standard | S |  | EVAL lane |
 | FND-12 | Delete the jdtls proxy; keep stock jdtls as a bench arm | FND-11, BENCH-03 | standard | M |  | EVAL lane |
 | FND-13 | Make CI green again on main | XT-02 | standard | M |  | FORMAL-05 |
+| FND-14 | Keep the queue-full reason when hints fold into a pending rescan | FND-13 | standard | S |  | — |
 | XT-01 | Scaffold `tools/xtask` and port the gate composition | FND-08, FND-09 | deep | M |  | FND-10, EVAL lane |
 | XT-02 | Tool pins: `tools/versions.toml`, `cargo xtask doctor`, `install-tools` | XT-01 | standard | M |  | EVAL lane |
 | XT-03 | Security and workflow stages into xtask | XT-02 | standard | M |  | EVAL lane |
@@ -529,6 +530,23 @@ foundation piece by piece (ADR 0035).
   - [ ] `just check` green; every `ci.yml` job, `macos` included, green on the landed commit
 - **Impact:** CI (two jobs gain the toolchain step; one lockstep rule); tests (macOS portability);
   `jfl-adapter-fs` (the recursive watch reports an unreadable directory).
+
+#### FND-14: Keep the queue-full reason when hints fold into a pending rescan
+- **Depends on:** FND-13. **Model:** standard. **Size:** S. **Parallel with:** none.
+- **Cites:** plan §4.3; fnd §4.4 rule 5; ver §5.
+- The last red `macos` case after FND-13: `watch_reports_queue_full` saw one rescan with only
+  `Unnamed` and 34 paths dropped. FSEvents' event on the root made the rescan first; every path
+  after it folded into that rescan, so the queue never filled and `QueueFull` was never raised,
+  though far more paths changed than the queue holds (IDX-06). The queue now counts the distinct
+  paths that fold into a waiting rescan as it would have held them, and more than its capacity
+  adds `QueueFull`. Every other reason already folded into a waiting rescan (`State::rescan`
+  inserts it); a test now pins each order.
+- **Reuse considered:** none needed: a fix.
+- **Accept:**
+  - [ ] `hints::tests::should_add_queue_full_when_more_paths_than_the_queue_holds_fold_into_a_pending_rescan` fails before the fix and passes after; paths that fit, or repeat, add nothing (`should_not_add_queue_full_when_paths_that_fold_into_a_pending_rescan_fit_the_queue`)
+  - [ ] every reason survives a later one (`should_keep_every_reason_when_any_reason_folds_into_a_pending_rescan`)
+  - [ ] `just check` green; the `macos` job green on the landed commit
+- **Impact:** `jfl-application` (the hint queue's reasons).
 
 ### Lane XT: port mayfly's `xtask`, piece by piece
 

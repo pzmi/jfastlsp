@@ -6,7 +6,10 @@
 //! delaying the first hint. The queue holds at most its capacity of paths: past it, the paths are
 //! dropped, counted, and replaced by one [`Hint::Rescan`], so an overflow of the queue is always
 //! reported and memory stays bounded (fnd §4.4 rule 5). A waiting rescan keeps every reason it was
-//! asked for, so a lost watch never hides behind a full queue. When the watch's backend stops, the
+//! asked for, so a lost watch never hides behind a full queue; and the paths that fold into it are
+//! counted as the queue would have held them, so more distinct paths than its capacity add
+//! [`RescanReason::QueueFull`] whichever reason the rescan was waiting for (FND-14: FSEvents'
+//! event on the root made the rescan first, and a burst behind it hid the overflow). When the watch's backend stops, the
 //! sink closes the queue: one last rescan ([`RescanReason::WatchEnded`]), then `next()` resolves to
 //! `None` instead of waiting for ever.
 //!
@@ -33,6 +36,9 @@ struct State {
     order: VecDeque<RelPath>,
     waiting: HashSet<RelPath>,
     rescan: Option<Rescan>,
+    /// The distinct paths folded into the waiting rescan, while it lacks `QueueFull`: at most
+    /// `capacity`, since one more is the overflow, which adds `QueueFull` and clears them.
+    folded: HashSet<RelPath>,
     capacity: usize,
     waker: Option<Waker>,
     closed: bool,
@@ -51,7 +57,13 @@ impl State {
         }
         let dropped = dropped.saturating_add(u64::try_from(self.order.len()).unwrap_or(u64::MAX));
         self.order.clear();
-        self.waiting.clear();
+        if reason == RescanReason::QueueFull {
+            self.waiting.clear();
+            self.folded.clear();
+        } else {
+            let waiting = std::mem::take(&mut self.waiting);
+            self.folded.extend(waiting);
+        }
         self.rescan = Some(match self.rescan {
             Some(mut pending) => {
                 pending.reasons.insert(reason);
@@ -66,8 +78,26 @@ impl State {
         self.wake();
     }
 
+    /// A path changed while a rescan waits: counted in it, and once more distinct paths than the
+    /// queue holds have folded into it, the queue would have overflowed (`QueueFull`).
+    fn fold(&mut self, path: RelPath) {
+        let Some(rescan) = self.rescan.as_mut() else {
+            return;
+        };
+        rescan.dropped = rescan.dropped.saturating_add(1);
+        if rescan.reasons.contains(RescanReason::QueueFull) {
+            return;
+        }
+        self.folded.insert(path);
+        if self.folded.len() > self.capacity {
+            rescan.reasons.insert(RescanReason::QueueFull);
+            self.folded.clear();
+        }
+    }
+
     fn take(&mut self) -> Option<Hint> {
         if let Some(rescan) = self.rescan.take() {
+            self.folded.clear();
             return Some(Hint::Rescan(rescan));
         }
         let path = self.order.pop_front()?;
@@ -97,14 +127,16 @@ pub struct HintQueue(Arc<Shared>);
 
 /// A queue holding at most `capacity` paths (at least one).
 ///
-/// Pinned by: `hints::tests::should_report_one_rescan_when_the_queue_overflows` and
-/// `hints::tests::should_queue_a_path_once_when_it_changes_twice`.
+/// Pinned by: `hints::tests::should_report_one_rescan_when_the_queue_overflows`,
+/// `hints::tests::should_queue_a_path_once_when_it_changes_twice` and
+/// `hints::tests::should_add_queue_full_when_more_paths_than_the_queue_holds_fold_into_a_pending_rescan`.
 #[must_use]
 pub fn hint_queue(capacity: usize) -> (HintSink, HintQueue) {
     let shared = Arc::new(Shared(Mutex::new(State {
         order: VecDeque::new(),
         waiting: HashSet::new(),
         rescan: None,
+        folded: HashSet::new(),
         capacity: capacity.max(1),
         waker: None,
         closed: false,
@@ -120,8 +152,8 @@ impl HintSink {
         if state.closed {
             return;
         }
-        if let Some(rescan) = state.rescan.as_mut() {
-            rescan.dropped = rescan.dropped.saturating_add(1);
+        if state.rescan.is_some() {
+            state.fold(path);
             return;
         }
         if state.waiting.contains(&path) {
@@ -268,6 +300,94 @@ mod tests {
         assert!(rescan.reasons.degrade_the_watch());
         assert_eq!(rescan.dropped, 3);
         assert_eq!(queue.try_next(), None);
+    }
+
+    #[test]
+    fn should_add_queue_full_when_more_paths_than_the_queue_holds_fold_into_a_pending_rescan() {
+        // given: a rescan already waits for another reason (FSEvents' event on the root itself)
+        let (sink, mut queue) = hint_queue(2);
+        sink.rescan(RescanReason::Unnamed);
+
+        // when: more distinct paths change than the queue holds
+        for name in ["A.java", "B.java", "C.java"] {
+            sink.changed(rel(name));
+        }
+
+        // then
+        let mut reasons = RescanReasons::of(RescanReason::Unnamed);
+        reasons.insert(RescanReason::QueueFull);
+        assert_eq!(
+            queue.try_next(),
+            Some(Hint::Rescan(Rescan {
+                reasons,
+                dropped: 3,
+            }))
+        );
+        assert_eq!(queue.try_next(), None);
+    }
+
+    #[test]
+    fn should_not_add_queue_full_when_paths_that_fold_into_a_pending_rescan_fit_the_queue() {
+        // given
+        let (sink, mut queue) = hint_queue(2);
+        sink.changed(rel("A.java"));
+        sink.rescan(RescanReason::Unnamed);
+
+        // when: one path more, and a path already counted changing again
+        sink.changed(rel("B.java"));
+        sink.changed(rel("A.java"));
+
+        // then
+        assert_eq!(
+            queue.try_next(),
+            Some(Hint::Rescan(Rescan {
+                reasons: RescanReasons::of(RescanReason::Unnamed),
+                dropped: 3,
+            }))
+        );
+    }
+
+    #[test]
+    fn should_keep_every_reason_when_any_reason_folds_into_a_pending_rescan() {
+        let reasons = [
+            RescanReason::QueueFull,
+            RescanReason::WatcherOverflow,
+            RescanReason::Unnamed,
+            RescanReason::WatcherError(WatchErrorKind::Io),
+        ];
+        for first in reasons {
+            for second in [
+                RescanReason::WatcherOverflow,
+                RescanReason::Unnamed,
+                RescanReason::WatcherError(WatchErrorKind::Io),
+                RescanReason::WatchEnded,
+            ] {
+                // given: a rescan waits for `first` (QueueFull by an overflow of a queue of one)
+                let (sink, mut queue) = hint_queue(1);
+                if first == RescanReason::QueueFull {
+                    sink.changed(rel("A.java"));
+                    sink.changed(rel("B.java"));
+                } else {
+                    sink.rescan(first);
+                }
+
+                // when
+                if second == RescanReason::WatchEnded {
+                    sink.close();
+                } else {
+                    sink.rescan(second);
+                }
+
+                // then
+                let Some(Hint::Rescan(rescan)) = queue.try_next() else {
+                    panic!("no rescan after {first:?} then {second:?}");
+                };
+                assert!(
+                    rescan.reasons.contains(first) && rescan.reasons.contains(second),
+                    "{first:?} then {second:?}: {rescan:?}"
+                );
+            }
+        }
     }
 
     #[test]
