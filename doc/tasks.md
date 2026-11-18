@@ -1034,10 +1034,34 @@ before LSP-04.
   reverse order; a crash mid-compile; close while a compile runs. Broken-model control: publish
   every result as it arrives. Regression traces, registered; `doc/formal-models.md` section.
   This task is the FORMAL checkpoint: the review covers all three models and the harness.
+- **As built (FORMAL-05):** `formal/diagnostics.qnt` with two documents, `a` reading `b` (a
+  dependency's change makes `a` stale at an unchanged version), a disk the server sees late, open
+  sessions whose versions restart at 1, Claude Code's Edit (disk write and `didChange`) and an
+  agent's shell edit, one javac worker of three job slots whose replies come in any order, with
+  crash (running jobs lost, written replies still read), restart and timeout, and the client's
+  last `publishDiagnostics` per document. Results are keyed by (session, input epoch), never by
+  the LSP version alone; disk content newer than the overlay is published without a version.
+  The card's three invariants, stated on the input epoch within an open session, plus
+  `FreshAfterEdit` (plan §3.2's "pending": diagnostics arriving after an edit are for it or newer,
+  what Claude Code relies on); liveness `EventuallyUpToDate` as a `progress` simulation. Seven
+  scenarios, the card's three plus `dependencyEditMakesStale`, `diskWinsOverOverlay`,
+  `timeoutLateReply` and (round 2) `createdFileMakesStale`; eight controls, at least one per invariant, the card's
+  `deliverEveryResult` among them, and a liveness control; witnesses for every interleaving the
+  simulation must reach. LSP-04's obligations are in `doc/formal-models.md`; `diagnostics` is
+  pending on LSP-04.
+  - **Review round (FIX FIRST, one MEDIUM):** javac's inputs are dynamic: "cannot find symbol
+    `C`" followed by creating `C.java` changed nothing the coordinator tracked, so the stale error
+    stayed current. The model adds a file `c` that `a` reads only while it exists (a negative
+    lookup), the scenario `createdFileMakesStale`, the control `noticeDiskTrackingReads`, and
+    `FreshAfterEdit` now also compares the published inputs with the current ones; LSP-04 gains
+    the obligation to record what javac actually read (files with hashes, negative lookups, class
+    folders, classpath and `EnvironmentKey`). The LOWs: `didOpen` takes its version as a pick (a
+    proxy re-sends at the client's version, never renumbered), unversioned diagnostics' ranges,
+    the E0 dependency on Claude Code's `didOpen`, and `jfl diag`'s stat and cookie first.
 - **Accept:**
-  - [ ] typecheck, tests and simulation green; the control violates `NeverOlderOverNewer`
-  - [ ] regression traces committed and fresh
-  - [ ] `doc/formal-models.md` covers the three models with their drivers' tasks (IDX-09, IDX-12, LSP-04)
+  - [x] typecheck, tests and simulation green; the control violates `NeverOlderOverNewer`
+  - [x] regression traces committed and fresh
+  - [x] `doc/formal-models.md` covers the three models with their drivers' tasks (IDX-09, IDX-12, LSP-04)
 - **Impact:** none (model).
 
 ### Lane EVAL: phase 0, measure before building
@@ -1907,6 +1931,26 @@ plugin; LSP-06 is M1's gate and makes the bench gate blocking.
   published or pending version, publication through the proxy as `publishDiagnostics` with
   `version`; close publishes an empty set and nothing after. Model first: the `diagnostics`
   conformance driver with the testkit's scripted compiler; negative control: publish every result.
+- **From FORMAL-05:** the driver's obligations are `doc/formal-models.md`'s "LSP-04's
+  obligations" (the diagnostics section): results keyed by (document, open session, input
+  epoch), the epoch bumped on every change of any input of the compile (a dependency's text
+  included) and on every `didOpen`, never ordered by the LSP version; publish only a reply for
+  the current epoch in the current session, after every such reply; the version tag of the text
+  compiled, none when the disk has overtaken the overlay; close publishes an empty set and drops
+  later replies; a crash re-queues what it lost and a timeout re-queues its document; the compile
+  reads every input's winning text, overlays included, and the scripted compiler echoes inputs,
+  session, epoch and incarnation; one publication is one epoch's whole set (a change for SEM-05's
+  javac results beside the syntax ones goes through the model first); a coordinator the driver can
+  step one action at a time. Each job records what javac actually read: the source files with
+  content hashes, the negative lookups (package directories listed), the class folders, the
+  classpath and `EnvironmentKey`; a change to any of them bumps the epoch, and the worker reads
+  sources through a file manager the daemon controls, or records hashes, so a disk change between
+  the server's read and javac's is detected. A document re-sent after a daemon restart keeps the
+  client's version (never renumbered); `jfl diag` takes the views per-request stat and cookie
+  before it waits. "Only open documents get diagnostics" depends on Claude Code sending `didOpen`
+  for the files it edits, unverified until E0 (plan §9.2). The `proptest-state-machine` test also checks `EventuallyUpToDate`'s
+  reduction: once edits and faults stop, every open document is up to date within a bounded
+  number of steps.
 - **Reuse considered:** none fits: the version-tagged publication rule is ours and modelled (ADR
   0007).
 - **Accept:**

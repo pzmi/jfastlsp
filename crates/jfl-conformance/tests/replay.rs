@@ -389,6 +389,7 @@ fn should_refuse_the_manifest_when_it_and_the_directory_disagree() -> TestResult
     assert!(read.iter().any(|r| r.model == "smoke"));
     assert!(read.iter().any(|r| r.model == "views"));
     assert!(read.iter().any(|r| r.model == "daemon"));
+    assert!(read.iter().any(|r| r.model == "diagnostics"));
     Ok(())
 }
 
@@ -401,6 +402,7 @@ fn should_refuse_the_registry_when_a_model_has_no_driver() -> TestResult {
         "views".to_owned(),
         "daemon".to_owned(),
         "diagnostics".to_owned(),
+        "unmodelled".to_owned(),
     ];
     let unregistered = vec!["other".to_owned()];
 
@@ -422,7 +424,7 @@ fn should_refuse_the_registry_when_a_model_has_no_driver() -> TestResult {
             .unwrap_or_default()
     };
     assert!(
-        error(1).contains("diagnostics is registered"),
+        error(1).contains("unmodelled is registered"),
         "{}",
         error(1)
     );
@@ -436,6 +438,10 @@ fn should_refuse_the_registry_when_a_model_has_no_driver() -> TestResult {
     assert!(
         registry::check(&["smoke".to_owned(), "views".to_owned()]).is_err(),
         "daemon is pending, so registered"
+    );
+    assert!(
+        registry::check(&["smoke".to_owned(), "views".to_owned(), "daemon".to_owned()]).is_err(),
+        "diagnostics is pending, so registered"
     );
     Ok(())
 }

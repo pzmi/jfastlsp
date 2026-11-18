@@ -38,3 +38,13 @@ main = "daemon"
 steps = 8
 sim_steps = 40
 progress = { step = "progressStep", invariant = "allProgress", control = "progressStepStaleBlocks", steps = 92, samples = 3000 }
+
+# Diagnostics staleness: versions, input epochs, sessions, out-of-order replies, worker crashes
+# and timeouts, close (FORMAL-05, plan §3.2, §7.3, doc/formal-models.md, which holds the measured
+# budget). Its driver lands with LSP-04.
+[models.diagnostics]
+file = "formal/diagnostics.qnt"
+main = "diagnostics"
+steps = 7
+sim_steps = 40
+progress = { step = "progressStep", invariant = "allProgress", control = "progressStepForgetting", steps = 62, samples = 3000 }

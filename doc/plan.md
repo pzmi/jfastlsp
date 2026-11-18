@@ -307,9 +307,15 @@ SEM-04's ADR.
 An edit (a `didChange`, or a disk change seen by the freshness stat) triggers a compile. Results
 are published as `publishDiagnostics` tagged with the document version they were computed for.
 A result for an older version than the newest published or pending one is dropped; a result is
-never published over a newer one. The request path never waits on the JVM: diagnostics are push,
-not request. `jfl diag` waits for the current version's result with a deadline. Modelled in
-`formal/diagnostics.qnt` (§7.3).
+never published over a newer one. A document's diagnostics also depend on the files its compile
+reads, so results are ordered by an input epoch per document, bumped on every change of any of
+its inputs (every file javac read, and every name it looked up and did not find: a file created
+later is a change) and on every `didOpen` (a client may number a reopened document from 1 again), never
+by the LSP version alone; every change makes a compile pending at once, so only a result for the
+current inputs is published. Diagnostics of disk content newer than the client's overlay carry no
+version; only open documents get diagnostics, and a close publishes an empty set. The request
+path never waits on the JVM: diagnostics are push, not request. `jfl diag` waits for the current
+version's result with a deadline. Modelled in `formal/diagnostics.qnt` (§7.3).
 
 ### 3.3 Annotation processors
 
@@ -811,11 +817,23 @@ models state the design, the state-machine tests the implementation, and both ar
 
 ### 7.3 `diagnostics.qnt`: diagnostics staleness
 
-- **Stimuli:** document change (version + 1), compile start, compile result (in any order),
-  worker crash and restart, document close.
-- **Invariants:** `NeverOlderOverNewer` (the published version per document never decreases and
-  is never older than a version already published); `PublishedMatchesVersion` (published
-  diagnostics were computed for the version they carry); `ClosedPublishesNothing`.
+- **Stimuli:** document open (a new session, version 1), change (version + 1), Claude Code's
+  Edit (a disk write and the same text as the next version), an agent's disk write and the
+  server seeing it later, close; for a document `a` that reads `b`, every change of `b`, and a
+  file `c` that `a` reads only while it exists, created and deleted;
+  compile start, compile result (in any order), worker crash (its running jobs lost, replies it
+  wrote still read), restart and timeout.
+- **Invariants:** `NeverOlderOverNewer` (within an open session, the published version and input
+  epoch per document never decrease and are never older than one already published);
+  `PublishedMatchesVersion` (published diagnostics were computed for the version they carry:
+  exactly the text the client sent as it); `ClosedPublishesNothing`; `FreshAfterEdit`
+  (diagnostics published after a change of the inputs were computed for the current inputs:
+  §3.2's "pending" rule, what a client reading after its edit relies on). **Liveness** (once
+  edits and faults stop): an open document's diagnostics become those of its current inputs
+  (`EventuallyUpToDate`), checked by the `Progress` simulation `formal-verify` runs, with a
+  crash that forgets its lost compiles as the control. [`formal-models.md`](formal-models.md)
+  holds the design the model fixes, LSP-04's obligations, the driver's observation and the
+  budget.
 - **Driver:** `jfl-application`'s diagnostics coordinator with the testkit's scripted compiler,
   which completes jobs in the order the trace says (LSP-04). **Negative control:** publishing
   every result as it arrives.

@@ -16,6 +16,15 @@ pending in `crates/jfl-conformance/src/registry.rs`, with the task that brings t
 task must have an open card in `doc/tasks.md`, and the `conformance-replay` stage warns about the
 model.
 
+| Model | What it fixes | Model task | Driver task, over |
+|:--|:--|:--|:--|
+| [`views`](#views-views-generations-freshness-and-completeness) | generations, freshness, completeness | FORMAL-03 | IDX-09, `jfl-application`'s view registry |
+| [`daemon`](#daemon-the-lock-the-socket-spawn-reconnect-and-overlays) | the single owner, spawn, reconnect, overlays | FORMAL-04 | IDX-12, `jfl-composition`'s daemon host and launcher |
+| [`diagnostics`](#diagnostics-versions-epochs-and-publication) | which compile results are published, and with which version | FORMAL-05 | LSP-04, `jfl-application`'s diagnostics coordinator |
+
+Each driver task's card names its section here; the section's obligations are what the driver's
+review checks.
+
 ## `views`: views, generations, freshness and completeness
 
 `formal/views.qnt` (FORMAL-03; plan §4, §7.1, §2.1; ADR 0014, ADR 0017, ADR 0037). The driver
@@ -521,7 +530,8 @@ These are the design above as IDX-12 must build it; the driver checks each again
 8. **The proxy:** the spawn lock, the second check under it, the notify handshake with a bounded
    wait; on a refused connect, a reset backlog connection, a failed or timed-out spawn: connect
    again. On a new connection: the version handshake, then the open documents, then the
-   unanswered request. **The proxy's waits have deadlines:** for the accept and handshake, and
+   unanswered request. A re-sent document keeps the client's LSP version and text, never
+   renumbered (the `diagnostics` model's obligation 11). **The proxy's waits have deadlines:** for the accept and handshake, and
    for each reply. An expired one is a reset (close the connection, answer the client's request
    with a retryable error, connect again), so a daemon that is alive but hung cannot hold a
    client forever; the model's proxies wait without one (`connecting`, `ready`), as `spawnTimeout`
@@ -770,3 +780,344 @@ and at a fresh seed in every `conformance-replay`. Each of these witness states 
 
 The rarest is an answer after a crash, which is why `sim_steps` is 40, not 30. Raise either
 number only with a measurement, while `formal.yml`'s 60-minute job stays well under its limit.
+
+## `diagnostics`: versions, epochs and publication
+
+`formal/diagnostics.qnt` (FORMAL-05; plan §3.1, §3.2, §3.4, §7.3; ADR 0007, ADR 0036). The
+driver is LSP-04's, over `jfl-application`'s diagnostics coordinator with the testkit's scripted
+compiler and worker, a scripted disk, and a scripted LSP client that records every
+`textDocument/publishDiagnostics`. `diagnostics` is pending on LSP-04 until then.
+
+### The world
+
+- **Three files** of one worktree and one `EnvironmentKey`. `a` imports `b`, so `a`'s compile
+  reads `b`'s text (javac's `-sourcepath`, plan §3.1); `b`'s reads only its own. `a` also names a
+  class `C` in its package: `a`'s compile reads `c` while `c` exists and fails "cannot find
+  symbol" while it does not, so the **absence** of `c` is an input too (a negative lookup). The
+  client opens `a` and `b`; `c` is only created, written and deleted on disk, by an agent.
+- **Texts.** Every change of a text, a disk write or an editor change, takes the next number, so a
+  larger number is a newer text; 0 is an absent file. On disk at the start: `a` is 1, `b` is 2,
+  `c` is absent.
+- **The disk and what the server has seen of it.** An agent's shell edit, a formatter or a `git
+  checkout` writes the disk; the server learns of it later, through its watcher or the freshness
+  stat (plan §3.2, §4.3), as `noticeDisk`.
+- **A client** (an editor, or Claude Code) opens, changes and closes documents. Each open is a new
+  session. Its version is a pick, 1 to 3: a client may number every open from 1 again, and a
+  proxy that re-sends a document to a restarted daemon (plan §5.2) sends the client's current
+  version.
+- **One javac worker** (ADR 0036), spawned lazily, with incarnations: it crashes, times out and
+  restarts. It runs up to three jobs at once and finishes them in any order. It stands for a
+  worker pool and for the syntax pass beside javac, whose replies interleave.
+- **What the client shows** of each document: the last `publishDiagnostics` it received.
+
+Bounds: texts up to 14, versions up to 6 (a `didOpen` at 1, 2 or 3), three open sessions per
+document, three worker incarnations, three job slots. An action that would pass a bound is disabled.
+
+### Design decisions the model fixes
+
+1. **Results are ordered by input epoch, not by LSP version.**
+   - A document's diagnostics depend on its own text and on the texts its compile reads. A
+     change to `b` makes `a`'s diagnostics stale, though `a`'s version did not move: two replies
+     for `a` at one version, one of which read `b`'s older text.
+   - So each document has an **epoch**, bumped whenever any of its inputs changes: its own text
+     (a `didChange`, a seen disk write), the text it reads of a dependency (the dependency's
+     `didChange`, its seen disk write, its `didOpen` or `didClose` when that changes which text
+     wins), and every `didOpen` of the document. A compile records the epoch it read.
+   - **Inputs are dynamic.** javac's inputs are what it read, and also what it looked up and did
+     not find: creating `c` after `a` failed to find `C` must make `a` pending, though no file
+     `a`'s compile read has changed. A coordinator that tracks only the files read leaves "cannot
+     find symbol `C`" published as current (the FORMAL-05 review's counterexample).
+   - Pinned by `NeverOlderOverNewer` and `FreshAfterEdit`, the scenarios
+     `dependencyEditMakesStale` and `createdFileMakesStale`, and the controls `deliverByVersion`
+     and `noticeDiskTrackingReads`.
+2. **Open sessions.** Epochs never restart, so a reply computed in an earlier session never
+   matches a later one, even when the reopened document is at version 1 again with other text.
+   A re-sent document keeps the client's version (`reopenAtTheClientVersionTest`): renumbering
+   it would tag every publication with a version the client never sent for that text. Pinned by
+   `PublishedMatchesVersion`, the scenario `closeDuringCompile` and the control
+   `deliverByVersion`'s reopen test.
+3. **Every change makes a compile pending at once,** so plan §3.2's rule (drop a result older than
+   the newest published or pending one) publishes a reply only when it was computed for the
+   document's current epoch in its current session. A client then never receives, after an
+   edit, diagnostics of the text it replaced. Pinned by `FreshAfterEdit` and the control
+   `deliverNotOlderThanPublished` (the rule read without "pending").
+4. **The newer text wins, disk or overlay** (plan §2.5). An open document's overlay is compiled
+   while it is not older than the disk the server has seen. When the disk has overtaken it, the
+   disk's text is compiled and published **without a version** (LSP's field is optional): it is
+   no text the client sent. Pinned by `PublishedMatchesVersion`, the scenario
+   `diskWinsOverOverlay` and the control `startJobTaggingClientVersion`.
+5. **A compile reads every input's winning text,** overlays included: `b`'s overlay while `b` is
+   open and its overlay is newer, else `b`'s seen disk. Closing `b` with an unsaved change makes
+   `a` stale (`closingAnUnsavedDependencyTest`).
+6. **Only open documents get diagnostics.** A close publishes an empty set at once, and nothing
+   follows it until the next `didOpen`: replies still running are dropped. A disk write to a
+   closed document makes stale only the open documents that read it
+   (`closedDocumentGetsNothingTest`). Pinned by `ClosedPublishesNothing` and the controls
+   `deliverIgnoringClose` and `didCloseWithoutClear`.
+7. **A crash** loses the running jobs; a reply the worker wrote before it died is still read, and
+   is published or dropped by the same rule. Every document whose current compile was lost is
+   compiled again, on a worker spawned when a compile is pending (plan §3.4). Pinned by
+   `EventuallyUpToDate` and its control `crashForgetting`.
+8. **A timeout** compiles the document again and leaves the late job running; its reply is
+   treated like any other (the scenario `timeoutLateReply`). Killing a hung worker is a crash.
+9. **Nothing waits on the worker** (plan §3.2, ADR 0015): the coordinator's moves never block on
+   a reply. Cancelling a superseded job is allowed and not required: it only removes a reply the
+   rule would drop.
+
+### What Claude Code sees
+
+Claude Code reads pushed diagnostics after every edit. `FreshAfterEdit` is what it relies on:
+diagnostics that arrive after an edit were computed for that edit or a newer one, whether or not
+the client checks `version`. Until the first publication after its edit, a client still shows
+the previous diagnostics, tagged with their own version; how long Claude Code waits for one is
+E0's measurement ("diagnostics wait time", plan §9.2), and `jfl diag` waits for the current
+version with a deadline (plan §3.2). An edit made only on disk (a shell edit) is seen by the
+server when its watcher or stat sees it; until then nothing is stale to the server, which is the
+views model's freshness, not this one's.
+
+Diagnostics without a version (decision 4) have ranges into the disk's text, which an editor's
+buffer may not hold: harmless for Claude Code, which reads the file again, but an editor would
+misplace them. LSP-04's goldens pin those ranges.
+
+"Only open documents get diagnostics" assumes Claude Code sends `didOpen` for the files it
+edits. That is E0's open question (plan §9.2, §15); if it does not, Claude Code gets no
+diagnostics at all, and the rule changes here first.
+
+### LSP-04's obligations
+
+These are the design above as LSP-04 must build it; the driver checks each against the model.
+
+1. **The key is (document, open session, input epoch).** The epoch is bumped on every change of
+   any input of the document's compile (decision 1) and on every `didOpen`. Never order or accept
+   results by the LSP version.
+2. **Each job records what javac actually read, and a change to any of it bumps the epoch:**
+   - the source files read, with content hashes;
+   - the negative lookups: the package directories listed (sources and class folders) for names
+     it searched, so a file created or deleted there is a change; a coarser rule, any create or
+     delete under a searched package directory, is acceptable;
+   - the class folders of earlier builds it read (plan §3.1), as a change of any of them;
+   - the classpath and the `EnvironmentKey`.
+
+   The worker reads sources through a file manager the daemon controls (the view's pinned
+   generation and the overlays) or records the hash of every file it read, so a disk change
+   between the server's read and javac's is detected, never compiled unseen. The record comes
+   from javac itself (a `JavaFileManager` wrapper, or a `TaskListener`), not from the imports.
+3. **The publication rule:** a reply is published only when its document is open, in the same
+   session, at the same epoch; otherwise it is dropped. Publish after every such reply, even when
+   the diagnostics did not change: a client waits for a publication after its edit.
+4. **The version tag:** the client's version whose text the compile read; none when the disk had
+   overtaken the overlay.
+5. **Close:** publish an empty set at once; drop every later reply for that session.
+6. **A crash** re-queues every document whose current compile it lost, and a pending compile
+   spawns the worker (with the backoff of plan §3.4). **A timeout** re-queues the document.
+7. **The compile reads the winning text of every input,** overlays included, and the job records
+   what it read; the scripted compiler echoes the inputs, the session, the epoch and the worker
+   incarnation in the diagnostics it returns, so the client's observation decodes them.
+8. **One publication is one epoch's whole set.** `publishDiagnostics` replaces a document's
+   diagnostics, so when syntax diagnostics (LSP-04) and javac's (SEM-05) are combined, a
+   publication combines results of one epoch only. Publishing them separately, or merging across
+   epochs, changes this model first (ADR 0007).
+9. **The driver can step the coordinator,** one model action at a time: start a job, read one
+   reply, see one disk write.
+10. **The observation is exact all the way down**, as for `views` (`deny_unknown_fields` and a
+    derived `PartialEq` on every nested type).
+11. **A re-sent document is never renumbered.** When a proxy re-sends its open documents to a
+    restarted daemon (IDX-12), each keeps the client's version and text; the new daemon takes it
+    as a `didOpen` at that version, and the client keeps the dead daemon's diagnostics until the
+    new one publishes.
+12. **`jfl diag` takes the views per-request stat and cookie first** (ADR 0037): of its file and
+    of HEAD, so a shell edit the watcher has not delivered yet is pending before it waits for the
+    current version's diagnostics with its deadline.
+
+### Not modelled
+
+- **Time:** deadlines, the worker's backoff and idle eviction, the pool's LRU cap (plan §7.4:
+  component tests), debouncing (a pending compile may wait any number of steps), `jfl diag`'s wait.
+- **Several environments and workers:** one worker whose replies come in any order stands for
+  them.
+- **Dynamic inputs beyond one negative lookup.** The model has one file that comes and goes
+  (`c`). Not modelled, and covered by obligation 2: class folders a Gradle build rewrites,
+  classpath and `EnvironmentKey` changes (a build-file edit), files created in other searched
+  packages, generated sources, a dependency set that changes with the edit itself (a new
+  import), and the gap between the server's read of a file and javac's.
+- **The diagnostics' content.** A result is identified by the inputs it was computed from;
+  positions and UTF-16 ranges are LSP-04's golden tests.
+- **Annotation-processor suppression** (plan §3.3), and diagnostics of closed files (none are
+  published; publishing them changes this model first).
+- **How the server sees the disk:** `noticeDisk` stands for the view registry's watcher and stat
+  (the `views` model); a dependency outside the worktree (a library) does not change.
+
+### Stimuli: the driver's actions
+
+`step` picks one of three equally likely groups, `clientStep`, `coordinatorStep` and `workerStep`
+(faults, `faultStep`, are one branch of `workerStep`), then an enabled action in it. Each
+parameter is a nondeterministic pick named as the parameter (`doc`, `job`); a pick the action did
+not use is `None`.
+
+| Action | Picks | What the driver does to the real code |
+|:--|:--|:--|
+| `init` | none | A fresh coordinator over a scripted disk holding `a` at text 1 and `b` at 2, and no `c`; `a` reads `b`, and `c` while it exists; all closed; no worker. |
+| `didOpen` | `doc`, `version` | The client (or a proxy re-sending it) opens `a` or `b` with the disk's text, at `version`. |
+| `didChange` | `doc` | The client sends the next version with a new text the disk does not have. |
+| `toolEdit` | `doc` | Claude Code's Edit: the disk is written, then the same text is sent as the next version. |
+| `diskWrite` | `doc` | The scripted disk is written (for `c`, perhaps created), and the coordinator is not told. |
+| `diskDelete` | `doc` | The scripted disk deletes `c`, and the coordinator is not told. |
+| `didClose` | `doc` | The client closes the document. |
+| `noticeDisk` | `doc` | The coordinator is told the file's disk text (its watcher or stat); `doc` may be `c`. |
+| `startJob` | `doc` | The coordinator sends the document's pending compile to the worker, in the first free slot (`j1`, `j2`, `j3`). |
+| `deliver` | `job` | The coordinator reads the job's reply. |
+| `complete` | `job` | The scripted worker finishes the job and writes its reply. |
+| `restart` | none | The coordinator spawns the worker (lazily, or after a crash). |
+| `crash` | none | The scripted worker dies; its running jobs are lost. |
+| `timeout` | `job` | The job's deadline passes. |
+
+Jobs take the first free slot, so an action has one outcome; the driver numbers its jobs the
+same way.
+
+### Observation: what the driver produces after every step
+
+The model has eleven variables:
+
+| Variable | Type | Observed from |
+|:--|:--|:--|
+| `disk` | file → int | The scripted disk's texts, 0 for an absent file. |
+| `seenC` | int | The text of `c` the coordinator has seen, 0 while it has seen none (a separate number, not a third document: a third entry in every map made Apalache several times slower per step). |
+| `docs` | doc → `{ open, session, version, overlay, seenDisk, epoch, dirty }` | The coordinator, per document: open or not, its open count, the client's latest version and its text, the disk text it has seen, its epoch, and whether a compile is pending. |
+| `worker` | `{ up, inc, lost }` | The scripted worker: up or not, its incarnation, and the running jobs its crashes lost. |
+| `jobs` | slot → `{ state, doc, session, version, epoch, inputs, inc, late }` | Each job: `free`, `running` or `done` (its reply written, not read); what it was started for; `inputs` the texts it read (`{ a, b, c }`, 0 for a text it does not read or a file it did not find); the incarnation; whether it timed out. |
+| `client` | doc → `{ kind, version, session, epoch, inputs, inc }` | The scripted client's last notification per document: `none`, `cleared` (an empty set) or `diags`; its `version` (-1 for none); the rest decoded from the diagnostics the scripted compiler wrote. |
+| `high` | doc → `{ epoch, version }` | Ghost: the highest epoch and version published before the latest in the current session (-1: none). The driver keeps them. |
+| `sinceEdit` | doc → bool | Ghost: a publication arrived after the latest change of the document's inputs. |
+| `sent` | set of `{ doc, session, version, text }` | Ghost: every text the client sent. |
+| `nextText` | int | The scripted disk's and client's next text number. |
+| `t` | int | The driver's step index (the scenarios' and the liveness simulation's clock). |
+
+### Invariants
+
+`val allInvariants` is the conjunction of these four. Apalache and the simulation check it.
+
+| Invariant | States |
+|:--|:--|
+| `NeverOlderOverNewer` | Within an open session, each publication's epoch and version are at least those of every earlier publication of the document. |
+| `PublishedMatchesVersion` | A publication that carries version `v` was computed from exactly the text the client sent as `v` in the document's current session. One without a version is not checked against the client's texts (decision 4 makes it disk content). |
+| `ClosedPublishesNothing` | A closed document shows the empty set its close published (or nothing, never opened). |
+| `FreshAfterEdit` | Diagnostics published after a change of an open document's inputs were computed for its current inputs: its current epoch in its current session, and the texts every input has now (so an input the epoch failed to track, such as a created file, is caught). |
+
+The first three are plan §7.3's, stated on what the diagnostics were computed for: plan §7.3's
+"version" is the input epoch, since the LSP version does not name a dependency's text (decision
+1), and "never decreases" holds within an open session, since a client may number a reopened
+document from 1 again (decision 2). `FreshAfterEdit` is plan §3.2's "older than the newest
+pending" with every change pending at once (decision 3); `NeverOlderOverNewer` alone admits
+diagnostics of a superseded text published after the edit that superseded it.
+
+### Liveness: `EventuallyUpToDate`
+
+Plan §3.2 and §3.4: a document whose edits stop eventually shows diagnostics of its current
+inputs, through crashes and timeouts. Once the client, the agent and the faults stop, and under
+weak fairness of the coordinator's and the worker's moves, that fails only by a deadlock (a lost
+compile never started again) or a livelock. As for `daemon`, the model's `progressStep` takes 30
+random steps of `step` (faults and clients included), then only system moves (`noticeDisk`,
+`startJob`, `complete`, `deliver`, `restart`), each picked at random among the enabled ones;
+`Progress` fails unless, 30 moves later, nothing is enabled and every open document is up to
+date. `formal-verify diagnostics` runs it from the `progress` entry in `formal/models.toml`
+(3000 samples of 62 steps of `progressStep` keeping `allProgress`), then the same of the
+liveness control `progressStepForgetting` (a crash that does not re-queue what it lost), which
+must report a violation. Every `check` runs the control's Quint test,
+`crashForgettingNeverUpdatesTest`.
+
+### Scenarios and regression traces
+
+Each scenario is a scripted step whose branches are guarded by the step count `t`, so exactly one
+action is enabled in each state. Each, run at seeds `0x1`, `0x3` and `0xdead`, gave one action
+sequence. Its regression trace, at seed `0x3`, is in
+`formal/traces/regression/manifest.toml`, and its test takes the same steps as named actions.
+
+| Scenario (`--step`) | Steps | What it shows |
+|:--|:--|:--|
+| `twoQuickEditsReverseOrder` | 13 | Three versions compiled; the newest reply arrives first and is published, the two older ones after it and are dropped. |
+| `crashMidCompile` | 13 | A crash loses version 2's compile; the restarted worker compiles it again; a reply the dead worker wrote for version 1 is read after the crash and dropped; the Edit tool's disk write, seen last, changes nothing. |
+| `closeDuringCompile` | 15 | A close while a compile runs publishes an empty set and drops the reply; reopened twice at version 1 with the same text, session 2's reply is dropped and session 3's published. |
+| `dependencyEditMakesStale` | 10 | An agent rewrites `b` on disk while `a` is open at version 1; `a`'s two replies, both at version 1, arrive in reverse order, and only the one that read the new `b` is published. |
+| `diskWinsOverOverlay` | 16 | An unsaved change, then an agent's disk write the server sees: the disk wins, its diagnostics carry no version, and the overlay's older reply is dropped; Claude Code's Edit then sends version 3 with the disk's text. |
+| `timeoutLateReply` | 9 | A compile times out and is compiled again; both replies, the late one last, are for the current inputs and both are published. |
+| `createdFileMakesStale` | 10 | `a` is published while `c` is absent ("cannot find symbol `C`"); an agent creates `c`; once the server sees it, `a` is pending though no file it read changed, and its next diagnostics read `c`. The FORMAL-05 review's counterexample, with the fix. |
+
+More tests without a trace: `deletedFileMakesStaleTest`, `reopenAtTheClientVersionTest`,
+`closedDocumentGetsNothingTest`, `dependencyOverlayIsReadTest`
+(an unsaved change of `b` is what `a` reads), `closingAnUnsavedDependencyTest`,
+`newerOverlayWinsTest` (an overlay newer than a seen disk write wins) and `reopenReadsTheDiskTest`
+(a document reopened after an unseen disk write is compiled from what the client read).
+
+### Broken-model controls
+
+Each control is an action variant with a Quint test that expects its invariant to be false:
+
+| Control | Fault | Violates |
+|:--|:--|:--|
+| `deliverEveryResult` | Plan §7.3's control: publishes every reply as it arrives. | `NeverOlderOverNewer` |
+| `deliverByVersion` | Accepts a reply at the document's current LSP version: a dependency's change does not move it, and a reopened document starts at 1 again. Two tests: the dependency case and the reopen case. | `NeverOlderOverNewer`, `PublishedMatchesVersion` |
+| `deliverIgnoringClose` | Forgets the close: a reply of the last epoch is published after it. | `ClosedPublishesNothing` |
+| `didCloseWithoutClear` | Closes without publishing the empty set. | `ClosedPublishesNothing` |
+| `deliverNotOlderThanPublished` | Plan §3.2's rule without "pending": accepts a reply not older than the published one, though a newer compile is pending. Its test shows the other invariants hold. | `FreshAfterEdit` |
+| `startJobTaggingClientVersion` | Tags a compile of disk content with the client's version. | `PublishedMatchesVersion` |
+| `noticeDiskTrackingReads` | Tracks only the files a compile read: creating a file it looked up and did not find changes nothing tracked, and "cannot find symbol" stays current. Its test shows the other invariants hold. | `FreshAfterEdit` |
+| `crashForgetting` | A crash that does not re-queue the compiles it lost. | `EventuallyUpToDate` (`Progress`) |
+
+Each control is also found by random simulation, with its fault in place of the correct action
+in `step` (20000 samples of 40 steps at seed `0x77`, a scratch module importing the model): every
+one within 3 s; `deliverNotOlderThanPublished` breaks neither `NeverOlderOverNewer` nor
+`PublishedMatchesVersion` in 20000 samples.
+
+Plan §7.3 names LSP-04's own negative control: a coordinator that publishes every reply as it
+arrives. It must diverge at the `deliver` of an older reply after a newer one was published:
+step 12 of `twoQuickEditsReverseOrder`.
+
+### Budget
+
+Measured in the sandbox: 4 CPUs, Quint 0.33.1 on the TypeScript backend, Apalache 0.62.4 on the
+Temurin JDK 21.
+
+| Check | Budget | Time |
+|:--|:--|:--|
+| `formal-test` (23 diagnostics tests) | every `check` | under a second |
+| `formal-freshness`: seven traces regenerated | every `check` | about 2 s per trace |
+| `conformance-replay` | 10 traces of `sim_steps` (40), generated twice, every `check` | a few seconds. Read, not replayed, until LSP-04. |
+| `formal-verify diagnostics`: Apalache | `steps = 7` | 522 s |
+| `formal-verify diagnostics`: simulation | 20000 samples of `sim_steps` (40) | 149 s |
+| `formal-verify diagnostics`: liveness and its control | 3000 samples of 62 steps, each | 34 s, then the control fails within seconds |
+| `formal-verify diagnostics` in all | weekly in `formal.yml` (60-minute job) | 725 s with xtask's build, another lane building beside it; perhaps twice that on a CI runner |
+
+**Apalache's time grows steeply with the bound:** on round 1's model (no `c`, `didOpen` at 1)
+18 s at length 4, 483 s at 7 and 1463 s at 8 (0.6 GB peak); on round 2's, 522 to 554 s at 7. So
+the bound is 7, keeping the job well under its 60 minutes on a slower runner. With `c` as a third
+document in every map, a step took about five times as long (length 5 reached in about 210 s
+instead of 45), which is why the server's view of `c` is one number. Length 7 covers every interleaving of a first compile with one
+change, a close, a crash and a restart, or a dependency's disk write and its notice: a stale
+reply dropped after an edit takes 6 steps (open, spawn, start, change, finish, read), a close
+during a compile 6, a crash mid-compile and the compile again 7, a published `a` made stale by
+`c`'s creation 7. Two replies in reverse order
+take 9 and are the simulation's. **The depth rests on the simulation**, run weekly in
+`formal-verify` and at a fresh seed in every `conformance-replay`: 20000 samples of 40 steps in
+`formal-verify`'s run above (seed `0x10023ab3705fa`) found no violation. Each of these witness states is
+found by `quint run --invariant 'not(<witness>)' --max-steps 40 --max-samples 20000` at seed
+`0x77`:
+
+| Witness (`val`) | State | Found after |
+|:--|:--|:--|
+| `witnessRepublished` | diagnostics replaced earlier ones of the same session | under 1 s |
+| `witnessReverseOrder` | a reply older than the published diagnostics is still to be read | under 1 s |
+| `witnessCrashMidCompile` | a crash lost a running compile | under 1 s |
+| `witnessCurrentAfterCrash` | after a lost compile, a later incarnation's diagnostics are up to date | under 1 s |
+| `witnessCloseDuringCompile` | a document closed while its compile runs or its reply waits | under 1 s |
+| `witnessSupersededVersion` | a reply for a version the client has superseded | under 1 s |
+| `witnessDependencyStale` | a reply for `a` at its current version, stale only because `b` changed | under 1 s |
+| `witnessReopenStale` | a reply of an earlier open session of a reopened document | under 1 s |
+| `witnessDiskWins` | an open document's up-to-date diagnostics carry no version | under 1 s |
+| `witnessLateReply` | a timed-out compile's reply arrives | under 1 s |
+| `witnessBothUpToDate` | both documents up to date, `a`'s read from `b`'s unsaved overlay | 3 s |
+| `witnessCreatedStale` | a reply for `a` that did not find `C`, read after the server saw `c` created | under 1 s |
+| `witnessReadsCreated` | `a`'s up-to-date diagnostics, published again, read a created `c` | 1 s |
+
+Every witness is reached within 3 s, so `sim_steps` is 40 for depth (a run holds several
+open sessions, crashes and dependency changes), not for reach. Raise either number only with a
+measurement, while `formal.yml`'s 60-minute job stays well under its limit.

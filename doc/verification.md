@@ -161,7 +161,7 @@ on it). The product's models:
 |:--|:--|:--|:--|
 | `views.qnt` | `NoMixedGeneration`, `GenerationsIncrease`, `AtomicPublish`, `FreshAfterStat`, `CompleteIsHonest`, `NoCrossView`, `SyncIsBarrier` | FORMAL-03 | IDX-09 |
 | `daemon.qnt` | `AtMostOneOwner`, `ServedOnlyByOwner`, `NoGhostBuffers`, `ShutdownReleases`, `OwnerReachable`, `ReconnectRestores`; liveness `EventuallyServed`, checked by the `Progress` simulation `formal-verify` runs from the `progress` entry (Apalache cannot reach its counterexamples) | FORMAL-04 | IDX-12 |
-| `diagnostics.qnt` | `NeverOlderOverNewer`, `PublishedMatchesVersion`, `ClosedPublishesNothing` | FORMAL-05 | LSP-04 |
+| `diagnostics.qnt` | `NeverOlderOverNewer`, `PublishedMatchesVersion`, `ClosedPublishesNothing`, `FreshAfterEdit`; liveness `EventuallyUpToDate`, checked by the `Progress` simulation of its `progress` entry | FORMAL-05 | LSP-04 |
 
 Each model has named scenarios (`run`s) for the interleavings that matter (a checkout during a
 reconcile; two proxies spawning at once; results arriving in reverse order), a `val

@@ -127,3 +127,71 @@ step = "sigtermAfterStaleStart"
 invariant = "allInvariants"
 max_steps = 14
 seed = "0x3"
+
+# The diagnostics model's scenarios (FORMAL-05, doc/formal-models.md): each scenario's scripted
+# step, guarded by the step count `t`, enables exactly one action in each state, so the trace does
+# not depend on the seed. Read, not replayed, until LSP-04 brings the diagnostics driver
+# (crates/jfl-conformance/src/registry.rs).
+
+[traces.diagnostics-two-quick-edits-reverse-order]
+model = "diagnostics"
+main = "diagnostics"
+init = "init"
+step = "twoQuickEditsReverseOrder"
+invariant = "allInvariants"
+max_steps = 13
+seed = "0x3"
+
+[traces.diagnostics-crash-mid-compile]
+model = "diagnostics"
+main = "diagnostics"
+init = "init"
+step = "crashMidCompile"
+invariant = "allInvariants"
+max_steps = 13
+seed = "0x3"
+
+[traces.diagnostics-close-during-compile]
+model = "diagnostics"
+main = "diagnostics"
+init = "init"
+step = "closeDuringCompile"
+invariant = "allInvariants"
+max_steps = 15
+seed = "0x3"
+
+[traces.diagnostics-dependency-edit-makes-stale]
+model = "diagnostics"
+main = "diagnostics"
+init = "init"
+step = "dependencyEditMakesStale"
+invariant = "allInvariants"
+max_steps = 10
+seed = "0x3"
+
+[traces.diagnostics-disk-wins-over-overlay]
+model = "diagnostics"
+main = "diagnostics"
+init = "init"
+step = "diskWinsOverOverlay"
+invariant = "allInvariants"
+max_steps = 16
+seed = "0x3"
+
+[traces.diagnostics-timeout-late-reply]
+model = "diagnostics"
+main = "diagnostics"
+init = "init"
+step = "timeoutLateReply"
+invariant = "allInvariants"
+max_steps = 9
+seed = "0x3"
+
+[traces.diagnostics-created-file-makes-stale]
+model = "diagnostics"
+main = "diagnostics"
+init = "init"
+step = "createdFileMakesStale"
+invariant = "allInvariants"
+max_steps = 10
+seed = "0x3"

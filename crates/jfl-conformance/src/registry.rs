@@ -44,7 +44,11 @@ pub const DRIVERS: [Entry; 1] = [Entry {
 
 /// Registered models whose driver has not landed yet, each with the task that brings it. Each
 /// task must have an open card in [`TASKS`] ([`check_pending`]).
-pub const PENDING: [(&str, &str); 2] = [("views", "IDX-09"), ("daemon", "IDX-12")];
+pub const PENDING: [(&str, &str); 3] = [
+    ("views", "IDX-09"),
+    ("daemon", "IDX-12"),
+    ("diagnostics", "LSP-04"),
+];
 
 /// The driver of `model`.
 pub fn driver(model: &str) -> Option<&'static Entry> {
