@@ -270,6 +270,23 @@ bench-git corpus="small": _preflight
     { printf '%s\n' "$root"; git -C "$root" ls-files -z -- '*.java'; } \
       | {{cargo}} bench --locked -p jfl-adapter-git --bench probe
 
+# The syntax index in process (IDX-07): every tracked `.java` file of the pinned corpus read into
+# memory, then indexed by jfl-adapter-java on 1 and 4 threads (files/s, MB/s, per-file p50, p95 and
+# max, wall time, summary bytes per file). In jfl-composition, which holds the clock and spawn
+# grants the adapter does not. Reports, never gates. `just bench-syntax medium`.
+bench-syntax corpus="small": _preflight
+    #!/usr/bin/env bash
+    set -euo pipefail
+    bash scripts/bench-corpus.sh fetch {{quote(corpus)}}
+    root="$(bash scripts/bench-corpus.sh path {{quote(corpus)}})"
+    { printf '%s\n' "$root"; git -C "$root" ls-files -z -- '*.java'; } \
+      | {{cargo}} bench --locked -p jfl-composition --bench syntax
+
+# Rewrite fixtures.lock from the tree after reviewing the changed goldens (ver §4,
+# ARCH-fixtures-lock): the SHA-256 of every file under fixtures/ and each crate's tests/fixtures/.
+fixtures-lock:
+    bash scripts/fixtures-lock.sh
+
 # Every tool of tools/versions.toml on the stages' PATH at its pinned version (xtask's cache first,
 # then mise's install directories), and versions.toml agreeing with mise.toml and mise.lock;
 # fails naming each missing or wrong tool and the fix (XT-02, fnd §8).

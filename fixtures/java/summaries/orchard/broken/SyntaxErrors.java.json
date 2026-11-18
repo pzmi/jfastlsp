@@ -1,0 +1,22 @@
+{
+  "package": "broken",
+  "imports": [],
+  "declarations": [
+    {"annotations":[],"at":"4:1-15:6","id":0,"javadoc":null,"kind":"class","modifiers":[],"name":"SyntaxErrors","name_at":"4:7-4:19","params":[],"parent":null,"permits":[],"signature":"class SyntaxErrors","supertypes":[],"symbol":"broken.SyntaxErrors"},
+    {"annotations":[],"at":"5:5-5:29","id":1,"javadoc":null,"kind":"field","modifiers":[],"name":"missingSemicolon","name_at":"5:9-5:25","params":[],"parent":0,"permits":[],"signature":"int missingSemicolon","supertypes":[],"symbol":"broken.SyntaxErrors#missingSemicolon"},
+    {"annotations":[],"at":"6:5-6:14","id":2,"javadoc":null,"kind":"field","modifiers":[],"name":"next","name_at":"6:9-6:13","params":[],"parent":0,"permits":[],"signature":"int next","supertypes":[],"symbol":"broken.SyntaxErrors#next"},
+    {"annotations":[],"at":"8:5-11:6","id":3,"javadoc":null,"kind":"method","modifiers":[],"name":"stray","name_at":"8:10-8:15","params":[],"parent":0,"permits":[],"signature":"void stray()","supertypes":[],"symbol":"broken.SyntaxErrors#stray()"},
+    {"annotations":[],"at":"13:5-15:6","id":4,"javadoc":null,"kind":"method","modifiers":[],"name":"fine","name_at":"13:10-13:14","params":[],"parent":0,"permits":[],"signature":"void fine()","supertypes":[],"symbol":"broken.SyntaxErrors#fine()"}
+  ],
+  "references": [
+    {"arity":1,"at":"10:9-10:13","name":"call","shape":"call"},
+    {"arity":0,"at":"14:9-14:14","name":"stray","shape":"call"}
+  ],
+  "diagnostics": [
+    {"at":"5:29-5:29","problem":{"missing":";"},"text":""},
+    {"at":"9:17-9:18","problem":"unexpected","text":")"},
+    {"at":"10:15-10:15","problem":{"missing":")"},"text":""},
+    {"at":"15:6-15:6","problem":{"missing":"}"},"text":""}
+  ],
+  "diagnostics_dropped": 0
+}

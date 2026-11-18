@@ -62,6 +62,7 @@ deny = [
   { crate = "rusqlite", wrappers = ["jfl-adapter-store"], reason = "storage is the store adapter's (ADR 0025)" },
   { crate = "tree-sitter", wrappers = ["jfl-adapter-java", "jfl-bench", "tree-sitter-java-orchard"], reason = "the Java grammar is the Java adapter's (ADR 0022); the bench harness runs the E1 parse pipeline on its own (ADR 0031, amended 2026-11-17)" },
   { crate = "tree-sitter-java-orchard", wrappers = ["jfl-adapter-java", "jfl-bench"], reason = "the Java grammar is the Java adapter's (ADR 0022); the bench harness runs the E1 parse pipeline on its own (ADR 0031, amended 2026-11-17)" },
+  { crate = "tree-sitter-java", wrappers = ["jfl-adapter-java"], reason = "upstream tree-sitter-java is the switch-back grammar, parsed by the Java adapter's tests only (ADR 0022, amended 2026-11-17; IDX-07)" },
   { crate = "lsp-server", wrappers = ["jfl-adapter-lsp", "jfl-adapter-ipc"], reason = "LSP framing lives in the LSP and IPC adapters (ADR 0020, ADR 0021)" },
   { crate = "gen-lsp-types", wrappers = ["jfl-adapter-lsp"], reason = "LSP types are the LSP adapter's (ADR 0020)" },
   { crate = "notify", wrappers = ["jfl-adapter-fs"], reason = "watcher hints are the fs adapter's (plan §6.1, IDX-06)" },
@@ -84,9 +85,9 @@ features = [
 
 [bans.build]
 # Only the crates named here may run a build script (fnd §2.2 rule 5), workspace crates included
-# (cargo-deny skips them by default). Production crates have none yet: the tree-sitter grammars
-# and bundled SQLite compile C and are added by name, with the reason, by the task that adds them
-# (IDX-07, IDX-08). Pinned by tools/jfl-architecture/tests/gate_negative_cases.rs
+# (cargo-deny skips them by default). Production crates reach C only through the bypass list
+# below: since IDX-07 the tree-sitter runtime and the orchard grammar (jfl-adapter-java); bundled
+# SQLite is added by name, with the reason, by IDX-08. Pinned by tools/jfl-architecture/tests/gate_negative_cases.rs
 # ::should_fail_deny_bans_when_a_workspace_crate_has_a_build_script.
 include-workspace = true
 allow-build-scripts = []
@@ -135,12 +136,18 @@ bypass = [
   # rayon-core: `links = "rayon-core"` only, prints rerun-if-changed; rayon's closure.
   { crate = "rayon-core", build-script = "fa31cb198b772600d100a7c403ddedccef637d2e6b2da431fa7f02ca41307fc6" },
   # tree-sitter: compiles the vendored lib.c with `cc` (wasm and bindgen paths are off); jfl-bench's
-  # closure, and jfl-adapter-java's later (IDX-07 says so when it adds the crate).
+  # closure, and since IDX-07 jfl-adapter-java's (a production crate: the review is the same file,
+  # checksum unchanged, at the exact pin 0.27.2).
   { crate = "tree-sitter", build-script = "43ca3c9ae1aa23c926c598b62f317edd7d731282e32f071f3cea88d24f450469" },
   # tree-sitter-java-orchard: compiles the vendored parser.c and scanner.c with `cc`, sets query cfgs.
   { crate = "tree-sitter-java-orchard", build-script = "1c8e689d24768981ddd36565e57655216cbe63c9117fc53d03d80973b7f74006" },
   # tree-sitter-language: emits wasm header paths only when TARGET is wasm32-unknown.
   { crate = "tree-sitter-language", build-script = "6d00d018c0917c1561428210e5cf17e87425efd0c989c29fae2c190c0d9b8ad2" },
+  # IDX-07: upstream tree-sitter-java 0.23.5, jfl-adapter-java's dev-dependency (the switch-back
+  # grammar's tests, ADR 0022 as amended 2026-11-17): compiles its vendored src/parser.c with `cc`
+  # (c11, the crate's own src/ as include path) and prints one rerun-if-changed; no network,
+  # nothing outside the crate directory. Never in a production closure (wrapped above).
+  { crate = "tree-sitter-java", build-script = "f0bb2a9bab500d44db01ae3a0537c648aba9f5a2b6cda39ea22f2897e2a38441" },
   # IDX-01: jfl-domain's property tests (proptest, a dev-dependency) bring two more, read at the
   # versions pinned in Cargo.lock; neither reaches a production crate's normal closure.
   # getrandom: reads CARGO_CFG_SANITIZE and sets a memory-sanitizer cfg; rand's closure.

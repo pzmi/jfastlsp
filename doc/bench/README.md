@@ -270,6 +270,63 @@ Measured by hand on medium, `--untracked-files=no` instead of `all` takes `statu
 rehashes them on every call: on the freshly made synthetic repository that is all of its 10 ms,
 and it drops below 5 ms once a plain `git status` has refreshed the index.
 
+### The syntax index (IDX-07, `just bench-syntax`)
+
+`crates/jfl-composition/benches/syntax.rs` reads every tracked `.java` file of the corpus into memory, then indexes them all with `jfl-adapter-java`, using orchard.
+- Each file goes through: the BOM, the bounds and the `\u` translation, then the parse, the queries' table, the summary and the diagnostics, all within one work budget.
+- It runs on 1 and 4 threads, one parser per thread. Each thread count gets a warm-up and three runs; the median is reported.
+- It lives in composition because timing and threads need grants the adapter does not hold.
+
+Measured 2026-11-18 (IDX-07 round 2) on the 4 vCPU Xeon VM **while another lane was running (load 1.3 to 2.5)**.
+- Each row sits beside E1's own extract stage (`jfl-bench parse --upto extract`, median of 3) run straight after on the same machine.
+- **These ratios come from single runs on a loaded machine.** EVAL-05 and `bench.yml` confirm on a quiet runner.
+- Plan §1.7's quiet-machine E1 numbers are faster than both columns.
+
+| corpus | threads | wall ms | files/s | p50 / p95 / max ms | E1 wall ms, p95 | ratio |
+|:--|--:|--:|--:|:--|:--|--:|
+| medium spring-framework (9,294 files, 53.7 MB) | 1 | 8,120 | 1,145 | 0.43 / 3.02 / 62.8 | 6,434, 2.48 | 1.26× |
+| | 4 | 2,003 | 4,639 | 0.42 / 3.07 / 65.0 | 1,700, 2.56 | 1.18× |
+| lombok fineract (7,301 files, 50.5 MB) | 1 | 6,964 | 1,048 | 0.29 / 3.45 / 103.2 | 5,250, 2.64 | 1.33× |
+| | 4 | 1,852 | 3,942 | 0.31 / 3.68 / 122.9 | 1,583, 2.92 | 1.17× |
+
+Round 3 (the type-parameter map), one run later the same day under load 2 to 3: medium took
+7,350 ms at 1 thread and 2,534 ms at 4, against E1's 5,977 and 2,051 (1.23× and 1.24×).
+
+**Work budget headroom.** The bench prints the most of its work budget any file used. It was
+2.8 % on medium (`AutowiredAnnotationBeanPostProcessorTests.java`) and 3.2 % on lombok
+(`LoansApiResourceSwagger.java`), so a real file sits about 30 times below the refusal.
+
+Earlier single runs (round 1, the same day) gave 1.06–1.25× on small, medium and lombok, and lombok at 4 threads 1.44×.
+
+**Summary bytes per file** (`heap_bytes` plus the value):
+
+| corpus | mean | p95 |
+|:--|--:|--:|
+| small | 5.2 KB | 18.4 KB |
+| medium | 6.1 KB | 20.7 KB |
+| lombok | 6.9 KB | 24.8 KB |
+
+- A medium file has 14.9 declarations and 135 reference sites on average.
+- No file of the three corpora has a syntax error or is refused, so none runs out of the work budget. E1 agrees on the syntax errors.
+- Peak RSS with every summary held: 24 MB small, 88 MB medium, 109 MB lombok.
+
+**Where the time goes.** Measured with callgrind over 300 junit-framework files: the adapter executes 1.54 times the parse's own instruction count, against about 1.15 for E1. Of the adapter's instructions:
+
+| share | what |
+|--:|:--|
+| 65 % | the parse |
+| 11 % | the cursor walk |
+| 6 % | declarations: signatures, erasure, Javadoc |
+| 5 % | reference sites: sort, deduplication, the locals lookup |
+| about 4 % | interning and header text |
+| rest | allocation and dropping the tree |
+
+E1 extracts no reference sites, no locals and no signatures.
+
+**Changes that moved the numbers:**
+- Running the same queries through tree-sitter's query engine cost 2.0 times the parse's instructions. That is why the queries are now read as a table (ADR 0022 as amended 2026-11-18).
+- Cloning the capture lists per file kept 4 threads from scaling. Removing the clones took medium from 2.6 s to 2.1 s, and p95 from 5.1 ms to 3.3 ms.
+
 ## Adding a suite
 
 1. A `suites/<name>.toml` with `name`, `description`, `kind` and the knobs of its kind

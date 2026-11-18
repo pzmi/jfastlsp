@@ -78,3 +78,28 @@ first commit rather than left to "a grammar-version change" (Consequences above)
   final.
 
 IDX-07 builds this (about 1–2 days on top of its card); EVAL-05 keeps measuring both grammars.
+
+## Amended 2026-11-18 (IDX-07; proposed, for the owner's next checkpoint): the queries as a table
+
+IDX-07 built the boundary above. Run with `QueryCursor`, our queries made indexing 2.3 times as
+slow as the E1 pipeline: tree-sitter's query engine cost half a parse again on the corpus
+(callgrind over 300 junit-framework files: the parse 4.09 G instructions, the query engine 2.26 G,
+our extraction 0.65 G), and nested patterns kept match states open across whole method bodies.
+spring-framework's full index at 4 threads took 3.1 s on a loaded machine, past plan §1.7's 2.5 s.
+
+- **Single-node patterns only.** `tags.scm` and `locals.scm` hold `(kind) @capture` patterns and
+  nothing else; the adapter reads names and fields of a captured node through the start-up table.
+- **Compiled, then read as a table.** `Query::new` still compiles both against the loaded grammar,
+  so a node name the grammar lacks fails start-up naming it; then the adapter reads the patterns
+  as a table from node kind to captures and applies it in one pre-order cursor walk, the cost of
+  E1's own walk. A pattern of any other shape fails start-up, naming it.
+- **Equivalence** is pinned by the goldens: every summary of both grammars stayed byte for byte
+  the same when the engine was replaced (`crates/jfl-adapter-java/tests/goldens.rs`).
+- **Result:** about 1.5 times the parse's instructions, down from 2.0. On a loaded machine, in
+  single runs beside E1's own extract stage, spring-framework took 1.26 times E1's time at 1
+  thread and 1.18 times at 4 (`doc/bench/README.md`).
+
+What stays: our own queries, our own types, per-grammar query files, and `tree-sitter-tags`
+rejected. What changes: "run with `tree_sitter::Query`/`QueryCursor`" above now reads "compiled
+with `tree_sitter::Query`, applied by the adapter's walk". A future need for a structural pattern
+(a child under a parent) is a field read in Rust, or an amendment here.

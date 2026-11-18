@@ -1,0 +1,20 @@
+{
+  "package": "syntax",
+  "imports": [],
+  "declarations": [
+    {"annotations":["SuppressWarnings"],"at":"6:1-29:2","id":0,"javadoc":"3:1-5:4","kind":"class","modifiers":[],"name":"Javadoc","name_at":"7:7-7:14","params":[],"parent":null,"permits":[],"signature":"@SuppressWarnings(\"all\") class Javadoc","supertypes":[],"symbol":"syntax.Javadoc"},
+    {"annotations":[],"at":"9:5-9:23","id":1,"javadoc":"8:5-8:60","kind":"field","modifiers":[],"name":"first","name_at":"9:9-9:14","params":[],"parent":0,"permits":[],"signature":"int first","supertypes":[],"symbol":"syntax.Javadoc#first"},
+    {"annotations":[],"at":"9:5-9:23","id":2,"javadoc":"8:5-8:60","kind":"field","modifiers":[],"name":"second","name_at":"9:16-9:22","params":[],"parent":0,"permits":[],"signature":"int second","supertypes":[],"symbol":"syntax.Javadoc#second"},
+    {"annotations":[],"at":"13:5-13:23","id":3,"javadoc":"11:5-11:85","kind":"method","modifiers":[],"name":"withNote","name_at":"13:10-13:18","params":[],"parent":0,"permits":[],"signature":"void withNote()","supertypes":[],"symbol":"syntax.Javadoc#withNote()"},
+    {"annotations":[],"at":"16:5-16:20","id":4,"javadoc":null,"kind":"method","modifiers":[],"name":"plain","name_at":"16:10-16:15","params":[],"parent":0,"permits":[],"signature":"void plain()","supertypes":[],"symbol":"syntax.Javadoc#plain()"},
+    {"annotations":[],"at":"21:5-21:21","id":5,"javadoc":"18:5-18:20","kind":"method","modifiers":[],"name":"spaced","name_at":"21:10-21:16","params":[],"parent":0,"permits":[],"signature":"void spaced()","supertypes":[],"symbol":"syntax.Javadoc#spaced()"},
+    {"annotations":["Deprecated"],"at":"23:5-25:19","id":6,"javadoc":null,"kind":"method","modifiers":[],"name":"late","name_at":"25:10-25:14","params":[],"parent":0,"permits":[],"signature":"@Deprecated void late()","supertypes":[],"symbol":"syntax.Javadoc#late()"},
+    {"annotations":[],"at":"28:5-28:20","id":7,"javadoc":null,"kind":"method","modifiers":[],"name":"empty","name_at":"28:10-28:15","params":[],"parent":0,"permits":[],"signature":"void empty()","supertypes":[],"symbol":"syntax.Javadoc#empty()"}
+  ],
+  "references": [
+    {"at":"6:2-6:18","name":"SuppressWarnings","shape":"annotation"},
+    {"at":"23:6-23:16","name":"Deprecated","shape":"annotation"}
+  ],
+  "diagnostics": [],
+  "diagnostics_dropped": 0
+}

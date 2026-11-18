@@ -1,0 +1,21 @@
+{
+  "package": "grammar",
+  "imports": [
+    {"at":"4:1-4:25","module":false,"name":"modulejava.base","on_demand":false,"static":false}
+  ],
+  "declarations": [
+    {"annotations":[],"at":"7:1-11:2","id":0,"javadoc":"6:1-6:48","kind":"class","modifiers":[],"name":"ImportModule","name_at":"7:7-7:19","params":[],"parent":null,"permits":[],"signature":"class ImportModule","supertypes":[],"symbol":"grammar.ImportModule"},
+    {"annotations":[],"at":"8:5-10:6","id":1,"javadoc":null,"kind":"method","modifiers":[],"name":"names","name_at":"8:18-8:23","params":[],"parent":0,"permits":[],"signature":"List<String> names()","supertypes":[],"symbol":"grammar.ImportModule#names()"}
+  ],
+  "references": [
+    {"at":"4:20-4:24","name":"base","shape":"qualified_name"},
+    {"at":"8:5-8:9","name":"List","shape":"type"},
+    {"at":"8:10-8:16","name":"String","shape":"type"},
+    {"at":"9:16-9:20","name":"List","shape":"name"},
+    {"arity":2,"at":"9:21-9:23","name":"of","shape":"qualified_call"}
+  ],
+  "diagnostics": [
+    {"at":"4:15-4:19","problem":"unexpected","text":"java"}
+  ],
+  "diagnostics_dropped": 0
+}

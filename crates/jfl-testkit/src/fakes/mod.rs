@@ -2,3 +2,4 @@
 
 pub mod repo_probe;
 pub mod source_tree;
+pub mod syntax_indexer;

@@ -1,0 +1,17 @@
+{
+  "package": "broken",
+  "imports": [],
+  "declarations": [
+    {"annotations":[],"at":"5:1-9:2","id":0,"javadoc":null,"kind":"class","modifiers":[],"name":"StringTemplate","name_at":"5:7-5:21","params":[],"parent":null,"permits":[],"signature":"class StringTemplate","supertypes":[],"symbol":"broken.StringTemplate"},
+    {"annotations":[],"at":"6:5-8:6","id":1,"javadoc":null,"kind":"method","modifiers":[],"name":"greet","name_at":"6:12-6:17","params":["String"],"parent":0,"permits":[],"signature":"String greet(String name)","supertypes":[],"symbol":"broken.StringTemplate#greet(String)"}
+  ],
+  "references": [
+    {"at":"6:5-6:11","name":"String","shape":"type"},
+    {"at":"6:18-6:24","name":"String","shape":"type"},
+    {"at":"7:16-7:19","name":"STR","shape":"name"}
+  ],
+  "diagnostics": [
+    {"at":"7:16-7:36","problem":"string_template","text":"STR.\"Hello \\{name}!\""}
+  ],
+  "diagnostics_dropped": 0
+}

@@ -1,0 +1,9 @@
+# Corpus files upstream tree-sitter-java 0.23.5 reports syntax errors for (ADR 0022, amended
+# 2026-11-17): the features it cannot parse. A gap that opens or closes fails
+# crates/jfl-adapter-java/tests/goldens.rs until this list changes.
+# A type annotation before a varargs ellipsis (`String @Use ... rest`).
+grammar/AnnotationsEverywhere.java
+# Statements before `super(...)` (JEP 513, Java 25).
+grammar/FlexibleConstructorBodies.java
+# `import module java.base;` (JEP 511, Java 25).
+grammar/ImportModule.java

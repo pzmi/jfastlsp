@@ -241,6 +241,9 @@ pub struct Import {
     pub is_static: bool,
     /// `.*`: every member of the named package or type.
     pub on_demand: bool,
+    /// `import module M;` (JEP 511, Java 25): every package `M` exports, on demand; `name` is the
+    /// module's name, and `is_static` and `on_demand` are false.
+    pub module: bool,
     /// The whole declaration.
     pub range: ByteRange,
 }
@@ -444,6 +447,20 @@ impl SummaryBuilder {
             name,
             is_static,
             on_demand,
+            module: false,
+            range,
+        });
+        Ok(())
+    }
+
+    /// Adds `import module name;` (JEP 511).
+    pub fn module_import(&mut self, name: &str, range: ByteRange) -> Result<(), SummaryError> {
+        let name = self.intern(name)?;
+        self.imports.push(Import {
+            name,
+            is_static: false,
+            on_demand: false,
+            module: true,
             range,
         });
         Ok(())
@@ -723,7 +740,9 @@ impl FileSummary {
             .imports
             .iter()
             .map(|i| {
-                let flags = u32::from(i.is_static) | (u32::from(i.on_demand) << 1);
+                let flags = u32::from(i.is_static)
+                    | (u32::from(i.on_demand) << 1)
+                    | (u32::from(i.module) << 2);
                 (self.str(i.name), flags)
             })
             .collect();
@@ -1050,6 +1069,39 @@ mod tests {
         let two = with_imports(&["b.Y", "a.X"]).api_digest(DeclId(0), RecordingHasher::default());
         // then
         assert_eq!(one, two);
+    }
+
+    #[test]
+    fn should_change_the_api_digest_when_a_module_import_replaces_a_package_import() {
+        // given: `import module java.base;` and `import java.base.*;` name the same text
+        let with = |module: bool| {
+            let mut builder = SummaryBuilder::new();
+            if module {
+                builder.module_import("java.base", range(0, 1)).unwrap();
+            } else {
+                builder
+                    .import("java.base", false, true, range(0, 1))
+                    .unwrap();
+            }
+            builder
+                .declaration(&input(DeclKind::Class, None, "A"))
+                .unwrap();
+            builder.finish()
+        };
+        // when
+        let module = with(true);
+        let package = with(false);
+        // then
+        assert!(
+            module
+                .imports()
+                .first()
+                .is_some_and(|i| i.module && !i.on_demand)
+        );
+        assert_ne!(
+            module.api_digest(DeclId(0), RecordingHasher::default()),
+            package.api_digest(DeclId(0), RecordingHasher::default())
+        );
     }
 
     #[test]

@@ -26,3 +26,8 @@ jfl-adapter-gradle = { path = "../jfl-adapter-gradle" }
 
 [lints]
 workspace = true
+
+# The syntax index on the bench corpus (`just bench-syntax SIZE`, IDX-07); reports, never gates.
+[[bench]]
+name = "syntax"
+harness = false

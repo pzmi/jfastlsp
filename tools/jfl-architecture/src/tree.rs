@@ -15,6 +15,11 @@ const SKIPPED_AT_ROOT: [&str; 2] = ["target", ".work"];
 pub trait Tree {
     /// The contents of `path`, or `None` when it is absent or unreadable.
     fn read(&self, path: &str) -> Option<String>;
+    /// The bytes of `path` (a fixture need not be UTF-8), or `None` when it is absent or
+    /// unreadable.
+    fn read_bytes(&self, path: &str) -> Option<Vec<u8>> {
+        self.read(path).map(String::into_bytes)
+    }
     /// Every file under `dir` (recursively; `""` is the whole tree), as paths relative to the
     /// root, sorted. `.git` directories, and `target` and `.work` at the root, are not entered.
     fn files_under(&self, dir: &str) -> Vec<String>;
@@ -53,6 +58,10 @@ impl DiskTree {
 impl Tree for DiskTree {
     fn read(&self, path: &str) -> Option<String> {
         std::fs::read_to_string(self.root.join(path)).ok()
+    }
+
+    fn read_bytes(&self, path: &str) -> Option<Vec<u8>> {
+        std::fs::read(self.root.join(path)).ok()
     }
 
     fn files_under(&self, dir: &str) -> Vec<String> {

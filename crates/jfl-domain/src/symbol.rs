@@ -442,6 +442,41 @@ pub fn erase_parameter_type(written: &str, scope: &[TypeParam<'_>]) -> Result<St
     Ok(base)
 }
 
+/// A parameter type as written without type arguments, annotations and white space, and its
+/// array dimensions (`List<@A String>...` is `("List", 1)`): the name a type variable is looked up
+/// by. Linear in `written`; refused past [`MAX_SYMBOL_LEN`].
+pub fn parameter_type_base(written: &str) -> Result<(String, usize), SymbolError> {
+    if written.len() > MAX_SYMBOL_LEN {
+        return Err(SymbolError::TooLong { len: written.len() });
+    }
+    strip_type(written)
+}
+
+/// [`erase_parameter_type`] with the type variables resolved by the caller: `resolve(name)` is the
+/// erasure of the type variable `name` in scope (its first bound's, followed to the end, or
+/// `Object`), or `None` when `name` is no type variable. One lookup per call, so a caller that
+/// resolves each variable once (the syntax index keeps a map of the open ones) erases every
+/// parameter in time linear in its text, whatever the number of variables in scope or the length
+/// of a bound chain; [`erase_parameter_type`] follows the chain hop by hop through a list.
+///
+/// Pinned by: `symbol::tests::should_erase_as_the_scope_does_when_variables_are_resolved_by_the_caller`.
+pub fn erase_parameter_type_with(
+    written: &str,
+    mut resolve: impl FnMut(&str) -> Option<String>,
+) -> Result<String, SymbolError> {
+    let (mut base, dims) = parameter_type_base(written)?;
+    if !base.contains('.')
+        && let Some(erased) = resolve(&base)
+    {
+        base = erased;
+    }
+    for _ in 0..dims {
+        base.push_str("[]");
+    }
+    check_type(&base)?;
+    Ok(base)
+}
+
 /// `text` without type arguments, annotations and white space, and its array dimensions.
 fn strip_type(text: &str) -> Result<(String, usize), SymbolError> {
     let mut base = String::new();
@@ -785,6 +820,46 @@ mod tests {
         // then
         assert!(matches!(refused, Err(SymbolError::TooLong { .. })));
         assert_eq!(SymbolId::parse(&fits.to_string()), Ok(fits));
+    }
+
+    #[test]
+    fn should_erase_as_the_scope_does_when_variables_are_resolved_by_the_caller() {
+        // given: `<T extends Comparable<T>, U extends T, V>` resolved once each
+        let scope = [
+            TypeParam {
+                name: "T",
+                first_bound: Some("Comparable<T>"),
+            },
+            TypeParam {
+                name: "U",
+                first_bound: Some("T"),
+            },
+            TypeParam {
+                name: "V",
+                first_bound: None,
+            },
+        ];
+        let resolved = |name: &str| match name {
+            "T" | "U" => Some(String::from("Comparable")),
+            "V" => Some(String::from("Object")),
+            _ => None,
+        };
+        // when
+        let cases = ["U...", "V[][]", "java.util.List<T>", "@A T", "String"];
+        // then
+        for case in cases {
+            let mut lookups = 0;
+            let with = erase_parameter_type_with(case, |n| {
+                lookups += 1;
+                resolved(n)
+            });
+            assert_eq!(with, erase_parameter_type(case, &scope), "{case}");
+            assert!(lookups <= 1, "{case}: {lookups} lookups");
+        }
+        assert_eq!(
+            parameter_type_base("Map<K, V> @A []"),
+            Ok((String::from("Map"), 1))
+        );
     }
 
     #[test]

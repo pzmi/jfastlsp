@@ -4,3 +4,4 @@
 pub mod process_runner;
 pub mod repo_probe;
 pub mod source_tree;
+pub mod syntax_indexer;

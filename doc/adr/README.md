@@ -77,7 +77,7 @@ for the owner's decisions.
 | [0019](0019-build-or-reuse-per-subsystem.md) | Build or reuse, per subsystem | Accepted (owner, 2026-11-17); amended 2026-11-17 (twice) |
 | [0020](0020-lsp-stack-lsp-server-gen-lsp-types-line-index.md) | LSP stack: lsp-server, gen-lsp-types and line-index | Accepted (owner, 2026-11-17); amended 2026-11-17 (LSP-01) |
 | [0021](0021-daemon-ipc-lsp-framing-over-a-unix-socket.md) | Daemon IPC: LSP framing over a Unix socket, single owner by a std file lock | Accepted (owner, 2026-11-17) |
-| [0022](0022-java-grammar-tree-sitter-java-orchard-with-own-queries.md) | Java grammar: tree-sitter-java-orchard with our own queries | Accepted (owner, 2026-11-17); amended 2026-11-17 |
+| [0022](0022-java-grammar-tree-sitter-java-orchard-with-own-queries.md) | Java grammar: tree-sitter-java-orchard with our own queries | Accepted (owner, 2026-11-17); amended 2026-11-17; amended 2026-11-18 (proposed) |
 | [0023](0023-class-files-cafebabe-and-ct-sym.md) | Class files: cafebabe and zip; the JDK API from ct.sym | Accepted (owner, 2026-11-17); amended 2026-11-17 |
 | [0024](0024-git-cli-on-the-reconcile-path-not-gitoxide.md) | Git: the git CLI on the reconcile path, stat-only freshness, not gitoxide | Accepted (owner, 2026-11-17) |
 | [0025](0025-storage-rusqlite-fst-postcard-blake3.md) | Storage crates: rusqlite, fst, postcard and blake3 | Accepted (owner, 2026-11-17) |

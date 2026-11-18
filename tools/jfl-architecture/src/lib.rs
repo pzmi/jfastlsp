@@ -11,7 +11,8 @@
 //! (the tree). [`ci`] holds `ARCH-ci-lockstep` (fnd §7.2), which reads `ci.yml`, the justfile and
 //! `doc/required-checks.md` rather than the crate graph: tests/ci_lockstep.rs. [`gate`] holds
 //! `ARCH-gate-config` (fnd §3.6), the pinned shape of the gate's own configuration:
-//! tests/gate_config.rs.
+//! tests/gate_config.rs. [`fixtures_lock`] holds `ARCH-fixtures-lock` (ver §4), every golden
+//! fixture's digest in `fixtures.lock`: tests/fixtures_lock.rs.
 //!
 //! Rejected: the ported `syn` checker (ADR 0030; a line-oriented scan and the compiler cover what
 //! it did, and the rest binds by review), and running `scripts/clippy-lists.sh` as the
@@ -19,6 +20,7 @@
 
 pub mod ci;
 pub mod clippy_lists;
+pub mod fixtures_lock;
 pub mod gate;
 pub mod graph;
 pub mod lexer;
@@ -35,9 +37,9 @@ use std::path::Path;
 use cargo_metadata::{Metadata, MetadataCommand};
 
 /// Every rule id this crate can report, in fnd §3.3's order. The meta-test in `tests/rules.rs`
-/// compares it with the rows fnd §3.3 assigns to FND-07, FND-05 and FND-08 and with the negative
-/// cases.
-pub const RULES: [&str; 28] = [
+/// compares it with the rows fnd §3.3 assigns to FND-07, FND-05, FND-08, FND-09 and IDX-07 and
+/// with the negative cases.
+pub const RULES: [&str; 29] = [
     "ARCH-policy-schema",
     "ARCH-metadata",
     "ARCH-missing-member",
@@ -66,6 +68,7 @@ pub const RULES: [&str; 28] = [
     "ARCH-ci-lockstep",
     "ARCH-gate-config",
     "ARCH-workflow-yaml",
+    "ARCH-fixtures-lock",
 ];
 
 /// The targets of ADR 0006: every edge is evaluated through `cargo metadata --filter-platform`

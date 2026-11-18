@@ -2,8 +2,9 @@
 //! workspace (`cargo metadata` JSON, the policy and the files in memory), each a small change to a
 //! clean baseline that must produce its rule's id at its path; the clean baseline itself and a
 //! few look-alikes must produce nothing. The meta-test fails when a rule fnd §3.3 assigns to
-//! FND-07, FND-05, FND-08 or FND-09 has no negative case here, in `tests/fixture_workspaces.rs`,
-//! `tests/ci_lockstep.rs`, `tests/gate_config.rs` or `tests/workflow_yaml.rs`.
+//! FND-07, FND-05, FND-08, FND-09 or IDX-07 has no negative case here, in
+//! `tests/fixture_workspaces.rs`, `tests/ci_lockstep.rs`, `tests/gate_config.rs`,
+//! `tests/workflow_yaml.rs` or `tests/fixtures_lock.rs`.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
@@ -1150,7 +1151,7 @@ fn should_report_arch_metadata_when_the_root_sits_inside_another_workspace() -> 
 /// The negative cases that live outside the table: (rule, test function) in
 /// `tests/fixture_workspaces.rs`, `tests/ci_lockstep.rs` and this file. The meta-test checks only that each function
 /// exists; that it asserts its rule is the function's own business (and review's).
-const OTHER_CASES: [(&str, &str); 10] = [
+const OTHER_CASES: [(&str, &str); 11] = [
     (
         "ARCH-forbidden-edge",
         "should_fail_forbidden_edge_when_the_domain_depends_on_the_application",
@@ -1191,10 +1192,14 @@ const OTHER_CASES: [(&str, &str); 10] = [
         "ARCH-workflow-yaml",
         "should_fail_workflow_yaml_when_the_run_key_is_spelled_with_an_escape",
     ),
+    (
+        "ARCH-fixtures-lock",
+        "should_fail_fixtures_lock_when_a_golden_is_edited_and_the_lock_is_stale",
+    ),
 ];
 
-/// The rule ids of fnd §3.3's rows whose Task column names FND-07, FND-05, FND-08 or FND-09 (the tasks
-/// that put rules in this crate).
+/// The rule ids of fnd §3.3's rows whose Task column names FND-07, FND-05, FND-08, FND-09 or IDX-07
+/// (the tasks that put rules in this crate).
 fn fnd_rules() -> Result<BTreeSet<String>, Box<dyn Error>> {
     let fnd = std::fs::read_to_string(
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../../doc/foundation.md"),
@@ -1214,7 +1219,7 @@ fn fnd_rules() -> Result<BTreeSet<String>, Box<dyn Error>> {
         let (Some(ids), Some(task)) = (cells.first(), cells.last()) else {
             continue;
         };
-        if !["FND-07", "FND-05", "FND-08", "FND-09"]
+        if !["FND-07", "FND-05", "FND-08", "FND-09", "IDX-07"]
             .iter()
             .any(|t| task.contains(t))
         {
@@ -1235,6 +1240,7 @@ fn should_cover_every_rule_of_fnd_3_3_when_the_negative_cases_are_counted() -> T
     let ci_source = include_str!("ci_lockstep.rs");
     let gate_source = include_str!("gate_config.rs");
     let yaml_source = include_str!("workflow_yaml.rs");
+    let lock_source = include_str!("fixtures_lock.rs");
     let this_source = include_str!("rules.rs");
     let mut covered: BTreeSet<String> = cases().iter().map(|c| c.rule.to_owned()).collect();
     for (rule, test) in OTHER_CASES {
@@ -1244,6 +1250,7 @@ fn should_cover_every_rule_of_fnd_3_3_when_the_negative_cases_are_counted() -> T
                 || ci_source.contains(&declared)
                 || gate_source.contains(&declared)
                 || yaml_source.contains(&declared)
+                || lock_source.contains(&declared)
                 || this_source.contains(&declared),
             "{test} is listed for {rule} but does not exist"
         );

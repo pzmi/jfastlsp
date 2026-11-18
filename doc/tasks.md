@@ -1203,6 +1203,10 @@ target repository is private, only aggregated reports under `doc/eval/` are comm
   by a recipe, or the cases that need them stay syntax-only and say so); its CI job. These
   synthetic Lombok and MapStruct projects stay the offline gate; fineract (BENCH-06) is the real
   counterpart, read through BENCH-05's cases and never copied into a fixture.
+- **Deferred from IDX-07 (2026-11-18):** each new `.java` file here gets its summary golden
+  (`fixtures/java/summaries/orchard/`): `tests/goldens.rs` writes a missing one and fails once;
+  review it and lock it (`just fixtures-lock`). `grammar/ImportModule.java` and
+  `grammar/FlexibleConstructorBodies.java` need Java 25 where the pinned JDK is 21.
 - **Accept:**
   - [ ] at least 200 resolution cases, at least 8 per construct of plan §5.6; a coverage table in `fixtures/java/resolution/README.md`
   - [ ] `java-fixtures` green in `check` and CI; a broken fixture outside `fixtures/java/broken/` fails it
@@ -1579,6 +1583,11 @@ but follow in lane CLI (M2). Starts after the go decision.
   first bound.
 - **Decided (orchestrator, IDX-02 review):** reference sites leave out uses bound to locals and
   parameters, using `locals.scm` (plan §5.5's memory decision); a use whose binding is unclear stays.
+- **Deferred (IDX-07, 2026-11-18):** `fixtures/java/projects/` and `fixtures/java/resolution/`
+  do not exist yet (EVAL-07's); `crates/jfl-adapter-java/tests/goldens.rs` covers every `.java`
+  under `fixtures/java/`, so their summary goldens are written, reviewed and locked when EVAL-07
+  lands them. BENCH-05's real-corpus cases have not landed either; the adapter ran on the corpus
+  (`just bench-syntax`: no file refused, none with a syntax error).
 - **Accept:**
   - [ ] summary goldens match for every file of `fixtures/java/projects/` and `fixtures/java/resolution/`
   - [ ] property test: arbitrary bytes and mutated corpus files never panic and finish within a bound

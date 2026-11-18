@@ -1,0 +1,14 @@
+{
+  "package": "syntax",
+  "imports": [],
+  "declarations": [
+    {"annotations":[],"at":"6:1-12:2","id":0,"javadoc":"5:1-5:30","kind":"class","modifiers":[],"name":"LineEnds","name_at":"6:7-6:15","params":[],"parent":null,"permits":[],"signature":"class LineEnds","supertypes":[],"symbol":"syntax.LineEnds"},
+    {"annotations":[],"at":"7:5-7:15","id":1,"javadoc":null,"kind":"field","modifiers":[],"name":"field","name_at":"7:9-7:14","params":[],"parent":0,"permits":[],"signature":"int field","supertypes":[],"symbol":"syntax.LineEnds#field"},
+    {"annotations":[],"at":"9:5-11:6","id":2,"javadoc":null,"kind":"method","modifiers":[],"name":"method","name_at":"9:10-9:16","params":[],"parent":0,"permits":[],"signature":"void method()","supertypes":[],"symbol":"syntax.LineEnds#method()"}
+  ],
+  "references": [
+    {"at":"10:9-10:14","name":"field","shape":"name"}
+  ],
+  "diagnostics": [],
+  "diagnostics_dropped": 0
+}

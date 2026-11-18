@@ -145,6 +145,12 @@ jfl-adapter-fs = { ignore = ["default"], libc = [], notify = ["default"] }
 jfl-adapter-git = { libc = [] }
 
 jfl-bench = { blake3 = ["default"], ignore = ["default"], rayon = ["default"], serde = ["default", "derive"], serde_json = ["default"], toml = ["default"], tree-sitter = ["default"], tree-sitter-java-orchard = ["default"] }
+# jfl-adapter-java (IDX-07, ADR 0022 as amended 2026-11-17): tree-sitter 0.27.2 (MIT; its vendored C
+# runtime, compiled by its build script with `cc`) and tree-sitter-java-orchard 0.5.25 (MIT; the
+# generated parser.c and scanner.c, compiled the same way), both pinned exactly (`=`); default
+# features only (tree-sitter's `std`; no wasm, no bindgen). Wrapped to this crate and jfl-bench in
+# deny.toml; their build scripts are reviewed there.
+jfl-adapter-java = { tree-sitter = ["default"], tree-sitter-java-orchard = ["default"] }
 
 [external.dev]
 # xtask (XT-02): toml reads tools/versions.toml, mise.toml and mise.lock in tests/versions.rs, an
@@ -171,6 +177,11 @@ jfl-adapter-fs = { divan = ["help"] }
 # divan for the per-call benchmark (`just bench-git`), with the same features as jfl-domain's, for
 # the same reasons.
 jfl-adapter-git = { divan = ["help"], proptest = ["std"] }
+# jfl-adapter-java (IDX-07): upstream tree-sitter-java 0.23.5 (MIT, C compiled by its build script),
+# the switch-back grammar of ADR 0022 (amended 2026-11-17), parsed beside orchard by the tests
+# only, pinned exactly; proptest for the no-panic properties on arbitrary and mutated input (ver
+# §8), with the same features as jfl-domain's.
+jfl-adapter-java = { proptest = ["std"], tree-sitter-java = ["default"] }
 
 [external.build]
 

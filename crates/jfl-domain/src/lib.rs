@@ -37,7 +37,10 @@ pub use summary::{
     Arity, DeclId, Declaration, DeclarationInput, FileSummary, Import, ListRef, Modifiers,
     RefShape, ReferenceSite, Span, StrId, SummaryBuilder, SummaryError, SummaryParts,
 };
-pub use symbol::{DeclKind, MemberId, SymbolError, SymbolId, TypeParam, erase_parameter_type};
+pub use symbol::{
+    DeclKind, MemberId, SymbolError, SymbolId, TypeParam, erase_parameter_type,
+    erase_parameter_type_with, parameter_type_base,
+};
 pub use text::{
     ByteOffset, ByteRange, CliPosition, CliPositionError, LineIndex, Position, PositionEncoding,
     PositionError, Range,
