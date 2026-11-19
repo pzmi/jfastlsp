@@ -17,6 +17,11 @@ disallowed-methods = [
   { path = "tokio::task::spawn_blocking", reason = "spawning a task needs the spawn grant (fnd §2.4, ARCH-detached-spawn)", allow-invalid = true },
   { path = "tokio::task::spawn_local", reason = "spawning a task needs the spawn grant (fnd §2.4, ARCH-detached-spawn)", allow-invalid = true },
   # grant: sleep (granted to this crate: lifted)
+  # grant: timer
+  { path = "tokio::time::interval", reason = "a deadline or a tick needs the timer grant: jfl-composition's daemon/timer.rs only (ADR 0039)", allow-invalid = true },
+  { path = "tokio::time::interval_at", reason = "a deadline or a tick needs the timer grant: jfl-composition's daemon/timer.rs only (ADR 0039)", allow-invalid = true },
+  { path = "tokio::time::timeout", reason = "a deadline or a tick needs the timer grant: jfl-composition's daemon/timer.rs only (ADR 0039)", allow-invalid = true },
+  { path = "tokio::time::timeout_at", reason = "a deadline or a tick needs the timer grant: jfl-composition's daemon/timer.rs only (ADR 0039)", allow-invalid = true },
   # grant: clock (granted to this crate: lifted)
   # grant: env
   { path = "std::env::current_dir", reason = "the environment needs the env grant (fnd §2.4, ARCH-env-authority)" },

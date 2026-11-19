@@ -75,3 +75,47 @@ fn should_reap_an_exited_child_when_the_handle_is_dropped() {
     // then
     assert_eq!(ps_state(&pid), None);
 }
+
+#[cfg(target_os = "linux")]
+#[test]
+fn should_signal_the_exit_descriptor_when_a_detached_child_exits() {
+    // given
+    let (detached, _log) = helpers::spawn(&Command::new(CHILD).args(["exit", "0"]));
+    let exit = detached.exit_fd();
+
+    // when
+    let readable = || {
+        let Some(fd) = exit else { return false };
+        let mut polls = [rustix::event::PollFd::new(
+            &fd,
+            rustix::event::PollFlags::IN,
+        )];
+        let none = rustix::event::Timespec {
+            tv_sec: 0,
+            tv_nsec: 0,
+        };
+        rustix::event::poll(&mut polls, Some(&none)).is_ok_and(|n| n > 0)
+    };
+    let seen = wait_until(GENEROUS, "the exit descriptor to be readable", readable);
+
+    // then
+    assert!(exit.is_some());
+    assert!(seen.is_ok(), "{seen:?}");
+}
+
+#[cfg(not(target_os = "linux"))]
+#[test]
+fn should_offer_no_exit_descriptor_when_the_platform_has_none() {
+    // given
+    let (mut detached, _log) = helpers::spawn(&Command::new(CHILD).args(["exit", "0"]));
+
+    // when
+    let exit = detached.exit_fd().is_some();
+    wait_until(GENEROUS, "the detached child to exit", || {
+        detached.try_exit().unwrap().is_some()
+    })
+    .unwrap();
+
+    // then
+    assert!(!exit);
+}

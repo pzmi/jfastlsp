@@ -539,8 +539,9 @@ Never trim a bound to fit (ver §12).
 ## `daemon`: the lock, the socket, spawn, reconnect and overlays
 
 `formal/daemon.qnt` (FORMAL-04; plan §5.2, §5.3, §7.2; ADR 0016, ADR 0021). The driver is
-IDX-12's, over `jfl-composition`'s daemon host and launcher in-process, with real Unix sockets and
-lock files in a tempdir. `daemon` is pending on IDX-12 until then.
+IDX-12's (`crates/jfl-conformance/src/daemon.rs`), over `jfl-composition`'s daemon host
+(`daemon::host`, stepped by `daemon::stepped`) and proxies (`daemon::proxy`) in process, with real
+Unix sockets, `flock`s and files in a fresh state directory under the temporary directory.
 
 ### The world
 
@@ -595,6 +596,16 @@ lock files in a tempdir. `daemon` is pending on IDX-12 until then.
    lost one with a retryable error; the model does not tell the two apart). A request is never
    silently dropped: a ready proxy's waiting client always has its request on the connection
    (`ReconnectRestores`, control `acceptWithoutResend`).
+8. **A swept socket stops its daemon** (IDX-12's decision, 2026-11-19). The socket file removed
+   by someone else while its daemon serves (`sweep`: a tmp cleaner on plan §5.3's `/tmp`
+   fallback, a user's `rm`) leaves the daemon listening on an inode no proxy can reach, while a
+   spawned daemon fails the lock it still holds: no new client is served until it exits, and it
+   never idles out while it has connections. So the daemon compares, on its tick, the file at the
+   path with the one it bound, and on a difference shuts down as on SIGTERM (`noticeSwept`, a
+   daemon move under fairness); its `unlink` then finds nothing to remove. `OwnerReachable`
+   allows the swept state (`sock.owner` is the daemon, `present` false), the one fault no code can
+   prevent; liveness requires the notice (the control `progressStepIgnoringSweep`, and the Quint
+   test `sweptUnnoticedNeverServesTest`, its cycle as named actions).
 
 ### IDX-12's obligations
 
@@ -642,18 +653,21 @@ These are the design above as IDX-12 must build it; the driver checks each again
 10. **The observation is exact all the way down**, as for `views` (`deny_unknown_fields` and a
    derived `PartialEq` on every nested type).
 
+**As built (IDX-12):** 1, `jfl_adapter_ipc::Flock` and `Host::tick` (checked after the lock and on
+every tick of the run loop); 2, std and Tokio open every descriptor close-on-exec and nothing
+clears it (`jfl-adapter-ipc/tests/endpoint.rs`), and the notify socket is a path the daemon sends
+to, not an inherited descriptor, so a child inherits nothing; the daemon starts no worker yet, so
+"workers die with the daemon" is the first worker's task (SEM-04's javac pool); 3, `run::run`
+calls `setsid` first; 4 and 5, `run::run` and `Host::shutdown`; 6 and 7, `Host::crash` and the
+per-connection `Conn`; 8, `daemon::proxy` (every wait a `poll(2)` bounded by the time left, an expiry a reset; a
+version mismatch stops the old daemon with `jfl/stop` and spawns, ADR 0021); 9, `daemon::stepped`; 10, the driver's observation types.
+
 ### Not modelled
 
 - **The version handshake's mismatch** (ADR 0021: the proxy asks the old daemon to stop and
   respawns): to the model it is a SIGTERM followed by a spawn.
 - **Socket and directory modes, the peer-uid check, the socket path's length limit** (plan
   §5.3): IDX-12's integration tests.
-- **The socket file removed by someone else** while its daemon serves, such as a tmp cleaner
-  under `/tmp/jfl-<euid>/` (plan §5.3's fallback path) or a user's `rm`. No proxy can reach the
-  daemon then, and a spawned daemon fails the lock, so no client is served until that daemon
-  exits; it never idles out while it has connections. IDX-12 should have the daemon notice that
-  its path no longer names its socket (a stat on its idle tick, comparing the inode) and stop;
-  modelling that is a change to this model first (ADR 0007).
 - **The lock file or the state directory deleted from outside** while a daemon holds the lock:
   a second daemon then locks a new file, and two own the directory. The model has this only as a
   code bug (`lockBreakingStale`); obligation 1's path check makes the old daemon stop.
@@ -690,7 +704,9 @@ groups never appear in a trace. Each parameter is a nondeterministic pick named 
 | `sigterm`, `idleExit` | `daemon` | The shutdown's first step: stop accepting, close every connection. The idle exit only with no accepted connection. |
 | `unlink` | `daemon` | The shutdown removes the socket file. |
 | `exit` | `daemon` | The shutdown releases the lock; the daemon exits 0. |
-| `crash` | `daemon` | Abort the daemon (obligation 6). |
+| `crash` | `daemon` | Abort the daemon (obligation 6). A swept socket's binding dies with it. |
+| `sweep` | | Remove the socket file of the serving owner (decision 8). |
+| `noticeSwept` | `daemon` | The tick finds the path no longer names the bound socket: the shutdown's first step. |
 
 Connection and daemon slots are taken first free in order (`d1`, `d2`, `d3`; `c1`, `c2`, `c3`), so
 an action has one outcome; the driver numbers its processes and connections the same way.
@@ -703,7 +719,7 @@ The model has seven variables:
 |:--|:--|:--|
 | `daemons` | slot → `{ phase, lock }` | Each slot's process: `phase` one of `none`, `started`, `locked`, `serving`, `stopping` (stopped accepting), `unlinked` (socket removed, lock held), `exited`, `failed` (exited 1: the lock was held, or a control's failed bind), `crashed`; `lock` the inode of `daemon.lock` it holds an flock on, as a number (below), or 0. |
 | `lockFile` | int | The inode at `<state>/daemon.lock`, 0 while there is none. The driver numbers inodes 1, 2, … in the order it first sees them. |
-| `sock` | `{ present, owner }` | Whether `<state>/sock` exists, and the slot whose bound socket has its inode (`""` for the initial stale file). |
+| `sock` | `{ present, owner }` | Whether `<state>/sock` exists, and the slot whose bound socket has its inode (`""` for the initial stale file); with no file, the live slot that still holds a bound socket the path no longer names (swept), else `""`. |
 | `spawnLock` | string | The proxy holding `spawn.lock`, or `""`. |
 | `conns` | slot → `{ state, proxy, daemon, overlays, inflight }` | `state` one of `free`, `backlog` (connected, not accepted), `open`, `peerClosed` (the proxy closed it, the daemon has not read EOF), `closed` (the daemon closed it, the proxy has not noticed); the daemon's overlays (document names) and whether it holds an unanswered request. |
 | `t` | int | The steps taken since `init`: the driver's step index. It is the liveness simulation's clock (`Progress`, below), in the model because Apalache cannot read a file holding a second module that imports the first. |
@@ -721,7 +737,7 @@ The `released` phase appears only in the `releaseBeforeUnlink` control.
 | `ServedOnlyByOwner` | Every connection a daemon has accepted and not closed belongs to the owner, and the owner is serving. |
 | `NoGhostBuffers` | Every overlay belongs to a live connection (open, or closed by its proxy and not yet read to EOF) of the owner, and an open connection holds only documents its proxy has open. |
 | `ShutdownReleases` | A daemon that exited holds no flock and left no socket file of its own. |
-| `OwnerReachable` | A serving owner's socket is the file at the path. |
+| `OwnerReachable` | A serving owner's socket is the file at the path, or was swept from under it (decision 8). |
 | `ReconnectRestores` | A ready proxy's open connection holds every document its client has open, and its client's unanswered request. |
 
 The first four are plan §7.2's. Plan §7.2's own negative control, releasing the lock before
@@ -814,6 +830,7 @@ sequence, and stops after its last step. Its regression trace, at seed `0x3`, is
 | `crashWithOpenDocuments` | 26 | `d1` crashes while `p1` has `a` open and a request in flight, and `p2`'s closed connection still holds `b` awaiting its EOF. The stale socket refuses `p1`; `p1` spawns `d2`, which unlinks the stale file and binds; `p1` re-sends `a` and its request; `d2` holds no overlay of either dead connection, and answers. |
 | `idleExitRacesConnect` | 32 | `d1`'s last connection closes; as its idle period ends, `p2` connects and sits in the backlog, and the idle exit resets it. `p2` is refused while `d1` stops, its spawned `d2` fails the lock `d1` still holds, and once `d1` has unlinked its socket and released the lock, `p2`'s next spawn (slot `d1` again) serves it. |
 | `sigtermAfterStaleStart` | 14 | From a stale start: `p1` is refused and spawns; the daemon takes the existing lock file, unlinks the stale socket and binds. SIGTERM stops it with `p1` connected: `p1` reads EOF, the daemon unlinks and releases, nothing is left, and `p1` finds no socket. |
+| `sweptSocketStops` | 28 | IDX-12's: `d1`'s socket file is swept while `p1` is connected. `p2` finds no socket and spawns `d2`, which fails the lock `d1` still holds; `d1`'s tick notices the sweep and it shuts down (`p1` reads EOF, the unlink finds nothing, the release), and `p2`'s next spawn serves it. Guarded by the step count `t`. |
 
 More tests without a trace: `spawnLockRefusedTest`, `idleExitWaitsForOpenConnectionsTest` (the
 idle exit is refused while a connection is open), `secondDaemonFailsTheLockTest` (a daemon spawned
@@ -836,12 +853,33 @@ Each control is an action variant with a Quint test that expects its invariant t
 | `releaseBeforeUnlink`, `unlinkAfterRelease` | Plan §7.2's control: releases the lock, then removes the socket. | `OwnerReachable` |
 | `acceptWithoutResend` | Accepts a reconnecting proxy without its documents and request. | `ReconnectRestores` |
 | `listenWithoutUnlinkingStale` | Binds without removing a stale socket file: the bind fails. | `EventuallyServed` (`Progress`) |
+| `progressStepIgnoringSweep` | A daemon never notices its socket swept: every spawn fails its lock. | `EventuallyServed` (`Progress`; by hand, and `sweptUnnoticedNeverServesTest` in every `check`) |
 
 Plan §7.2 names IDX-12's own negative control: a host that releases the lock before removing the
 socket. It must diverge in a trace with a shutdown (`idleExitRacesConnect` and
 `sigtermAfterStaleStart` have one, and `conformance-replay`'s generated traces must include one),
 at the first step after which the model's daemon still holds its lock and the faulty host has
-released it.
+released it. **As built (IDX-12):** the control's host releases the lock in the shutdown's first
+step (`sigterm`, `idleExit` or `noticeSwept`), so it diverges there, deterministically, on each
+committed trace with a shutdown: step 10 of `sigtermAfterStaleStart`, step 15 of
+`idleExitRacesConnect`, step 16 of `sweptSocketStops` (the model's `lock: 1` against the host's
+`0`); `conformance-replay` tries the committed traces after the generated batch
+(`cli::control_diverges`), so the gate never depends on the seed drawing a shutdown.
+`tests/replay.rs::should_diverge_at_the_shutdown_when_the_daemon_control_releases_first` pins the
+three.
+
+**The driver as built (IDX-12).** A spawn starts an in-process host in the model's first free
+slot, reporting on the proxy's notify path; a crash is the host's abort (every descriptor
+dropped, no shutdown step run); the initial stale state is what a throwaway host leaves when it
+locks, binds and crashes. The model's `accept` names one connection of the backlog: the host
+takes connections from the kernel's backlog in order until it holds the one whose handshake
+request carries that proxy's id, keeping the others for later. The proxy's half of `accept` (the
+handshake's answer read, the documents and request re-sent) and the daemon's reading of each frame
+a client sends are part of the same model step, since the model's overlays and requests change
+with it. What the replay found: a notice from the daemon of an earlier, abandoned spawn reached the
+next spawner over the shared notify path (generated `spawnTimeout` steps), so each spawn now has
+its own path (`<state>/n-<12 hex digits>`: the process's pid and its spawn count; the counter is
+the process's, since two proxies of one process, as the driver's, would otherwise collide).
 
 ### Budget
 
@@ -850,12 +888,12 @@ Temurin JDK 21.
 
 | Check | Budget | Time |
 |:--|:--|:--|
-| `formal-test` (18 daemon tests) | every `check` | under a second |
-| `formal-freshness`: four traces regenerated | every `check` | about 2 s per trace |
-| `conformance-replay` | 10 traces of `sim_steps` (40), generated twice, every `check` | a few seconds. Read, not replayed, until IDX-12. |
-| `formal-verify daemon`: Apalache | `steps = 8` | 462 s |
-| `formal-verify daemon`: simulation | 20000 samples of `sim_steps` (40) | 194 s (170 s without the other lane running) |
-| `formal-verify daemon`: liveness and its control | 3000 samples of 92 steps, each | 89 s, then the control fails within seconds |
+| `formal-test` (20 daemon tests) | every `check` | under a second |
+| `formal-freshness`: five traces regenerated | every `check` | about 2 s per trace |
+| `conformance-replay` | 10 traces of `sim_steps` (40), generated twice, every `check`, then the control | a few seconds (IDX-12: 240 generated traces at six seeds, 1640 states each batch, conform) |
+| `formal-verify daemon`: Apalache | `steps = 8` | 462 s; 552 s with IDX-12's `sweep` and `noticeSwept` (2026-11-19, another lane building) |
+| `formal-verify daemon`: simulation | 20000 samples of `sim_steps` (40) | 194 s (170 s without the other lane running); 157 s with IDX-12's actions |
+| `formal-verify daemon`: liveness and its control | 3000 samples of 92 steps, each | 89 s, then the control fails within seconds; 72 s with IDX-12's actions, and its `progressStepIgnoringSweep` control (by hand) fails in 3 s |
 | `formal-verify daemon` in all | weekly in `formal.yml` (60-minute job) | 762 s, with another lane building beside it; perhaps twice that on a CI runner |
 
 **Apalache's time grows steeply with the bound:** 24 s at length 4, 63 s at 6 and 467 s at 8;
@@ -876,6 +914,7 @@ and at a fresh seed in every `conformance-replay`. Each of these witness states 
 | `witnessServingAfterShutdown` | a daemon serves after another shut down cleanly | 4 s |
 | `witnessRespawnHoldsOverlays` | a connection to a daemon started after a crash holds overlays | 15 s (4 s at 40 steps) |
 | `witnessAnsweredAfterCrash` | a client answered, documents open, after a crash | 50 s, about 9000 samples (21 s at 40 steps) |
+| `witnessSweptNoticed` | a daemon stopping after its socket was swept (IDX-12) | under 1 s |
 
 The rarest is an answer after a crash, which is why `sim_steps` is 40, not 30. Raise either
 number only with a measurement, while `formal.yml`'s 60-minute job stays well under its limit.

@@ -38,7 +38,7 @@ toml_list() {
 }
 
 # One line per grant: `<grant> <crate> <crate>...` (no associative arrays: macOS ships bash 3.2).
-grant_table="$(for grant in process socket fs spawn sleep clock env; do
+grant_table="$(for grant in process socket fs spawn sleep timer clock env; do
   echo "$grant $(toml_list grants "$grant" | tr '\n' ' ')"
 done)"
 grants_of() { # grants_of CRATE: its grants, space-separated

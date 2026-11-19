@@ -8,12 +8,13 @@
 //! `tests/run.rs::should_refuse_setsid_to_a_group_leader_when_run`.
 
 use std::io;
-use std::os::fd::OwnedFd;
+use std::os::fd::{AsFd, BorrowedFd, OwnedFd};
 use std::process::{Child, Stdio};
 
 use crate::command::Checked;
 use crate::error::RunError;
 use crate::run::{Exit, Group, failed_to_start, std_command};
+use crate::sys;
 
 /// A child left running. Unlike [`crate::FramedChild`], dropping this handle never kills it and
 /// never blocks: the drop reaps it only if it has already exited. A child still running then is
@@ -26,6 +27,7 @@ use crate::run::{Exit, Group, failed_to_start, std_command};
 #[derive(Debug)]
 pub struct Detached {
     child: Child,
+    exit: Option<OwnedFd>,
 }
 
 impl Detached {
@@ -39,7 +41,16 @@ impl Detached {
             .stderr(Stdio::from(log))
             .spawn()
             .map_err(|source| failed_to_start(checked, source))?;
-        Ok(Self { child })
+        let exit = sys::exit_descriptor(&child);
+        Ok(Self { child, exit })
+    }
+
+    /// A descriptor that becomes readable when the child exits (a pidfd on Linux), for a caller
+    /// that waits on it with `poll(2)` beside its own descriptors; `None` where the platform has
+    /// none (macOS), when the caller checks [`Detached::try_exit`] between bounded waits.
+    /// Pinned by `tests/detached.rs::should_signal_the_exit_descriptor_when_a_detached_child_exits`.
+    pub fn exit_fd(&self) -> Option<BorrowedFd<'_>> {
+        self.exit.as_ref().map(AsFd::as_fd)
     }
 
     /// The child's pid.

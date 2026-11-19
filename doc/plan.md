@@ -733,7 +733,7 @@ proxies (`jfl lsp`, CLI) speak `jfl-protocol` through the IPC client.
 | Sockets | `jfl-adapter-ipc` (Unix domain only) | names no `std::net` or `std::os::unix::net`; no TCP anywhere |
 | Filesystem | `jfl-adapter-fs`, `-git`, `-store`, `-ipc`, `-classfile`, `-javac`, `-gradle`, `jfl-composition` | pure and application crates name no `std::fs` |
 | Clock and environment | `jfl-composition` (provides `Clock`, reads configuration), `jfl-process` (deadlines, the child's allowlisted environment), `jfl-cli` (environment only, for defaults) | adapters take time from the `Clock` port; pure and application crates name none |
-| Sleeping | no production crate (waits are deadlines on the `Clock` port or channels) | `jfl-testkit`'s `poll` is the only sleep in the workspace |
+| Sleeping | no production crate (waits are deadlines on the `Clock` port or channels, or `poll(2)` bounded by the time left); a deadline on an event or a periodic tick only in `jfl-composition`'s `daemon/timer.rs` (the `timer` grant, ADR 0039) | `jfl-testkit`'s `poll` is the only sleep in the workspace; no polling loop anywhere |
 | Randomness | none in v0.x | pure crates name none; a future need is a port |
 
 **Tool and test crates** are never reached from production (§6.3) and hold the authority their

@@ -91,7 +91,9 @@ seed = "0x3"
 
 # The daemon model's scenarios (FORMAL-04, doc/formal-models.md): scripted steps like the views
 # scenarios, each from an initial state with its pick fixed (`initClean`: no socket file;
-# `initStale`: one left by a crash). Read, not replayed, until IDX-12 brings the daemon driver.
+# `initStale`: one left by a crash). Replayed through the daemon driver (IDX-12,
+# crates/jfl-conformance/src/daemon.rs); `daemon-swept-socket-stops`, guarded by the step count
+# `t` like the diagnostics scenarios, is IDX-12's (the socket file removed from under its daemon).
 [traces.daemon-two-proxies-spawn-at-once]
 model = "daemon"
 main = "daemon"
@@ -126,6 +128,15 @@ init = "initStale"
 step = "sigtermAfterStaleStart"
 invariant = "allInvariants"
 max_steps = 14
+seed = "0x3"
+
+[traces.daemon-swept-socket-stops]
+model = "daemon"
+main = "daemon"
+init = "initClean"
+step = "sweptSocketStops"
+invariant = "allInvariants"
+max_steps = 28
 seed = "0x3"
 
 # The diagnostics model's scenarios (FORMAL-05, doc/formal-models.md): each scenario's scripted

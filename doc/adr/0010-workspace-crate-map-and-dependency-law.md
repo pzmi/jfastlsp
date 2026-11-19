@@ -4,7 +4,7 @@ Date: 2026-11-16
 
 ## Status
 
-Accepted (owner, 2026-11-17); amended 2026-11-16 (twice) and 2026-11-17 (owner: `jfl-jdtls` removed).
+Accepted (owner, 2026-11-17); amended 2026-11-16 (twice) and 2026-11-17 (owner: `jfl-jdtls` removed). Superseded by [0039](0039-timed-waits-only-deadlines-and-ticks-in-the-daemon-timer-module.md) in part, for the sleep grant (2026-11-24).
 
 ## Context
 

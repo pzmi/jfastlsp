@@ -117,8 +117,11 @@ Plan §6.5's table is enforced per crate, because clippy has no module-level con
     `Builder::spawn_scoped`, `tokio::spawn` and its `spawn_blocking`/`spawn_local`;
   - `sleep`: every timed wait, not only a sleep (FND-08): `std::thread::sleep`, `park_timeout`,
     `Receiver::recv_timeout`, `Condvar::wait_timeout*`, the Unix sockets' `set_read_timeout` and
-    `set_write_timeout`, crossbeam's `recv_timeout`/`recv_deadline`, and Tokio's `sleep`,
-    `sleep_until`, `timeout`, `timeout_at`, `interval` and `interval_at`;
+    `set_write_timeout`, crossbeam's `recv_timeout`/`recv_deadline`, and Tokio's `sleep` and
+    `sleep_until`;
+  - `timer`: a deadline on an event or a periodic tick (ADR 0039): Tokio's `timeout`,
+    `timeout_at`, `interval` and `interval_at`, granted to `jfl-composition` for its
+    `daemon/timer.rs` only (by review); a plain sleep or a polling loop is never a timer;
   - `clock`: `SystemTime::now`, `Instant::now`, `SystemTime::elapsed`, `Instant::elapsed`,
     Tokio's `Instant::now`;
   - `env`: `std::env::var`, `var_os`, `vars`, `vars_os`, `set_var`, `remove_var`, `home_dir`,
@@ -145,7 +148,7 @@ Plan §6.5's table is enforced per crate, because clippy has no module-level con
   | `jfl-adapter-ipc` | socket, fs, spawn | the endpoint, the state directory and lock, per-connection tasks |
   | `jfl-adapter-lsp` | spawn | the session's reader and writer threads and its bounded request pool, all scoped and joined before the session returns (LSP-01) |
   | fs adapters of plan §6.5 (`-fs`, `-git`, `-store`, `-classfile`, `-javac`, `-gradle`) | fs | their own files only; `jfl-adapter-fs` starts no thread itself, but a watch runs `notify`'s event-loop thread (notify's own, stopped when the watch drops, not joined) and a walk `ignore`'s scoped workers (joined before it returns) (IDX-06) |
-  | `jfl-composition` | fs, spawn, clock, env | the system `Clock`, configuration, task supervision |
+  | `jfl-composition` | fs, spawn, clock, env, timer | the system `Clock`, configuration, task supervision; timer for the daemon's idle tick and its handshake and write deadlines, in `daemon/timer.rs` only (ADR 0039) |
   | `jfl-cli` | env | `--state-dir` defaults (`XDG_*`, `HOME`) |
   | `jfl-testkit` | process, fs, sleep, clock | fixture builders run `git` and create tempdirs; sleep and clock inside `poll` only (by review) |
   | `jfl-conformance` | fs, env | committed traces; seed and step parameters from the recipe |
@@ -245,6 +248,7 @@ socket  = ["jfl-adapter-ipc"]
 fs      = [ ... ]             # §2.4's table
 spawn   = ["jfl-adapter-ipc", "jfl-composition"]
 sleep   = ["jfl-testkit"]
+timer   = ["jfl-composition"]
 clock   = ["jfl-process", "jfl-composition", "jfl-testkit", "jfl-bench", "jfl-eval"]
 env     = ["jfl-process", "jfl-composition", "jfl-cli", "jfl-conformance", "jfl-architecture", "jfl-bench", "jfl-eval", "xtask"]
 independent = ["jfl-oracle", "jfl-eval", "jfl-bench", "xtask"]

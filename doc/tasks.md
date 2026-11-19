@@ -2317,13 +2317,81 @@ but follow in lane CLI (M2). Starts after the go decision.
   daemon's first act, before the lock.
 - **Reuse considered:** std file locks (Rust 1.89), `rustix`, Tokio's `UnixListener`, `lsp-server`'s
   message type; sccache's spawn handshake, Biome's `lsp-proxy` and buck2's version check copied as
-  designs (ADR 0021).
+  designs (ADR 0021). As built: all of these; `proptest-state-machine` weighed and not taken (below);
+  no daemonizing or lock crate (plan §16.3).
+- **Decided (IDX-12, 2026-11-19):** the daemon notices its socket file removed under it and stops:
+  on its tick it compares the file at the path with the one it bound, and shuts down as on SIGTERM
+  (no proxy can reach it, and a spawned daemon fails the lock it holds, so serving on would starve
+  every new client). Model first: `formal/daemon.qnt`'s fault `sweep` and daemon move
+  `noticeSwept`, `OwnerReachable` allowing the swept state, the scenario `sweptSocketStops` (its
+  regression trace committed), the liveness control `progressStepIgnoringSweep` and its cycle test;
+  Apalache at `steps = 8` took 552 s (was 462 s), inside `formal.yml`'s budget
+  (`doc/formal-models.md`, decision 8).
+- **Decided (IDX-12):** the notify socket is a path, one per spawn (`<state>/n-<12 hex digits>`:
+  the process's pid and its spawn count, a fixed width checked with `sock` against `sun_path` when
+  the state directory's socket path is made), not an inherited descriptor: every descriptor stays
+  close-on-exec, with no exception. A shared path let a notice from an earlier, abandoned spawn's
+  daemon reach the next spawner (found by the driver's generated `spawnTimeout` steps). The
+  proxy's waits are `poll(2)` with the time left (its socket non-blocking; the notify socket
+  polled with the child's pidfd on Linux, in slices of `jfl_process::EXIT_RECHECK` elsewhere, as
+  `jfl-process` waits), and a proxy refused the spawn lock blocks on it (`Flock::acquire`): no
+  sleep and no socket timeout in `jfl-adapter-ipc` or the proxy.
+- **Decided (owner, 2026-11-24, H1; ADR 0039):** a timed wait is a deadline on an event or a
+  periodic tick, and only in `jfl-composition`'s `daemon/timer.rs` (the daemon's idle and
+  lock-path tick, its handshake and write deadlines: Tokio's `interval` and `timeout`), under the
+  new `timer` grant `architecture.toml` gives `jfl-composition` alone; plain sleeps and polling
+  loops stay banned everywhere, and the `sleep` grant stays `jfl-testkit`'s. ADR 0039 supersedes
+  ADR 0010's sleeping rule; plan §6.5 and fnd §2.4 say the same.
+- **Decided (IDX-12):** a version mismatch replaces the old daemon (ADR 0021, plan §6.6): the
+  daemon answers `VersionMismatch` and keeps the connection open for `jfl/stop` alone (frozen
+  across majors), which it honours; the proxy sends `jfl/stop` on that connection, reads the
+  answer and the connection's end, connects again and spawns its own. The proxy decides, not the
+  daemon, because only the proxy knows it needs its own version: a daemon cannot tell an upgrade
+  from a stale client. A proxy whose own spawn mismatches too (a broken install) gives up with
+  `Incompatible` instead of looping. Pinned by
+  `tests/daemon.rs::should_stop_the_daemon_of_another_major_and_start_its_own_when_a_proxy_connects`
+  and `::should_serve_only_stop_when_the_handshake_announced_another_major`.
+- **Decided (IDX-12 review, M1):** each connection has a writer task draining a bounded outbox
+  (64 replies), each write under a 30 s deadline; an expired write or a full outbox severs the
+  connection (its tasks end, its socket closes), so the loop never waits on a peer and no
+  half-written frame is followed by another. Pinned by
+  `tests/daemon.rs::should_keep_serving_others_and_sigterm_when_a_client_stops_reading`.
+- **Decided (IDX-12):** plan §5.3's proposed `/tmp/jfl-<euid>/` fallback is not built: a socket path
+  over `sun_path`'s limit is refused with the limit named (`jfl_adapter_ipc::socket`), so the
+  fallback stays Proposed.
+- **As built (IDX-12):** `jfl-adapter-ipc` (state directory, `Flock`, socket path, Tokio listener
+  with the peer-uid check, std client with deadlines, notify datagrams, `lsp_server::Message`
+  classification of frames from `jfl-protocol`'s bounded decoder); `jfl-composition::daemon` (the
+  steppable host, `stepped` for the driver, the proxy, the run loop with `setsid` first, SIGTERM,
+  the idle tick with the lock-path and socket-path checks, the shutdown order, `jfl/stop`, the
+  `ProcessLauncher` on `jfl-process`'s detached mode, and the request seam `service::Service`, whose
+  `Unwired` answers status without views and every query with an error, never `complete=true`);
+  `jfl daemon` in `jfl-cli`. The state directory reaches the services through `run::run`'s
+  factory, called with the checked `StateDir` once the lock is held (the summary store's place,
+  IDX-09). Not wired yet: `lsp_server`'s `log` is not bridged (no subscriber is installed);
+  a ranged `didChange` is LSP-02's document sync (the host keeps full-text changes).
+- **Remaining (IDX-12 lands as a slice, 2026-11-19):** the `endpoint` contract suite (below; LSP-02
+  needs the daemon, not the suite); the tracing subscriber the
+  daemon is first to install, keeping the `lsp_server` target below DEBUG; workers that die with
+  the daemon belong to the first worker (SEM-04), the daemon starts none yet. Review LOWs left: the
+  proxy's `connect` has no deadline of its own (a Unix connect blocks only on a full backlog); a
+  proxy that dies while awaiting leaves its `n-*` notify file; a connection's overlays are not
+  bounded (plan §5.9); `Proxy::call` bounds each wait by its reply budget, not by what is left of
+  the call's; the liveness control `progressStepIgnoringSweep` runs by hand only (the registry
+  takes one control per model); the state directory is checked by its last component only, and
+  the shutdown's unlink compares then removes (a window after a lost lock only); nothing is logged
+  (refused peers, accept and write failures); `daemon.log` is neither reset to `0600` nor bounded;
+  the bench can leave a daemon on an error path; the test daemon is a bin of a production crate
+  (a release builds `--bin jfl` only). Fixed in the review round: a malformed request is answered
+  with its id when one can be read; a failed accept pauses accepting until the next tick; a proxy
+  reaps the daemons it spawned; test guards kill only unreaped children.
 - **Accept:**
-  - [ ] `conformance-replay` green for `daemon`; the negative control fails at its step
-  - [ ] integration tests: a second daemon on the same state dir exits with a clear error; modes are `0700`/`0600` (also under a non-root uid via `setpriv`, since the sandbox runs as root); an existing state dir with mode `0755` or another owner is refused; a peer with another uid is refused; two clients racing start one daemon
-  - [ ] after a daemon crash a client reconnects and the new daemon holds no overlay of a dead connection
-  - [ ] a `proptest-state-machine` test of the host's lock, socket and connection states against a reference machine (ADR 0007, amended; ver §6.4)
-  - [ ] runs on the bench corpus (small at least, `just bench`) and reports the metrics it affects; its correctness tests also run against the real-corpus cases that apply (BENCH-05)
+  - [x] `conformance-replay` green for `daemon`; the negative control fails at its step (the five regression traces and 240 generated traces at six seeds conform; the control diverges at the first shutdown step of each committed trace with one: `tests/replay.rs::should_diverge_at_the_shutdown_when_the_daemon_control_releases_first`)
+  - [x] integration tests: a second daemon on the same state dir exits with a clear error; modes are `0700`/`0600` (also under a non-root uid via `setpriv`, since the sandbox runs as root); an existing state dir with mode `0755` or another owner is refused; a peer with another uid is refused; two clients racing start one daemon (`jfl-adapter-ipc/tests/endpoint.rs`, `jfl-composition/tests/daemon.rs`)
+  - [x] after a daemon crash a client reconnects and the new daemon holds no overlay of a dead connection (the `daemon-crash-with-open-documents` trace on the host in process; `tests/daemon.rs::should_reconnect_to_a_new_daemon_with_its_document_when_the_daemon_crashed` with a killed process)
+  - [x] a reference-machine test of the host's lock, socket and connection states, with `EventuallyServed`'s reduction (once faults stop, every waiting client is served within 60 system moves): plain `proptest`, not `proptest-state-machine`, whose default features add 16 crates against the std-only proptest of `architecture.toml` (orchestrator's decision, IDX-12) (`jfl-composition/tests/host_machine.rs`; ADR 0007, amended; ver §6.4)
+  - [x] reports the metrics it affects (`just bench-daemon`, `doc/bench/README.md`); no corpus applies (none of it reads a Java file; the orchestrator to confirm this reading of the clause)
+  - [ ] the `endpoint` contract suite (ver §5): one suite over an in-memory duplex and `jfl-adapter-ipc`, with a deliberately broken implementation failing it
 - **Impact:** protocol (endpoint); new authority (sockets).
 
 ### Lane LSP: M1, the LSP carrier

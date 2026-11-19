@@ -24,6 +24,9 @@ socket = ["jfl-adapter-ipc"]
 fs = ["jfl-adapter-fs", "jfl-adapter-git", "jfl-adapter-store", "jfl-adapter-classfile", "jfl-adapter-javac", "jfl-adapter-gradle", "jfl-adapter-ipc", "jfl-composition", "jfl-testkit", "jfl-conformance", "jfl-architecture", "jfl-bench", "jfl-eval", "jfl-oracle", "xtask"]
 spawn = ["jfl-adapter-ipc", "jfl-adapter-lsp", "jfl-composition"]
 sleep = ["jfl-testkit"]
+# A deadline on an event or a periodic tick (Tokio's timeout and interval), never a plain sleep or a
+# polling loop: jfl-composition's daemon/timer.rs only, by review (ADR 0039).
+timer = ["jfl-composition"]
 clock = ["jfl-process", "jfl-composition", "jfl-testkit", "jfl-bench", "jfl-eval"]
 env = ["jfl-process", "jfl-composition", "jfl-cli", "jfl-conformance", "jfl-architecture", "jfl-bench", "jfl-eval", "xtask"]
 independent = ["jfl-oracle", "jfl-eval", "jfl-bench", "xtask"]
@@ -161,6 +164,22 @@ jfl-adapter-java = { tree-sitter = ["default"], tree-sitter-java-orchard = ["def
 # rusqlite, the other crates of ADR 0025, are not taken: the postings are a sorted table
 # (crates/jfl-adapter-store/src/postings.rs has the measurement) and DEC-03's tier needs no database.
 jfl-adapter-store = { blake3 = ["default"], postcard = ["alloc"], serde = ["derive", "std"], thiserror = ["default"] }
+# jfl-adapter-ipc (IDX-12, plan §5.3, ADR 0021): tokio (net, io-util) for the daemon's listener and
+# connections, the only Unix sockets of the product with jfl-composition's runtime (plan §16.2; wrapped
+# in deny.toml); rustix (event, process, std: no default features, as jfl-process) for the
+# effective uid the state directory and every peer must have, and poll(2) for the proxy's deadlines
+# (no socket timeout, no sleep); lsp-server, rust-analyzer's message type, pinned exactly
+# as in jfl-adapter-lsp (ADR 0020, ADR 0021), to classify each frame (its reader and writer are
+# denied by clippy.toml); serde_json for the params left as JSON and the request id; thiserror for
+# the typed refusals (fnd §4.3). All in the graph already but tokio, whose new crates (bytes,
+# socket2, signal-hook-registry, tokio-macros) run no build script.
+jfl-adapter-ipc = { lsp-server = [], rustix = ["event", "process", "std"], serde_json = ["default"], thiserror = ["default"], tokio = ["io-util", "net"] }
+# jfl-composition (IDX-12): tokio's current-thread runtime (rt, net), its timers (time: the idle
+# tick and the daemon's handshake and write deadlines, all in daemon/timer.rs), SIGTERM (signal), select! (macros) and bounded channels
+# (sync) for the daemon host; rustix (process, std) for setsid, the daemon's first act; serde (derive)
+# for the typed results it serializes; serde_json
+# for the requests' params; thiserror for the typed errors. In the graph already.
+jfl-composition = { rustix = ["process", "std"], serde = ["default", "derive"], serde_json = ["default"], thiserror = ["default"], tokio = ["macros", "net", "rt", "signal", "sync", "time"] }
 
 [external.dev]
 # xtask (XT-02): toml reads tools/versions.toml, mise.toml and mise.lock in tests/versions.rs, an
@@ -199,6 +218,13 @@ jfl-adapter-java = { proptest = ["std"], tree-sitter-java = ["default"] }
 # features bring 16 crates (the IDX-09 card's decision).
 jfl-adapter-store = { proptest = ["std"] }
 jfl-application = { proptest = ["std"] }
+# jfl-adapter-ipc (IDX-12): tokio's current-thread runtime (rt) to drive the daemon side in the
+# integration tests; in the graph already (the crate's own tokio).
+jfl-adapter-ipc = { tokio = ["rt"] }
+# jfl-composition (IDX-12): proptest for the daemon host's reference-machine test (ver §6.4; plain
+# proptest, not proptest-state-machine, whose default features add 16 crates against the std-only
+# proptest every crate here takes), with the same features as jfl-domain's, for the same reasons.
+jfl-composition = { proptest = ["std"] }
 
 [external.build]
 

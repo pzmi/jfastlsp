@@ -13,7 +13,9 @@ const FILE: &str = "architecture.toml";
 
 /// The grants of fnd §2.4, which are also the `# grant: <name>` sections of the root
 /// `clippy.toml`.
-pub const GRANTS: [&str; 7] = ["process", "socket", "fs", "spawn", "sleep", "clock", "env"];
+pub const GRANTS: [&str; 8] = [
+    "process", "socket", "fs", "spawn", "sleep", "timer", "clock", "env",
+];
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -56,6 +58,7 @@ struct RawGrants {
     fs: Option<Vec<String>>,
     spawn: Option<Vec<String>>,
     sleep: Option<Vec<String>>,
+    timer: Option<Vec<String>>,
     clock: Option<Vec<String>>,
     env: Option<Vec<String>>,
     independent: Option<Vec<String>>,
@@ -242,6 +245,7 @@ pub fn parse(text: &str) -> Result<Policy, Finding> {
         present("fs", raw.grants.fs),
         present("spawn", raw.grants.spawn),
         present("sleep", raw.grants.sleep),
+        present("timer", raw.grants.timer),
         present("clock", raw.grants.clock),
         present("env", raw.grants.env),
     ];

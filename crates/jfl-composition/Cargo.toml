@@ -23,6 +23,11 @@ jfl-adapter-ipc = { path = "../jfl-adapter-ipc" }
 jfl-adapter-lsp = { path = "../jfl-adapter-lsp" }
 jfl-adapter-javac = { path = "../jfl-adapter-javac" }
 jfl-adapter-gradle = { path = "../jfl-adapter-gradle" }
+tokio = { version = "1.52.3", default-features = false, features = ["rt", "net", "time", "signal", "macros", "sync"] }
+rustix = { version = "1.1.6", default-features = false, features = ["std", "process"] }
+serde_json = "1.0.154"
+thiserror = "2"
+serde = { version = "1.0.229", features = ["derive"] }
 
 [lints]
 workspace = true
@@ -53,3 +58,19 @@ harness = false
 [[bench]]
 name = "queries"
 harness = false
+
+# The daemon's IPC as a client meets it (`just bench-daemon`, IDX-12): spawn to ready, connect and
+# handshake, a trivial request's round trip; reports, never gates.
+[[bench]]
+name = "daemon"
+harness = false
+
+[dev-dependencies]
+jfl-testkit = { path = "../jfl-testkit" }
+proptest = { version = "1.12.0", default-features = false, features = ["std"] }
+
+# The daemon for this crate's own tests (tests/daemon.rs); see its doc comment.
+[[bin]]
+name = "jfl-composition-test-daemon"
+path = "src/bin/jfl-composition-test-daemon.rs"
+test = false

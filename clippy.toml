@@ -91,12 +91,13 @@ disallowed-methods = [
   { path = "std::thread::park_timeout", reason = "no sleeps: wait on channels or fake time, or jfl_testkit::poll::wait_until (fnd §2.4, ver §3, ARCH-test-sleep)" },
   { path = "std::thread::park_timeout_ms", reason = "a timed wait is a sleep: it needs the sleep grant (fnd §2.4, ver §3, ARCH-test-sleep)" },
   { path = "std::thread::sleep", reason = "no sleeps: wait on channels or fake time, or jfl_testkit::poll::wait_until (fnd §2.4, ver §3, ARCH-test-sleep)" },
-  { path = "tokio::time::interval", reason = "a timed wait is a sleep: it needs the sleep grant (fnd §2.4, ver §3, ARCH-test-sleep)", allow-invalid = true },
-  { path = "tokio::time::interval_at", reason = "a timed wait is a sleep: it needs the sleep grant (fnd §2.4, ver §3, ARCH-test-sleep)", allow-invalid = true },
   { path = "tokio::time::sleep", reason = "no sleeps: wait on channels or fake time, or jfl_testkit::poll::wait_until (fnd §2.4, ver §3, ARCH-test-sleep)", allow-invalid = true },
   { path = "tokio::time::sleep_until", reason = "no sleeps: wait on channels or fake time, or jfl_testkit::poll::wait_until (fnd §2.4, ver §3, ARCH-test-sleep)", allow-invalid = true },
-  { path = "tokio::time::timeout", reason = "a timed wait is a sleep: it needs the sleep grant (fnd §2.4, ver §3, ARCH-test-sleep)", allow-invalid = true },
-  { path = "tokio::time::timeout_at", reason = "a timed wait is a sleep: it needs the sleep grant (fnd §2.4, ver §3, ARCH-test-sleep)", allow-invalid = true },
+  # grant: timer
+  { path = "tokio::time::interval", reason = "a deadline or a tick needs the timer grant: jfl-composition's daemon/timer.rs only (ADR 0039)", allow-invalid = true },
+  { path = "tokio::time::interval_at", reason = "a deadline or a tick needs the timer grant: jfl-composition's daemon/timer.rs only (ADR 0039)", allow-invalid = true },
+  { path = "tokio::time::timeout", reason = "a deadline or a tick needs the timer grant: jfl-composition's daemon/timer.rs only (ADR 0039)", allow-invalid = true },
+  { path = "tokio::time::timeout_at", reason = "a deadline or a tick needs the timer grant: jfl-composition's daemon/timer.rs only (ADR 0039)", allow-invalid = true },
   # grant: clock
   { path = "std::time::Instant::elapsed", reason = "time comes from the Clock port; the clock needs the clock grant (fnd §2.4, ARCH-clock-authority)" },
   { path = "std::time::Instant::now", reason = "time comes from the Clock port; the clock needs the clock grant (fnd §2.4, ARCH-clock-authority)" },

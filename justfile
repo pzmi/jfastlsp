@@ -348,6 +348,12 @@ javac-bindings mode="check": _preflight
     java tools/javac-bindings/JavacBindings.java {{quote(mode)}} "$out/shop.tsv" fixtures/java/projects/shop
     java tools/javac-bindings/JavacBindings.java {{quote(mode)}} "$out/generated.tsv" "$out/generated"
 
+# The daemon's IPC as a client meets it (IDX-12): the test daemon spawned on demand by a real proxy
+# (spawn to ready), then connect and the version handshake, and a trivial request's round trip, at
+# p50 and p95. No corpus: none of it reads a Java file. Reports, never gates. `just bench-daemon`.
+bench-daemon: _preflight
+    {{cargo}} bench --locked -p jfl-composition --bench daemon
+
 # Rewrite fixtures.lock from the tree after reviewing the changed goldens (ver §4,
 # ARCH-fixtures-lock): the SHA-256 of every file under fixtures/ and each crate's tests/fixtures/.
 fixtures-lock:

@@ -9,3 +9,4 @@ pub mod golden;
 pub mod lsp_transcript;
 pub mod poll;
 pub mod query_golden;
+pub mod signal;

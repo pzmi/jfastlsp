@@ -71,7 +71,7 @@ for the owner's decisions.
 | [0007](0007-formal-methods-required-quint-with-itf-conformance.md) | Formal methods required: Quint models with ITF conformance against the real code | Accepted (owner, 2026-11-17); amended 2026-11-16, 2026-11-17 (owner) and 2026-11-17 (FORMAL-02) |
 | [0008](0008-no-event-sourcing-the-index-is-a-rebuildable-cache.md) | No event sourcing: the index is a rebuildable cache | Accepted (owner, 2026-11-17) |
 | [0009](0009-phase-0-first-owner-run-evaluations-and-decision-tasks.md) | Phase 0 first: owner-run evaluations and a decision task per open choice | Accepted (owner, 2026-11-17); amended 2026-11-16 |
-| [0010](0010-workspace-crate-map-and-dependency-law.md) | Workspace crate map and dependency law in architecture.toml | Accepted (owner, 2026-11-17); amended 2026-11-16 (twice) and 2026-11-17 |
+| [0010](0010-workspace-crate-map-and-dependency-law.md) | Workspace crate map and dependency law in architecture.toml | Accepted (owner, 2026-11-17); amended 2026-11-16 (twice) and 2026-11-17; superseded in part by 0039 (the sleep grant) |
 | [0011](0011-pinned-toolchains-rust-1-97-0-and-tools-versions-toml.md) | Pinned toolchains: Rust 1.97.0, edition 2024; JDK and tools in tools/versions.toml | Superseded by 0030; tool pins restored by 0035 |
 | [0012](0012-port-xtask-from-mayfly.md) | Port xtask from mayfly | Superseded by 0030; direction restored by 0035 |
 | [0013](0013-two-carriers-over-one-query-engine-cli-first.md) | Two carriers over one query engine: JSON CLI first, LSP second | Superseded by 0034 |
@@ -100,3 +100,4 @@ for the owner's decisions.
 | [0036](0036-javac-worker-our-own-warm-context-with-scip-java.md) | javac worker: our own small worker with one warm javac context, scip-java's plugin | Accepted (owner, 2026-11-17) |
 | [0037](0037-completeness-requires-a-watched-cookie-synced-view.md) | Completeness requires a watched, cookie-synced view | Accepted (owner, 2026-11-18) |
 | [0038](0038-record-decisions-change-them-by-a-new-record.md) | Record important decisions; change one by a new record that supersedes it | Accepted (owner, 2026-11-18) |
+| [0039](0039-timed-waits-only-deadlines-and-ticks-in-the-daemon-timer-module.md) | Timed waits: only deadlines and ticks, in the daemon's timer module | Accepted (owner, 2026-11-24) |

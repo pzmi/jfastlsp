@@ -11,6 +11,7 @@ use std::path::{Path, PathBuf};
 
 use jfl_conformance::HarnessError;
 use jfl_conformance::cli;
+use jfl_conformance::daemon;
 use jfl_conformance::manifest;
 use jfl_conformance::registry;
 use jfl_conformance::replay::{self, Context, Failure};
@@ -458,7 +459,7 @@ fn should_refuse_the_registry_when_a_model_has_no_driver() -> TestResult {
     );
     assert!(
         registry::check(&["smoke".to_owned(), "views".to_owned()]).is_err(),
-        "daemon is pending, so registered"
+        "daemon has a driver, so registered"
     );
     assert!(
         registry::check(&["smoke".to_owned(), "views".to_owned(), "daemon".to_owned()]).is_err(),
@@ -587,19 +588,19 @@ fn should_warn_of_each_pending_model_when_the_traces_are_replayed() {
 
 #[test]
 fn should_read_a_pending_model_s_generated_traces_when_its_driver_has_not_landed() -> TestResult {
-    // given: a well-formed and a malformed generated run of the pending daemon model
+    // given: a well-formed and a malformed generated run of the pending diagnostics model
     let scratch = Generated::new("pending")?;
-    let daemon = scratch.dir.join("daemon");
+    let daemon = scratch.dir.join("diagnostics");
     fs::create_dir_all(&daemon)?;
     let committed_daemon = fs::read_to_string(
-        root().join("formal/traces/regression/daemon-two-proxies-spawn-at-once.itf.json"),
+        root().join("formal/traces/regression/diagnostics-close-during-compile.itf.json"),
     )?;
     let run = |text: &str| -> Result<(u8, String, String), Box<dyn Error>> {
         fs::write(daemon.join("trace_0.itf.json"), text)?;
         let args: Vec<String> = [
             "replay",
             "--model",
-            "daemon",
+            "diagnostics",
             "--seed",
             "0x7",
             "--generated",
@@ -624,7 +625,7 @@ fn should_read_a_pending_model_s_generated_traces_when_its_driver_has_not_landed
     assert_eq!(good.0, cli::OK, "{}{}", good.1, good.2);
     assert!(
         good.1.contains(
-            "daemon: 1 generated traces read, not replayed (its driver lands with IDX-12)"
+            "diagnostics: 1 generated traces read, not replayed (its driver lands with LSP-04)"
         ),
         "{}",
         good.1
@@ -672,6 +673,62 @@ fn should_diverge_at_the_reconcile_when_the_views_control_publishes_early() -> T
             .contains("the build still waits for summaries"),
         "{divergence}"
     );
+    Ok(())
+}
+
+/// The daemon regression traces with a shutdown, and the step of the first shutdown step in each.
+const DAEMON_SHUTDOWNS: [(&str, usize, &str); 3] = [
+    (
+        "formal/traces/regression/daemon-sigterm-after-stale-start.itf.json",
+        10,
+        "sigterm",
+    ),
+    (
+        "formal/traces/regression/daemon-idle-exit-races-connect.itf.json",
+        15,
+        "idleExit",
+    ),
+    (
+        "formal/traces/regression/daemon-swept-socket-stops.itf.json",
+        16,
+        "noticeSwept",
+    ),
+];
+
+#[test]
+fn should_diverge_at_the_shutdown_when_the_daemon_control_releases_first() -> TestResult {
+    for (file, step, action) in DAEMON_SHUTDOWNS {
+        // given
+        let text = fs::read_to_string(root().join(file))?;
+        let context = Context {
+            model: "daemon",
+            seed: "0x3",
+            trace: file,
+        };
+
+        // when
+        let conformed = replay::replay(daemon::driver(), &context, trace::parse(file, &text)?);
+        let control = replay::replay(daemon::control(), &context, trace::parse(file, &text)?);
+
+        // then: the model's daemon still holds its lock; the faulty host has released it
+        assert!(conformed.is_ok(), "{file}: {conformed:?}");
+        let Err(Failure::Diverged(divergence)) = control else {
+            return Err(format!("{file}: the daemon control did not diverge: {control:?}").into());
+        };
+        assert_eq!(
+            (divergence.step, divergence.action.as_str()),
+            (step, action),
+            "{divergence}"
+        );
+        assert!(
+            divergence.diff().contains("-            lock: 1,"),
+            "{divergence}"
+        );
+        assert!(
+            divergence.diff().contains("+            lock: 0,"),
+            "{divergence}"
+        );
+    }
     Ok(())
 }
 

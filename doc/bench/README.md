@@ -456,6 +456,32 @@ Against plan §1.7 (the rows measured end to end through a carrier from M1; thes
 - **`jfl sym` prefix query, warm (large), p95 < 50 ms:** 12.1 ms p95 on medium for a default answer of 100 symbols, about half of it the reads of the listed symbols' files; the scan grows with the distinct names (96k identifiers on medium), so large (3.6 times the files) projects to about 25–35 ms. Not measured on large here (the corpus is not cached in this sandbox).
 - **`fst` was weighed for the symbol scan** (ADR 0025) in a one-off measurement outside the repository on the medium corpus's 96,046 distinct identifiers: a set built in 91–122 ms (plus 7–16 ms to sort the names first), against prefix queries of 0.13 ms where a linear prefix-and-subsequence scan takes 3.6 ms. The names are rebuilt with every generation, so the build would land on the first query after each publish, and the camel-hump search the card asks for is not a prefix or a Levenshtein automaton: not taken (the card's `Decided`).
 
+### The daemon's IPC (IDX-12, `just bench-daemon`)
+
+`crates/jfl-composition/benches/daemon.rs` times the daemon as a client meets it: the test daemon binary (the `jfl daemon` entry) spawned detached through `jfl-process` by a real proxy, in a scratch state directory, release build.
+
+- **Spawn to ready**: a proxy that finds no daemon until the answer to its first request: the spawn lock, the second check, the spawn, the notify handshake, connect, the version handshake and one `jfl/status`. Twenty spawns, each daemon stopped with `jfl/stop` after.
+- **Connect and handshake** against a running daemon: a new connection, its handshake request and the daemon's answer, 500 times.
+- **A trivial request's round trip**: `jfl/status` (no view in it) on one open connection, 5,000 times.
+
+No corpus: none of it reads a Java file (the queries' costs are the views' and the resolver's suites). Measured 2026-11-19 (IDX-12) on the 4 vCPU Xeon VM (Intel Xeon @ 2.10GHz), one other lane building:
+
+| | p50 | p95 |
+|:--|--:|--:|
+| spawn to ready | 1.94 ms | 2.29 ms |
+| connect and handshake | 50.1 µs | 85.2 µs |
+| `jfl/status` round trip | 36.0 µs | 59.6 µs |
+
+The table is the review round's build (2026-11-19): the proxy waits with `poll(2)` instead of
+socket timeouts, the notify wait polls the child's pidfd, the daemon writes through a writer task
+per connection. The first build measured spawn to ready 1.51 / 1.79 ms, connect and handshake
+52.5 / 94.4 µs, the round trip 48.1 / 59.4 µs: the round trip lost its two `setsockopt` calls per
+read; spawn to ready gained about 0.4 ms (opening the pidfd, the writer task, and another lane's
+build beside it: within this VM's noise for 20 samples).
+
+- **A cold `jfl` call** against a running daemon pays the connect and handshake once (about 0.05 ms) and a round trip per request (about 0.04 ms): together under 1 % of `jfl def`'s proposed p50 of 20 ms (plan §1.7); the first call of a session that must spawn the daemon pays about 2 ms more, before any index exists.
+- **The round trip** is the floor every query's answer adds to its own work: two frames through `jfl-protocol`'s decoder, one current-thread runtime hop and the writer task's.
+
 ## Adding a suite
 
 1. A `suites/<name>.toml` with `name`, `description`, `kind` and the knobs of its kind
