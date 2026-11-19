@@ -1,5 +1,7 @@
 //! In-memory fakes of the ports (ver §5), each run through its port's contract suite.
 
+pub mod clock;
+pub mod hasher;
 pub mod repo_probe;
 pub mod source_tree;
 pub mod summary_store;

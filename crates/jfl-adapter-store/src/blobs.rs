@@ -139,9 +139,21 @@ fn real_dir(root: &Path) -> io::Result<()> {
             io::ErrorKind::NotADirectory,
             "the summary store's root is not a directory (a symbolic link is refused)",
         )),
-        Err(e) if e.kind() == io::ErrorKind::NotFound => fs::create_dir_all(root),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => private_dir(root, true),
         Err(e) => Err(e),
     }
+}
+
+/// Creates `path` (and its missing parents when `recursive`) with mode 0700: the store's
+/// directories are its owner's alone, wherever its root is placed (IDX-08's review).
+///
+/// Pinned by: `tests/disk.rs::should_keep_directories_private_when_the_store_creates_them`.
+fn private_dir(path: &Path, recursive: bool) -> io::Result<()> {
+    use std::os::unix::fs::DirBuilderExt as _;
+    fs::DirBuilder::new()
+        .recursive(recursive)
+        .mode(0o700)
+        .create(path)
 }
 
 /// Makes `path`, inside the store, a directory of its own: a link or a file there is removed
@@ -153,7 +165,7 @@ fn replace_unless_dir(path: &Path) -> io::Result<()> {
         Err(e) if e.kind() == io::ErrorKind::NotFound => {}
         Err(e) => return Err(e),
     }
-    fs::create_dir(path)
+    private_dir(path, false)
 }
 
 fn remove_stray(path: &Path, is_dir: bool) -> io::Result<()> {
@@ -232,7 +244,7 @@ impl Blobs {
                 Err(e) if e.kind() != io::ErrorKind::NotFound => return Err(e),
                 _ => {}
             }
-            fs::create_dir_all(&objects)?;
+            private_dir(&objects, true)?;
             let temp = root.join(format!("{TEMP_PREFIX}{FORMAT_FILE}"));
             // A stale temporary, or a link planted in its place, is removed (a link, not its
             // target); `create_new` then never opens through one.
@@ -328,27 +340,41 @@ impl Blobs {
     /// The bytes of `key`'s entry, bounded by [`MAX_ENTRY_BYTES`]; `None` for no entry or one too
     /// long (removed). Not a use until [`Blobs::used`] says the bytes decoded.
     pub fn read(&self, key: &SyntaxKey) -> Option<Vec<u8>> {
-        let read = File::open(self.path_of(key)).and_then(|file| {
-            let len = file.metadata()?.len();
-            read_bounded(file, MAX_ENTRY_BYTES, len)
-        });
-        match read {
+        match Self::read_path(&self.path_of(key)) {
             Ok(Some(bytes)) => Some(bytes),
             Ok(None) => {
-                self.discard(key);
+                self.discard(key, None);
                 None
             }
             Err(e) => {
-                let mut table = self.lock();
-                // Gone from disk: forget it. Any other error (out of descriptors) leaves the entry
-                // counted, so the cap does not lose track of a file that is still there.
-                if e.kind() == io::ErrorKind::NotFound {
-                    table.remove(key);
-                }
-                table.stats.misses = table.stats.misses.saturating_add(1);
+                self.missed(key, &e);
                 None
             }
         }
+    }
+
+    /// The bytes at `path`, bounded; `None` when longer than [`MAX_ENTRY_BYTES`].
+    fn read_path(path: &Path) -> io::Result<Option<Vec<u8>>> {
+        let file = File::open(path)?;
+        let len = file.metadata()?.len();
+        read_bounded(file, MAX_ENTRY_BYTES, len)
+    }
+
+    /// A read of `key` failed with `error`: a miss. An entry gone from disk is forgotten, but only
+    /// if it is still gone under the lock: a write of the same key renames its file in under the
+    /// lock, so a reader whose open lost that race must not drop the live entry from the cap's
+    /// table. Any other error (out of descriptors) leaves the entry counted, so the cap does not
+    /// lose track of a file that is still there.
+    ///
+    /// Pinned by: `tests/disk.rs::should_keep_counting_an_entry_when_a_read_missed_its_write`.
+    pub fn missed(&self, key: &SyntaxKey, error: &io::Error) {
+        let mut table = self.lock();
+        if error.kind() == io::ErrorKind::NotFound
+            && matches!(fs::symlink_metadata(self.path_of(key)), Err(e) if e.kind() == io::ErrorKind::NotFound)
+        {
+            table.remove(key);
+        }
+        table.stats.misses = table.stats.misses.saturating_add(1);
     }
 
     /// Records a read of `key` that decoded: a hit, and a use if the entry is still held. An entry
@@ -363,12 +389,29 @@ impl Blobs {
         table.stats.hits = table.stats.hits.saturating_add(1);
     }
 
-    /// Removes `key`'s entry, unreadable: a miss, counted as discarded.
-    pub fn discard(&self, key: &SyntaxKey) {
+    /// Removes `key`'s entry, found unreadable: a miss, counted as discarded. `torn` is what the
+    /// reader found (`None`: longer than any read accepts). The entry is removed only if the file
+    /// still holds just that, checked under the lock every write renames under: if a write has put
+    /// a good entry there since (two readers saw the same torn bytes, one discarded it, a write
+    /// replaced it), the good entry stays. Neither the inode nor the times can tell: the new file
+    /// may get the freed inode back, within the same timestamp tick.
+    ///
+    /// Pinned by: `tests/disk.rs::should_keep_a_rewritten_entry_when_a_late_discard_names_the_torn_one`.
+    pub fn discard(&self, key: &SyntaxKey, torn: Option<&[u8]>) {
         let mut table = self.lock();
-        table.remove(key);
-        let _ = fs::remove_file(self.path_of(key));
-        table.stats.discarded = table.stats.discarded.saturating_add(1);
+        let path = self.path_of(key);
+        match Self::read_path(&path) {
+            Ok(now) if now.as_deref() == torn => {
+                table.remove(key);
+                let _ = fs::remove_file(&path);
+                table.stats.discarded = table.stats.discarded.saturating_add(1);
+            }
+            Ok(_) => {}
+            Err(e) if e.kind() == io::ErrorKind::NotFound => {
+                table.remove(key);
+            }
+            Err(_) => {}
+        }
         table.stats.misses = table.stats.misses.saturating_add(1);
     }
 
@@ -400,7 +443,7 @@ impl Blobs {
         let target = dir.join(&file);
         let temp = match self.write_temp(&dir, &file, entry) {
             Err(e) if e.kind() == io::ErrorKind::NotFound => {
-                fs::create_dir_all(&dir)?;
+                private_dir(&dir, true)?;
                 self.write_temp(&dir, &file, entry)?
             }
             other => other?,

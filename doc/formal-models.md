@@ -179,6 +179,35 @@ model.
    trace's variables, so a narrower nested type would compare less than the model holds; IDX-09's
    review checks this.
 
+### Where the shell meets each obligation
+
+The view service (`crates/jfl-application/src/view_service.rs`, IDX-09 slice 2) does the I/O of
+each transition in the model's order; its component tests (`tests/view_service.rs`) pin it over
+the testkit's fakes, and `tests/views_machine.rs` runs the registry against a reference machine.
+
+- **1, watch then scan:** a view opens by watch, then the clock, `HEAD`'s stat set and the listing
+  (`should_hear_of_a_file_written_during_the_open_scan_when_the_watch_came_first`); a lost watch
+  is re-established before the rescan that may certify the view
+  (`should_watch_again_and_rescan_when_the_watch_degrades`).
+- **2, new directories:** a hint naming anything but a `.java` file the view holds (a directory, a
+  new file) asks for a rescan, which lists the view (`should_rescan_when_a_hint_names_no_java_file`);
+  a hint under a nested root is dropped, and a rescan leaves out what its listing does not admit,
+  so a parent never indexes a nested view's file (the model's assumption: `should_keep_*_out_of_*`).
+- **3, losses:** a `Rescan` whose reasons degrade the watch is `watchLost`, any other an overflow
+  of every view; either loses the view's queued cookies.
+- **4, `statfs`:** only an allowlist of local filesystems is watched
+  (`should_never_claim_complete_when_the_filesystem_cannot_be_watched`), and the walk does not
+  cross into another device, which is a gap
+  (`should_answer_partly_indexed_when_a_directory_is_another_filesystem`).
+- **Atomic publish** (plan §7.1) holds by construction in the shell: each generation entry carries
+  its summary, so the registry's `NotStored` guard is never what stops a shell build (the store is
+  only the reopen cache); the guard is exercised by the `views` driver and
+  `tests/views.rs::should_refuse_publish_when_a_named_summary_is_not_stored`.
+- **6, the cookie:** written into the view's root through its own watch, waited for with a
+  deadline, at most two (`should_answer_from_the_new_content_when_a_write_lands_before_the_request`).
+- **7, the re-stat at the pin:** `HEAD`, the ref it names and `packed-refs`, and the index, from
+  `RepoProbe::snapshot` (`should_rebuild_when_a_commit_moves_the_branch_and_head_stays`).
+
 ### Not modelled yet
 
 - **Overlays** (plan §4.4: an open buffer applies only while it is newer than the disk, and disk
@@ -199,8 +228,10 @@ model.
   that is not the request's latest queued cookie:
   `tests/views.rs::should_wait_for_the_second_cookie_when_a_stale_first_cookie_event_arrives`.
 - **Deadlines** (plan §2.7), including the bound on a request's wait for its cookie: the model's
-  `requestPin` waits for a queued cookie; IDX-09 answers incomplete when the deadline passes
-  first.
+  `requestPin` waits for a queued cookie; IDX-09's view service calls `cookie_lost` when the
+  deadline passes first, the step the model's `dropEvent` of a cookie takes, so the answer is
+  incomplete (`crates/jfl-application/tests/view_service.rs::should_answer_incomplete_when_the_cookie_misses_its_deadline`).
+  A model action for it is left on IDX-09's card.
 
 A change that implements any of these extends the model first (ADR 0007).
 

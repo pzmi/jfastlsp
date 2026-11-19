@@ -18,9 +18,9 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use jfl_application::hints::{HintQueue, HintSink, hint_queue};
 use jfl_application::source_tree::{
-    BUILD_FILES, Exclusion, FileStat, GitEntry, HintSubject, ListMode, ListedFile, Listing, MTime,
-    ReadBytes, RescanReason, Skipped, SourceTree, SourceTreeError, Unlisted, UnlistedReason,
-    exclusion, hint_excluded, is_git_metadata, is_java_file_name,
+    BUILD_FILES, Exclusion, FileStat, FsKind, GitEntry, HintSubject, ListMode, ListedFile, Listing,
+    MTime, ReadBytes, RescanReason, Skipped, SourceTree, SourceTreeError, Unlisted, UnlistedReason,
+    WatchErrorKind, exclusion, hint_excluded, is_cookie_name, is_git_metadata, is_java_file_name,
 };
 use jfl_domain::{FileUri, RelPath};
 
@@ -40,6 +40,12 @@ struct State {
     clock: i64,
     /// Each live watch's sink, with the tree path of the root it watches.
     sinks: Vec<(String, HintSink)>,
+    /// What [`SourceTree::filesystem`] answers.
+    kind: FsKind,
+    /// Whether a cookie's events are lost ([`FakeSourceTree::lose_cookies`]).
+    lose_cookies: bool,
+    /// Directories on another filesystem than the tree's ([`FakeSourceTree::mount`]).
+    mounts: Vec<String>,
 }
 
 /// The fake tree; clones share it.
@@ -96,6 +102,9 @@ impl FakeSourceTree {
                 next_inode: 1,
                 clock: 1_700_000_000,
                 sinks: Vec::new(),
+                kind: FsKind::Local,
+                lose_cookies: false,
+                mounts: Vec::new(),
             })),
         }
     }
@@ -247,6 +256,51 @@ impl FakeSourceTree {
         self.put(&join(dir, "\u{fffd}-not-utf-8.java"), Entry::NonUtf8Java)
     }
 
+    /// Answers `kind` to [`SourceTree::filesystem`] from now on (a new tree is
+    /// [`FsKind::Local`]).
+    pub fn set_filesystem(&self, kind: FsKind) {
+        self.lock().kind = kind;
+    }
+
+    /// Writes cookies without their events reaching any watch, as an event lost before the
+    /// kernel queued it would: a waiter's deadline passes.
+    pub fn lose_cookies(&self, lose: bool) {
+        self.lock().lose_cookies = lose;
+    }
+
+    /// Makes `dir` a mount point of another filesystem: a listing does not walk it and reports
+    /// it as a gap ([`UnlistedReason::OtherFilesystem`]), as the adapter's walk does.
+    pub fn mount(&self, dir: &str) -> Result<(), String> {
+        self.mkdir(dir)?;
+        self.lock().mounts.push(dir.to_owned());
+        Ok(())
+    }
+
+    /// Whether `path` names an entry of the tree.
+    #[must_use]
+    pub fn exists(&self, path: &str) -> bool {
+        self.lock().entries.contains_key(path)
+    }
+
+    /// Sets the mtime of the file `path`, as `touch -d` does.
+    pub fn set_mtime(&self, path: &str, secs: i64) -> Result<(), String> {
+        match self.lock().entries.get_mut(path) {
+            Some(Entry::File { stat, .. }) => {
+                stat.mtime = MTime { secs, nanos: 0 };
+                Ok(())
+            }
+            _ => Err(format!("{path} is not a file")),
+        }
+    }
+
+    /// Reports a watcher error to every live watch, as a directory the backend could not watch
+    /// does: a rescan whose reason degrades the watch.
+    pub fn break_watches(&self) {
+        for (_, sink) in &self.lock().sinks {
+            sink.rescan(RescanReason::WatcherError(WatchErrorKind::Io));
+        }
+    }
+
     /// Makes `dir` unreadable, as `chmod 000` does for a user other than root.
     pub fn unreadable(&self, dir: &str) -> Result<(), String> {
         let mut state = self.lock();
@@ -386,6 +440,13 @@ fn walk(
                             .any(|file| state.entries.contains_key(&join(dir, file)))
                     },
                 );
+                if state.mounts.iter().any(|m| m == key) {
+                    listing.record_unlisted(Unlisted {
+                        path: under(base, key),
+                        why: UnlistedReason::OtherFilesystem,
+                    });
+                    continue;
+                }
                 match (why, under(base, key)) {
                     (Some(why), Some(path)) => listing.skipped.push(Skipped { path, why }),
                     (Some(_), None) => {}
@@ -445,5 +506,41 @@ impl SourceTree for FakeSourceTree {
         let (sink, queue) = hint_queue(self.hint_capacity);
         self.lock().sinks.push((base, sink));
         Ok(FakeWatch(queue))
+    }
+
+    async fn sweep_cookies(&self, root: &FileUri, before: MTime) -> Result<u64, SourceTreeError> {
+        let base = self.base(root)?;
+        let mut state = self.lock();
+        let stale: Vec<String> = children(&state, &base)
+            .into_iter()
+            .filter(|(key, entry)| {
+                is_cookie_name(name_of(key))
+                    && matches!(entry, Entry::File { stat, .. } if stat.mtime < before)
+            })
+            .map(|(key, _)| key.to_owned())
+            .collect();
+        for key in &stale {
+            state.entries.remove(key);
+            Self::hint(&state, key);
+        }
+        Ok(u64::try_from(stale.len()).unwrap_or(u64::MAX))
+    }
+
+    async fn filesystem(&self, root: &FileUri) -> Result<FsKind, SourceTreeError> {
+        self.base(root)?;
+        Ok(self.lock().kind)
+    }
+
+    async fn write_cookie(&self, root: &FileUri, name: &RelPath) -> Result<(), SourceTreeError> {
+        let key = join(&self.base(root)?, name.as_str());
+        if self.lock().entries.contains_key(&key) {
+            return Err(SourceTreeError::Io(std::io::ErrorKind::AlreadyExists));
+        }
+        if self.lock().lose_cookies {
+            return Ok(());
+        }
+        self.write(&key, b"")
+            .and_then(|()| self.remove(&key))
+            .map_err(|_| SourceTreeError::NotAFile)
     }
 }

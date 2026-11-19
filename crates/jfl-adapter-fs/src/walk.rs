@@ -43,7 +43,31 @@ use crate::file::file_stat;
 /// `tests/symlinks.rs`.
 #[must_use]
 pub fn list(root: &Path, mode: ListMode, config: &FsConfig) -> Listing {
+    list_on(root, mode, config, device_of)
+}
+
+/// The device `path` lives on, links not followed.
+fn device_of(path: &Path) -> Option<u64> {
+    use std::os::unix::fs::MetadataExt as _;
+    fs::symlink_metadata(path).ok().map(|meta| meta.dev())
+}
+
+/// [`list`], with `device` telling which device a directory lives on (`lstat`'s `st_dev` in
+/// [`list`]; a test stands in a mount point with it). A directory on another device than the
+/// root is a mount point: it is not walked and is reported as a gap
+/// ([`UnlistedReason::OtherFilesystem`]), since the root's filesystem type, which decides whether
+/// the view is watched, says nothing about it (a network or FUSE mount inside a worktree).
+///
+/// Pinned by: `tests/files.rs::should_report_a_gap_and_not_walk_it_when_a_directory_is_another_filesystem`.
+pub fn list_on(
+    root: &Path,
+    mode: ListMode,
+    config: &FsConfig,
+    device: fn(&Path) -> Option<u64>,
+) -> Listing {
     let skipped: Arc<Mutex<Vec<Skipped>>> = Arc::default();
+    let crossed: Arc<Mutex<Vec<Option<RelPath>>>> = Arc::default();
+    let root_device = device(root);
     let shared = Mutex::new(Listing::default());
     let files = AtomicUsize::new(0);
 
@@ -57,7 +81,20 @@ pub fn list(root: &Path, mode: ListMode, config: &FsConfig) -> Listing {
         .threads(config.walk_threads);
     let filter_root = root.to_path_buf();
     let filter_skipped = Arc::clone(&skipped);
-    builder.filter_entry(move |entry| keep(entry, &filter_root, &filter_skipped));
+    let filter_crossed = Arc::clone(&crossed);
+    builder.filter_entry(move |entry| {
+        if entry.depth() > 0
+            && entry.file_type().is_some_and(|t| t.is_dir())
+            && device(entry.path()) != root_device
+        {
+            filter_crossed
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .push(relative(&filter_root, entry.path()).ok());
+            return false;
+        }
+        keep(entry, &filter_root, &filter_skipped)
+    });
 
     let mut visitors = Visitors {
         root,
@@ -71,6 +108,12 @@ pub fn list(root: &Path, mode: ListMode, config: &FsConfig) -> Listing {
     let mut listing = shared.into_inner().unwrap_or_else(PoisonError::into_inner);
     let skipped = mem::take(&mut *skipped.lock().unwrap_or_else(PoisonError::into_inner));
     listing.skipped = skipped;
+    for path in mem::take(&mut *crossed.lock().unwrap_or_else(PoisonError::into_inner)) {
+        listing.record_unlisted(Unlisted {
+            path,
+            why: UnlistedReason::OtherFilesystem,
+        });
+    }
     listing.sort();
     listing
 }

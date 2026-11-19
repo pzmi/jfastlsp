@@ -14,8 +14,8 @@
 use std::time::Duration;
 
 use jfl_application::source_tree::{
-    Exclusion, Hint, Hints, ListMode, Listing, RescanReason, Skipped, SourceTree, SourceTreeError,
-    UnlistedReason,
+    Exclusion, FsKind, Hint, Hints, ListMode, Listing, RescanReason, Skipped, SourceTree,
+    SourceTreeError, UnlistedReason, cookie_name,
 };
 use jfl_domain::{FileUri, RelPath};
 
@@ -94,7 +94,7 @@ pub fn check<F: Factory>(factory: &F) -> Vec<Violation> {
 
 /// Runs every case, waiting at most `hint_deadline` for each awaited hint.
 pub fn check_with<F: Factory>(factory: &F, hint_deadline: Duration) -> Vec<Violation> {
-    let cases: [(&'static str, Case<F>); 20] = [
+    let cases: [(&'static str, Case<F>); 22] = [
         ("lists_java_files_once", lists_java_files_once),
         ("lists_with_stat", lists_with_stat),
         ("skips_nested_worktree", skips_nested_worktree),
@@ -132,6 +132,11 @@ pub fn check_with<F: Factory>(factory: &F, hint_deadline: Duration) -> Vec<Viola
         (
             "watch_watches_a_new_directory_before_its_hint",
             watch_watches_a_new_directory_before_its_hint,
+        ),
+        ("reports_a_local_filesystem", reports_a_local_filesystem),
+        (
+            "cookie_follows_earlier_changes",
+            cookie_follows_earlier_changes,
         ),
     ];
     cases
@@ -648,6 +653,57 @@ fn watch_watches_a_new_directory_before_its_hint<F: Factory>(
     Ok(())
 }
 
+/// The fixture's root is on a local filesystem (the adapter's under `CARGO_TARGET_TMPDIR`), which
+/// `filesystem` names as such, so a view there is watched; a root that does not exist is refused.
+fn reports_a_local_filesystem<F: Factory>(factory: &F, _: Duration) -> Result<(), String> {
+    let fx = factory.fixture(ROOMY)?;
+    let kind = block_on(fx.tree().filesystem(fx.root()));
+    if kind != Ok(FsKind::Local) {
+        return Err(format!(
+            "the fixture root's filesystem: {kind:?}, not Local"
+        ));
+    }
+    let missing = fx
+        .root()
+        .join(&rel("missing")?)
+        .map_err(|e| e.to_string())?;
+    if block_on(fx.tree().filesystem(&missing)).is_ok() {
+        return Err("a root that does not exist was given a filesystem".to_owned());
+    }
+    Ok(())
+}
+
+/// A cookie (ADR 0037): written into the root, its hint comes through the watch after the hint of
+/// every change made before it, and it leaves no file behind.
+fn cookie_follows_earlier_changes<F: Factory>(
+    factory: &F,
+    deadline: Duration,
+) -> Result<(), String> {
+    let fx = factory.fixture(ROOMY)?;
+    let mut watch = block_on(fx.tree().watch(fx.root())).map_err(|e| format!("watch: {e}"))?;
+    fx.write("w/A.java", b"class A {}")?;
+    let name = cookie_name("contract", 7, 0).ok_or("no cookie name")?;
+    block_on(fx.tree().write_cookie(fx.root(), &name)).map_err(|e| format!("cookie: {e}"))?;
+    let cookie = Hint::Changed(name.clone());
+    let (seen, ok) = hints_until(&mut watch, deadline, "the cookie's hint", |h| *h == cookie);
+    if !ok {
+        return Err(format!("no hint for the cookie; saw {seen:?}"));
+    }
+    let before = seen.iter().take(seen.len().saturating_sub(1));
+    if !before
+        .clone()
+        .any(|h| names_or_rescans(h, "w/A.java") || names_or_rescans(h, "w"))
+    {
+        return Err(format!(
+            "the cookie's hint came before w/A.java's; saw {seen:?}"
+        ));
+    }
+    match block_on(fx.tree().stat(fx.root(), &name)) {
+        Err(SourceTreeError::NotFound) => Ok(()),
+        other => Err(format!("the cookie file is left behind: {other:?}")),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
@@ -745,6 +801,7 @@ mod tests {
             }
             impl SourceTree for $name {
                 $($body)*
+                delegate!(cookie);
             }
         };
     }
@@ -782,6 +839,18 @@ mod tests {
             type Watch = FakeWatch;
             async fn watch(&self, root: &FileUri) -> Result<FakeWatch, SourceTreeError> {
                 self.0.watch(root).await
+            }
+        };
+        (cookie) => {
+            async fn filesystem(&self, root: &FileUri) -> Result<FsKind, SourceTreeError> {
+                self.0.filesystem(root).await
+            }
+            async fn write_cookie(
+                &self,
+                root: &FileUri,
+                name: &RelPath,
+            ) -> Result<(), SourceTreeError> {
+                self.0.write_cookie(root, name).await
             }
         };
     }
@@ -843,6 +912,7 @@ mod tests {
     }
 
     impl SourceTree for StaleStat {
+        delegate!(cookie);
         delegate!(list);
         delegate!(read);
         delegate!(watch);
@@ -962,6 +1032,23 @@ mod tests {
         async fn watch(&self, root: &FileUri) -> Result<Leaks, SourceTreeError> {
             Ok(Leaks(self.0.watch(root).await?, false))
         }
+        delegate!(cookie);
+    }
+
+    /// Takes the port's defaults: no filesystem type, no cookie.
+    struct Defaults(FakeSourceTree);
+
+    impl Wrap for Defaults {
+        fn wrap(fake: FakeSourceTree) -> Self {
+            Self(fake)
+        }
+    }
+
+    impl SourceTree for Defaults {
+        delegate!(list);
+        delegate!(read);
+        delegate!(stat);
+        delegate!(watch);
     }
 
     /// Filters hints through a rule; `LateWatch` and `DottedDirsDropped` below.
@@ -1036,6 +1123,7 @@ mod tests {
                 }
             }
             impl SourceTree for $name {
+                delegate!(cookie);
                 delegate!(list);
                 delegate!(read);
                 delegate!(stat);
@@ -1078,6 +1166,24 @@ mod tests {
 
         // then
         assert_eq!(failed, ["watch_watches_a_new_directory_before_its_hint"]);
+    }
+
+    #[test]
+    fn should_fail_the_filesystem_and_cookie_cases_when_the_defaults_are_kept() {
+        // given
+        let suite_on_broken = || run::<Defaults>();
+
+        // when
+        let failed = suite_on_broken();
+
+        // then
+        assert_eq!(
+            failed,
+            [
+                "reports_a_local_filesystem",
+                "cookie_follows_earlier_changes"
+            ]
+        );
     }
 
     #[test]
@@ -1167,7 +1273,8 @@ mod tests {
                 "watch_leaves_out_agent_worktrees",
                 "watch_hints_a_dotted_directory_move",
                 "watch_hints_a_new_dotted_directory",
-                "watch_watches_a_new_directory_before_its_hint"
+                "watch_watches_a_new_directory_before_its_hint",
+                "cookie_follows_earlier_changes"
             ]
         );
     }

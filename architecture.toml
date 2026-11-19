@@ -136,8 +136,10 @@ jfl-application = { thiserror = ["default"] }
 # libc (IDX-06 review): the O_NONBLOCK flag for opening a file to read, so a FIFO swapped in for it
 # never blocks the read; no default features, in the graph already (notify, rustix), its build
 # script reviewed in deny.toml. notify's event-loop thread is notify's own, started and stopped with
-# a watch: the crate holds no `spawn` grant and starts no thread itself (fnd §2.4).
-jfl-adapter-fs = { ignore = ["default"], libc = [], notify = ["default"] }
+# a watch: the crate holds no `spawn` grant and starts no thread itself (fnd §2.4). rustix (IDX-09):
+# a safe `statfs(2)`, so a view on a network, FUSE or overlay filesystem is never watched (ADR 0037);
+# its `fs` feature only, in the graph already (jfl-process), its build script reviewed in deny.toml.
+jfl-adapter-fs = { ignore = ["default"], libc = [], notify = ["default"], rustix = ["fs", "std"] }
 # jfl-adapter-git (IDX-05, ADR 0024): no Git crate; libc only for the O_NONBLOCK flag when the hot path
 # reads HEAD and loose refs, so a FIFO planted in a Git directory never blocks a request (as
 # jfl-adapter-fs does); no default features, in the graph already, its build script reviewed in
@@ -192,7 +194,11 @@ jfl-adapter-git = { divan = ["help"], proptest = ["std"] }
 jfl-adapter-java = { proptest = ["std"], tree-sitter-java = ["default"] }
 # jfl-adapter-store (IDX-08): proptest for the decoders on arbitrary, flipped, cut and mutated entries
 # (ver §8), with the same features as jfl-domain's, for the same reasons.
+# jfl-application (IDX-09): proptest for the view registry against a reference machine (ver §6.4),
+# with the same features as jfl-domain's; not proptest-state-machine, whose proptest default
+# features bring 16 crates (the IDX-09 card's decision).
 jfl-adapter-store = { proptest = ["std"] }
+jfl-application = { proptest = ["std"] }
 
 [external.build]
 

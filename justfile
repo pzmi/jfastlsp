@@ -301,8 +301,9 @@ bench-store corpus="small" cold="warm": _preflight
 # The view registry in process (IDX-09): every tracked `.java` file of the pinned corpus `lstat`ed,
 # then jfl-application's registry over those stats: the open of a view, one request's freshness path
 # (its file's `lstat`, start, cookie back, pin with the re-stat and completeness, finish) at p50 and
-# p95, one changed file reconciled and published, and a full rescan. Reports, never gates.
-# `just bench-views medium`.
+# p95, one changed file reconciled and published, and a full rescan; then the view service over the
+# real adapters (view open cold and warm, the cookie's round trip through inotify, a rescan with the
+# listing). Reports, never gates. `just bench-views medium`.
 bench-views corpus="small": _preflight
     #!/usr/bin/env bash
     set -euo pipefail
@@ -310,6 +311,8 @@ bench-views corpus="small": _preflight
     root="$(bash scripts/bench-corpus.sh path {{quote(corpus)}})"
     { printf '%s\n' "$root"; git -C "$root" ls-files -z -- '*.java'; } \
       | {{cargo}} bench --locked -p jfl-composition --bench views
+    { printf '%s\n' "$root"; git -C "$root" ls-files -z -- '*.java'; } \
+      | {{cargo}} bench --locked -p jfl-composition --bench view_service
 
 # Rewrite fixtures.lock from the tree after reviewing the changed goldens (ver §4,
 # ARCH-fixtures-lock): the SHA-256 of every file under fixtures/ and each crate's tests/fixtures/.

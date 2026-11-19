@@ -205,6 +205,8 @@ pub struct SyncState {
 /// One worktree's view.
 #[derive(Debug, Clone)]
 pub struct ViewState<D, G, K> {
+    /// Its worktree root: the key the registry holds it under.
+    pub root: FileUri,
     /// The delivered file events no build has taken.
     pub dirty: BTreeSet<RelPath>,
     /// Whether a full reconcile is due.
@@ -254,7 +256,8 @@ pub struct Pin<D, G, K> {
     pub generation: Arc<Published<D, G, K>>,
     /// Its completeness, computed from the request's own view at that generation.
     pub completeness: Completeness,
-    /// The view whose index state the completeness was computed from.
+    /// The root of the view whose state the completeness was computed from (the view's own, so
+    /// never another view's at the same generation number: plan §4.5).
     pub complete_view: FileUri,
 }
 
@@ -434,6 +437,7 @@ impl<D: FileObserved, G: Observed, K: Clone + Eq + fmt::Debug> ViewRegistry<D, G
             })
             .collect();
         let view = ViewState {
+            root: root.clone(),
             dirty: BTreeSet::new(),
             rescan: false,
             watched,
@@ -654,6 +658,25 @@ impl<D: FileObserved, G: Observed, K: Clone + Eq + fmt::Debug> ViewRegistry<D, G
         Ok(())
     }
 
+    /// Leaves `path` out of the view's build: the next generation does not hold it. Not a
+    /// transition of the model, whose views index a fixed set of paths: the daemon's shell calls
+    /// it for a path the view does not admit (under a nested worktree or repository, or outside
+    /// the listing a rescan unioned with the tracked files), so a parent never indexes a nested
+    /// view's file and a path that leaked in leaves at the next rescan. The `views` driver never
+    /// calls it.
+    ///
+    /// Pinned by: `tests/view_service.rs::should_keep_a_nested_worktree_file_out_of_the_parent_when_it_is_edited`.
+    pub fn exclude(&mut self, root: &FileUri, path: &RelPath) -> Result<(), ViewError> {
+        let build = self
+            .view_mut(root)?
+            .build
+            .as_mut()
+            .ok_or(ViewError::NoBuild)?;
+        build.index.remove(path);
+        build.pending.remove(path);
+        Ok(())
+    }
+
     /// Publishes the build as the view's next generation, atomically: only when it waits for no
     /// summary and `store` holds every summary it names (atomic publish). Requests that pinned the
     /// previous generation keep it.
@@ -809,7 +832,7 @@ impl<D: FileObserved, G: Observed, K: Clone + Eq + fmt::Debug> ViewRegistry<D, G
         }
         let generation = Arc::clone(&view.published);
         let restat = generation.git.proves_unchanged(git);
-        let completeness = completeness_at(request, view, restat);
+        let (completeness, complete_view) = completeness_at(request, view, restat);
         let root = request.view.clone();
         if !restat {
             self.view_mut(&root)?.rescan = true;
@@ -819,7 +842,7 @@ impl<D: FileObserved, G: Observed, K: Clone + Eq + fmt::Debug> ViewRegistry<D, G
         Ok(request.pin.insert(Pin {
             generation,
             completeness,
-            complete_view: root,
+            complete_view,
         }))
     }
 
@@ -843,6 +866,21 @@ impl<D: FileObserved, G: Observed, K: Clone + Eq + fmt::Debug> ViewRegistry<D, G
             return Err(ViewError::WrongPhase);
         }
         request.phase = RequestPhase::Done;
+        Ok(())
+    }
+
+    /// Forgets a finished request, dropping its pin, so the generation it pinned is freed once no
+    /// other request holds it. Not a transition of the model (whose requests are reused, never
+    /// removed): the daemon's shell forgets each request it finishes, the `views` driver does not.
+    /// A request whose cookie is still queued is kept, so a late cookie event still finds it.
+    ///
+    /// Pinned by: `views::tests::should_free_a_pinned_generation_when_its_request_is_forgotten`.
+    pub fn forget(&mut self, id: RequestId) -> Result<(), ViewError> {
+        let request = self.requests.get(&id).ok_or(ViewError::UnknownRequest)?;
+        if request.phase != RequestPhase::Done {
+            return Err(ViewError::WrongPhase);
+        }
+        self.requests.remove(&id);
         Ok(())
     }
 
@@ -901,12 +939,13 @@ fn module_completeness(generation: Generation, files: u32, stale: u32) -> Comple
 
 /// The request's completeness at its view's published generation (`formal/views.qnt`'s
 /// `completeAt`), through IDX-02's [`completeness`] over the view's one module (before M3 a
-/// worktree is one module, plan §2.1), keyed by the request's own view.
+/// worktree is one module, plan §2.1), keyed by the request's own view; with the root of the view
+/// whose state it read, which [`Pin::complete_view`] reports.
 fn completeness_at<D: FileObserved, G, K>(
     request: &Request<D, G, K>,
     view: &ViewState<D, G, K>,
     restat: bool,
-) -> Completeness {
+) -> (Completeness, FileUri) {
     let published = &view.published;
     let count = |n: usize| u32::try_from(n).unwrap_or(u32::MAX);
     let files = count(published.present);
@@ -939,7 +978,7 @@ fn completeness_at<D: FileObserved, G, K>(
     if !view.certain {
         result = result.and(IncompleteReason::WatcherLostEvents);
     }
-    result
+    (result, view.root.clone())
 }
 
 #[cfg(test)]
@@ -1012,6 +1051,78 @@ mod tests {
         assert!(!refused.is_complete());
         assert!(empty.is_complete());
         assert!(whole.is_complete());
+    }
+
+    #[test]
+    fn should_free_a_pinned_generation_when_its_request_is_forgotten() -> Result<(), String> {
+        // given
+        let mut registry: ViewRegistry<FileSeen, FileSeen, u8> = ViewRegistry::new();
+        let absent = FileSeen {
+            stat: None,
+            racy: false,
+        };
+        let git = GitSeen {
+            head: absent,
+            index: absent,
+        };
+        let root = uri("/w/m")?;
+        let path = RelPath::new("A.java").map_err(|e| e.to_string())?;
+        let seen = FileSeen::new(
+            Some(stat(1, 10)),
+            MTime { secs: 99, nanos: 0 },
+            Duration::from_millis(10),
+        );
+        registry
+            .open(root.clone(), false, git.clone(), [(path, seen, 1)])
+            .map_err(|e| e.to_string())?;
+        let id = RequestId(1);
+        registry
+            .request_start(id, &uri("/w/m/A.java")?, &seen, &git, Stamp(1))
+            .map_err(|e| e.to_string())?;
+        let pinned = Arc::downgrade(
+            &registry
+                .request_pin(id, &git)
+                .map_err(|e| e.to_string())?
+                .generation,
+        );
+        let early = registry.forget(id);
+        registry.finish(id).map_err(|e| e.to_string())?;
+        registry
+            .deliver(Event::File {
+                view: root.clone(),
+                path: RelPath::new("A.java").map_err(|e| e.to_string())?,
+            })
+            .map_err(|e| e.to_string())?;
+        registry
+            .reconcile_start(&root, None, |_| seen, || git.clone())
+            .map_err(|e| e.to_string())?;
+        registry
+            .summarised(
+                &root,
+                &RelPath::new("A.java").map_err(|e| e.to_string())?,
+                seen,
+                2,
+                Stamp(2),
+            )
+            .map_err(|e| e.to_string())?;
+        struct All;
+        impl Stored<u8> for All {
+            fn holds(&self, _: &u8) -> bool {
+                true
+            }
+        }
+        registry.publish(&root, &All).map_err(|e| e.to_string())?;
+        let kept = pinned.upgrade().is_some();
+
+        // when
+        registry.forget(id).map_err(|e| e.to_string())?;
+
+        // then
+        assert_eq!(early, Err(ViewError::WrongPhase));
+        assert!(kept);
+        assert!(pinned.upgrade().is_none());
+        assert!(registry.request(id).is_none());
+        Ok(())
     }
 
     #[test]

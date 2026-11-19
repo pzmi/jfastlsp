@@ -54,6 +54,8 @@ struct Tree {
 
 #[derive(Debug, Default)]
 struct Model {
+    /// The error every call returns while set ([`FakeRepoProbe::fail_with`]).
+    failure: Option<RepoProbeError>,
     repos: Vec<Repo>,
     trees: Vec<Tree>,
     /// Every distinct tree content, by id.
@@ -225,6 +227,19 @@ impl FakeRepoProbe {
 
     fn model(&self) -> MutexGuard<'_, Model> {
         self.model.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// Makes every call fail with `error` (an I/O error, a deadline, a failed `git`) until it is
+    /// called again with `None`, as ver §5 asks of a fake: so a caller's handling of each failure
+    /// can be tested.
+    ///
+    /// Pinned by: `fakes::repo_probe::tests::should_fail_every_call_when_told_to`.
+    pub fn fail_with(&self, error: Option<RepoProbeError>) {
+        self.model().failure = error;
+    }
+
+    fn failure(&self) -> Result<(), RepoProbeError> {
+        self.model().failure.map_or(Ok(()), Err)
     }
 
     /// `git init` at `root` and one commit of `files` on `main`.
@@ -577,14 +592,17 @@ impl FakeRepoProbe {
 
 impl RepoProbe for FakeRepoProbe {
     async fn resolve(&self, path: &FileUri) -> Result<Option<Worktree>, RepoProbeError> {
+        self.failure()?;
         Ok(self.resolve_now(path))
     }
 
     async fn snapshot(&self, worktree: &Worktree) -> Result<GitSnapshot, RepoProbeError> {
+        self.failure()?;
         self.snapshot_now(worktree)
     }
 
     async fn head_tree(&self, worktree: &Worktree) -> Result<Option<ObjectId>, RepoProbeError> {
+        self.failure()?;
         self.head_tree_now(worktree)
     }
 
@@ -593,10 +611,45 @@ impl RepoProbe for FakeRepoProbe {
         worktree: &Worktree,
         base: Option<&ObjectId>,
     ) -> Result<ChangedFiles, RepoProbeError> {
+        self.failure()?;
         self.changed_now(worktree, base)
     }
 
     async fn tracked_java(&self, worktree: &Worktree) -> Result<TrackedFiles, RepoProbeError> {
+        self.failure()?;
         self.tracked_now(worktree)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::exec::block_on;
+
+    #[test]
+    fn should_fail_every_call_when_told_to() -> Result<(), String> {
+        // given
+        let probe = FakeRepoProbe::new();
+        let root = FileUri::from_path("/r").map_err(|e| e.to_string())?;
+        probe.init(&root, &[("A.java", b"class A {}")])?;
+        let worktree = block_on(probe.resolve(&root))
+            .map_err(|e| e.to_string())?
+            .ok_or("no worktree")?;
+        let io = RepoProbeError::Io(std::io::ErrorKind::Other);
+
+        // when
+        probe.fail_with(Some(io));
+        let failed = (
+            block_on(probe.resolve(&root)).err(),
+            block_on(probe.snapshot(&worktree)).err(),
+            block_on(probe.tracked_java(&worktree)).err(),
+        );
+        probe.fail_with(None);
+        let recovered = block_on(probe.snapshot(&worktree)).is_ok();
+
+        // then
+        assert_eq!(failed, (Some(io), Some(io), Some(io)));
+        assert!(recovered);
+        Ok(())
     }
 }

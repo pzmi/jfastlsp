@@ -15,6 +15,7 @@ jfl-application = { path = "../jfl-application" }
 ignore = "0.4.34"
 notify = "8.2.2"
 libc = { version = "0.2.191", default-features = false }
+rustix = { version = "1.1.6", default-features = false, features = ["std", "fs"] }
 
 [dev-dependencies]
 divan = { version = "0.1.21", default-features = false, features = ["help"] }

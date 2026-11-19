@@ -1775,40 +1775,97 @@ but follow in lane CLI (M2). Starts after the go decision.
   one (file creation is not modelled: `doc/formal-models.md`, "Not modelled yet"); a module
   count `ModuleIndex::new` refuses is incomplete, never empty. `just bench-views` measures it on
   the corpus (`doc/bench/README.md`).
-- **Left for slice 2 (IDX-09):** the async shell over the ports (`SourceTree`, `RepoProbe`,
-  `SyntaxIndexer`, `SummaryStore`) that opens a view on first request (`RepoProbe::resolve`,
-  then watch, list, publish), feeds hints (a `Rescan` whose reasons `degrade_the_watch()` is
-  `watch_lost`, `WatcherOverflow` is `overflow` for every view of the instance, a new
-  directory's hint is scanned), writes the cookie file through the view's own watch with a
-  deadline (`cookie_lost` when it passes; the two round trips measured against plan §1.7's
-  100 ms), checks the filesystem type with `statfs` (`open(.., watched: false)` on network,
-  FUSE or overlay filesystems), takes the IDX-05 obligations (snapshot before `changed_since`,
-  the clock before the snapshot, `ChangedFiles::everything`, an error or `unrepresentable > 0`
-  as a rescan, the listing unioned with `tracked_java`, the `repo_probe` fake's I/O error) and
-  the IDX-06 union. `ViewRegistry::bind` picks the innermost *open* view, so the shell opens the
-  view `RepoProbe::resolve` names before it starts a request (else a nested worktree's file would
-  bind to its parent and be added to the parent's index), and never hands a parent view a hint
-  under a nested root. The shell supplies the listing to every rescan, and writes a cookie
-  file named by its stamp so its events carry it. From the slice-1 review: `Pin::complete_view`
-  is a copy of the request's view, not the view `completeness_at` read (return the root it
-  used); finished requests are never removed and keep their pinned generations alive (drop the
-  pin on finish, or a `forget`); `GitSeen.head` must cover the branch ref `HEAD` names and
-  `packed-refs`, not `.git/HEAD` alone (RepoProbe's stat set); a summary the store's cap evicts
-  between `summarised` and `publish` leaves the build stuck on `NotStored` (re-summarise or
-  abandon it); a protocol golden showing the two new reasons' words ("filesystem not watched",
-  "watcher lost events") when the shell first emits them. And the state-machine test
-  (**Decided (orchestrator, 2026-11-18):** not `proptest-state-machine`, whose `proptest`
-  default features bring 16 crates the workspace keeps out; the reference machine is written
-  over plain `proptest`, std only).
-  When the shell wires the summary store (IDX-08's review): create its root under the 0700 state
-  dir with 0700 directories, and fix the two store races if the shell makes them reachable (a
-  `NotFound` read racing a same-key write drops the live entry from the cap table; a discard
-  racing a good write deletes it).
+- **As built (IDX-09, slice 2, 2026-11-19):** `jfl_application::view_service`, the async shell
+  over the ports (`SourceTree`, `RepoProbe`, `SyntaxIndexer`, `SummaryStore`, and a new
+  `WallClock` port: the time read before each stat, the cookie's deadline). A request resolves its
+  file's innermost worktree and opens that view before it starts (the bind hazard); a view opens
+  by `statfs` (`SourceTree::filesystem`; only an allowlist of local filesystems is watched, so
+  network, FUSE, overlay and unknown ones answer `NotWatched`), watch, the clock, `HEAD`'s stat
+  set, the listing unioned with `tracked_java` (nested worktrees, repositories, agent worktrees and
+  links left out, build output kept), then publish; its files are read and summarised four at a
+  time on the ports' pool (`ServiceConfig::parallelism`), and stale cookies older than a minute
+  are swept first (`SourceTree::sweep_cookies`: regular files of a cookie's exact name, never
+  through a link). Hints: a `.java` file the view holds is a file event, any other path (a new
+  file, a directory, `.gitignore`, a build file) a rescan, this daemon's cookie its request's
+  barrier, another daemon's ignored; a `Rescan` that `degrade_the_watch()` is `watch_lost` and
+  the view is watched again at once (`watch_restored`, so the next rescan lists after the watch is
+  up), any other `overflow`; either loses the view's queued cookies. Every rescan takes the
+  listing. **A parent never holds a nested view's file, and is never handed a hint under a nested
+  root** (the slice-1 obligation, met): each view keeps the nested roots its last scan skipped and
+  the views opened inside it since, and drops a hint under one; a hint for a file the view does
+  not hold asks for a rescan rather than a read (it may be under a worktree just created or a
+  `.gitignore`d directory); a listed rescan leaves out of the build every path outside the listing
+  unioned with the tracked files (`ViewRegistry::exclude`, not a model transition: the model's
+  views index fixed paths), so anything that leaked in leaves, while a tracked file deleted on
+  disk stays as an absent entry; a view opened inside an open one makes the parent rescan
+  (`tests/view_service.rs`: `should_keep_a_nested_worktree_file_out_of_the_parent_when_it_is_edited`,
+  `should_keep_a_new_worktree_out_of_the_parent_when_it_is_created_under_it`,
+  `should_keep_an_ignored_file_out_of_the_view_when_it_is_hinted_or_asked_for`,
+  `should_drop_a_nested_view_s_files_from_the_parent_when_the_nested_view_opens`). A directory on
+  another device than the root (a mount point) is not walked and is a gap
+  (`UnlistedReason::OtherFilesystem`: `jfl-adapter-fs/tests/files.rs`), so a network mount inside a
+  worktree is never trusted as watched. The cookie (`SourceTree::write_cookie`:
+  `.jfl-cookie-<owner>-<stamp>` created 0600 in the view's root and removed at once, through the
+  view's own watch; a file already of that name is left alone and `-<attempt>` is appended) is
+  waited for with a 200 ms deadline, `cookie_lost` when it passes. The cookie file exists for the
+  microseconds between its create and remove: another watcher of the worktree sees it come and
+  go. The Git observation (`GitObserved`) puts `HEAD`, the
+  ref it names and `packed-refs` in the registry's `head` and the index in its `index`, settled
+  by the racy rule. Each generation entry carries its summary (`Summary`), so the store's cap
+  evicting an entry between its summary and the publish never sticks a build; the store is the
+  cache a view opens from. A file the indexer refuses or that cannot be read, and every gap of the
+  listing, is `ModulePartlyIndexed`. Core changes: `Pin::complete_view` is the root
+  `completeness_at` read; `ViewRegistry::forget` drops a finished request and its pin (the shell
+  forgets each request it finishes). The `repo_probe` fake fails every call on request
+  (`fail_with`); the `source_tree` fake answers a filesystem kind, writes or loses cookies and can
+  break its watches; the contract gained `reports_a_local_filesystem` and
+  `cookie_follows_earlier_changes` (a tree on the port's defaults fails both). The store's
+  directories are created 0700; a read that missed a racing write re-checks under the lock before
+  forgetting the entry, and a discard removes the file only while it still holds the torn bytes it
+  was given (a rewrite can get the freed inode back, so the inode cannot tell). The protocol golden
+  `jfl.definition.response.unwatched` words the two new reasons. The reference machine
+  (`tests/views_machine.rs`, plain `proptest`, 512 cases of up to 80 steps at a fixed seed) checks
+  every step's acceptance, every generation and every pin's completeness against an independent
+  model, and that a complete answer is a snapshot of one disk state since the request started.
+  Its generator mixes in late-read fragments (a request, writes behind its cookie, the deliveries,
+  a reconcile, the pin), also a named test
+  (`should_refuse_complete_when_a_reconcile_read_after_the_cookie_published_a_mix`): dropping the
+  late-read rule from the registry alone fails both on the reference's completeness, and dropping
+  it from the registry and the reference fails both on the snapshot check, which restates no
+  rule. **Decided (IDX-09, slice 2):** a rescan
+  re-stats every indexed file and lists the view; it does not narrow the work with
+  `changed_since`, whose `status` alone costs more (39 ms on medium) than every stat (9 ms), so
+  IDX-05's ordering obligations for it do not arise (the clock is still read before every
+  snapshot). `just bench-views` measures the shell on the corpus (`doc/bench/README.md`): cookie
+  round trip p50 0.026 ms, p95 0.050 ms on medium; a cold open 5.7 s with four parses at once
+  (12.8 s one at a time).
+- **Decided (orchestrator, 2026-11-18):** not `proptest-state-machine`, whose `proptest` default
+  features bring 16 crates the workspace keeps out; the reference machine is written over plain
+  `proptest`, std only.
+- **Left after slice 2 (IDX-09):** lifting the reftable refusal (`ReftableUnsupported`) once a
+  pinned git (≥ 2.45) lets a test pin the stacks' `tables.list`, here or IDX-15; a model action
+  for a pin whose cookie deadline passes (today a deadline is `cookie_lost`, which the model's
+  `dropEvent` of a cookie covers; `doc/formal-models.md`, "Not modelled yet"), model first;
+  `FSEventStreamFlushSync` on macOS, which `notify` does not expose (a cookie there waits for the
+  stream's latency, bounded by the deadline); **the cold open against plan §1.7 (decided by the
+  orchestrator, 2026-11-19: before IDX-12 wires the service into `jfl lsp`, and in any case before
+  M1):** the rows "full syntax index, cold, 4 cores (medium) ≤ 2.5 s" (5.7 s today, four parses at
+  once with only the parse on the pool) and "time to first useful answer on a fresh worktree
+  (medium) < 2 s": a first request must not wait for the whole open, but answer from what is
+  indexed, incomplete, within plan §2.7's deadline while the open proceeds; an abort transition
+  for a request that fails after `request_start` (it stays `Waiting`, holding no pin; model
+  first); the reference machine never draws a racy stat; the large tier's summaries on disk
+  rather than in each
+  generation (DEC-03, IDX-11); requests served one at a time (`&mut self`; the daemon, IDX-12,
+  serialises them); a hint that names a directory costs a full rescan; the backend gaps the
+  shell cannot see (`notify` drops `IN_UNMOUNT` and `IN_IGNORED`; FSEvents' `RootChanged`) stay
+  the fs adapter's (IDX-06's list); placing the store's root under the daemon's 0700 state
+  directory is the daemon's wiring (IDX-12; the store creates its own directories 0700).
 - **Accept:**
   - [x] `conformance-replay` replays the `views` regression and generated traces green (`crates/jfl-conformance/src/views.rs`; the seven regression traces, and 10 × 30-step generated traces at each `check`'s seed; seeds 0x1 to 0x5 also run)
   - [x] the negative control fails at the expected step (`tests/replay.rs::should_diverge_at_the_reconcile_when_the_views_control_publishes_early`: step 3, `reconcileStart`)
   - [x] component tests: a request pinned to N while N+1 publishes answers wholly from N; a `sed -i`-style write seen by the stat is in the answer without `sync` (`crates/jfl-application/tests/views.rs`)
-  - [ ] a `proptest-state-machine` test of the registry (open, reconcile, publish, pin, `sync`) against a reference machine (ADR 0007, amended; ver §6.4), over plain `proptest` (Decided above)
+  - [x] a `proptest-state-machine` test of the registry (open, reconcile, publish, pin, `sync`) against a reference machine (ADR 0007, amended; ver §6.4), over plain `proptest` (Decided above): `crates/jfl-application/tests/views_machine.rs`
   - [x] runs on the bench corpus (small at least, `just bench`) and reports the metrics it affects; its correctness tests also run against the real-corpus cases that apply (BENCH-05): `just bench-views SIZE` (small and medium, `doc/bench/README.md`); BENCH-05 has no cases yet, and every request over the unchanged corpus came out complete
 - **Obligations from the watcher (IDX-06 review), with FORMAL-03's (watch, then scan; a loss on a
   watch error; a filesystem-type check; racy mtimes):** hints are not a complete record, so a view

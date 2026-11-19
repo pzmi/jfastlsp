@@ -112,6 +112,9 @@ pub enum UnlistedReason {
     StatFailed,
     /// The listing reached its file cap and stopped.
     TooManyFiles,
+    /// A directory on another filesystem than the root's (a mount point): not walked, since
+    /// the root's filesystem type says nothing about whether a watch sees its changes.
+    OtherFilesystem,
 }
 
 /// A gap in a listing.
@@ -340,6 +343,168 @@ impl From<crate::blocking::Interrupted> for SourceTreeError {
     }
 }
 
+/// What kind of filesystem a root lives on, as `statfs` names it: whether a watch on it can be
+/// trusted to see every change (ADR 0037, `doc/formal-models.md`, IDX-09's obligation 4).
+///
+/// Only [`FsKind::Local`] is watched. The rule is an allowlist of local filesystems, never a list
+/// of bad ones: a filesystem this list does not know (a new one, a stacked one) is
+/// [`FsKind::Other`] and is opened unwatched, so its answers are incomplete rather than wrong.
+///
+/// Pinned by: `source_tree::tests::should_watch_only_a_known_local_filesystem_when_classifying`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum FsKind {
+    /// A local disk filesystem whose changes inotify or FSEvents report (ext4, xfs, btrfs,
+    /// tmpfs, zfs, APFS, HFS+, …).
+    Local,
+    /// A network filesystem: changes made by another client raise no event here (NFS, SMB/CIFS,
+    /// 9p, AFS, Ceph, …).
+    Network,
+    /// A FUSE filesystem (sshfs, virtiofs, macFUSE): the daemon behind it decides what is
+    /// reported, often nothing.
+    Fuse,
+    /// An overlay filesystem: a change to a lower layer raises no event on the overlay.
+    Overlay,
+    /// Any other filesystem, or one whose type could not be read.
+    Other,
+}
+
+/// Linux `statfs` magic numbers (`linux/magic.h`) of the local filesystems a watch can trust.
+const LINUX_LOCAL: [u64; 20] = [
+    0xEF53,      // ext2, ext3, ext4
+    0x5846_5342, // xfs
+    0x9123_683E, // btrfs
+    0x0102_1994, // tmpfs
+    0x8584_58F6, // ramfs
+    0x2FC1_2FC1, // zfs
+    0xF2F5_2010, // f2fs
+    0xCA45_1A4E, // bcachefs
+    0x5265_4973, // reiserfs
+    0x3153_464A, // jfs
+    0x3434,      // nilfs2
+    0x482B,      // hfsplus
+    0x2011_BAB0, // exfat
+    0x4D44,      // vfat
+    0x7366_746E, // ntfs3
+    0x5346_544E, // ntfs
+    0x1501_3346, // udf
+    0x7371_7368, // squashfs
+    0xE0F5_E1E2, // erofs
+    0x9660,      // iso9660
+];
+
+/// Linux `statfs` magic numbers of the network filesystems.
+const LINUX_NETWORK: [u64; 11] = [
+    0x6969,      // nfs
+    0x517B,      // smb
+    0xFE53_4D42, // smb2
+    0xFF53_4D42, // cifs
+    0x0102_1997, // v9fs (9p)
+    0x0BD0_0BD0, // lustre
+    0x00C3_6400, // ceph
+    0x5346_414F, // afs
+    0x6B41_4653, // kafs
+    0x7375_7245, // coda
+    0x564C,      // ncp
+];
+
+impl FsKind {
+    /// Whether a watch on this filesystem is trusted: only a local one.
+    #[must_use]
+    pub fn watchable(self) -> bool {
+        self == Self::Local
+    }
+
+    /// The kind of a Linux `statfs` `f_type`.
+    #[must_use]
+    pub fn from_linux_magic(magic: u64) -> Self {
+        match magic {
+            0x6573_5546 => Self::Fuse,
+            0x794C_7630 => Self::Overlay,
+            m if LINUX_NETWORK.contains(&m) => Self::Network,
+            m if LINUX_LOCAL.contains(&m) => Self::Local,
+            _ => Self::Other,
+        }
+    }
+
+    /// The kind of a BSD or macOS `statfs` `f_fstypename`.
+    #[must_use]
+    pub fn from_bsd_name(name: &str) -> Self {
+        match name {
+            "apfs" | "hfs" | "ufs" | "zfs" | "tmpfs" | "msdos" | "exfat" | "cd9660" => Self::Local,
+            "nfs" | "smbfs" | "afpfs" | "webdav" | "ftp" => Self::Network,
+            n if n.contains("fuse") => Self::Fuse,
+            _ => Self::Other,
+        }
+    }
+}
+
+/// The name of a cookie file (ADR 0037): `.jfl-cookie-<owner>-<stamp>` in the view's root, where
+/// `owner` names the daemon that writes it (so a second daemon's cookies, another user's on a
+/// shared worktree, are never taken for this one's) and `stamp` the cookie's place on the clock;
+/// `-<attempt>` follows when an earlier attempt found a file of that name already there (one is
+/// never removed to make room). The name passes [`hint_excluded`] (one leading dot, no other)
+/// and is never listed (not `.java`). `None` when `owner` holds anything but ASCII letters and
+/// digits.
+///
+/// Pinned by: `source_tree::tests::should_read_back_a_cookie_stamp_when_the_owner_wrote_it`.
+#[must_use]
+pub fn cookie_name(owner: &str, stamp: u64, attempt: u32) -> Option<RelPath> {
+    if !is_owner(owner) {
+        return None;
+    }
+    let name = if attempt == 0 {
+        format!("{COOKIE_PREFIX}{owner}-{stamp}")
+    } else {
+        format!("{COOKIE_PREFIX}{owner}-{stamp}-{attempt}")
+    };
+    RelPath::new(&name).ok()
+}
+
+fn is_owner(owner: &str) -> bool {
+    !owner.is_empty() && owner.bytes().all(|b| b.is_ascii_alphanumeric())
+}
+
+fn is_digits(text: &str) -> bool {
+    !text.is_empty() && text.bytes().all(|b| b.is_ascii_digit())
+}
+
+/// Whether `name`, a file name in a view's root, is exactly a cookie of any daemon
+/// ([`cookie_name`]'s shape): what a sweep of stale cookies may remove, and nothing else.
+///
+/// Pinned by: `source_tree::tests::should_read_back_a_cookie_stamp_when_the_owner_wrote_it`.
+#[must_use]
+pub fn is_cookie_name(name: &str) -> bool {
+    let Some(rest) = name.strip_prefix(COOKIE_PREFIX) else {
+        return false;
+    };
+    let mut parts = rest.split('-');
+    let (Some(owner), Some(stamp)) = (parts.next(), parts.next()) else {
+        return false;
+    };
+    let attempt_ok = parts.next().is_none_or(is_digits);
+    is_owner(owner) && is_digits(stamp) && attempt_ok && parts.next().is_none()
+}
+
+/// What every cookie file's name starts with.
+pub const COOKIE_PREFIX: &str = ".jfl-cookie-";
+
+/// Whether `path` is a cookie file of any daemon: never a source change.
+#[must_use]
+pub fn is_cookie(path: &RelPath) -> bool {
+    path.as_str().starts_with(COOKIE_PREFIX) && !path.as_str().contains('/')
+}
+
+/// The stamp of `path` when it is a cookie `owner` wrote ([`cookie_name`], any attempt).
+#[must_use]
+pub fn cookie_stamp(owner: &str, path: &RelPath) -> Option<u64> {
+    if !is_cookie_name(path.as_str()) {
+        return None;
+    }
+    let rest = path.as_str().strip_prefix(COOKIE_PREFIX)?;
+    let after = rest.strip_prefix(owner)?.strip_prefix('-')?;
+    after.split('-').next()?.parse().ok()
+}
+
 /// A stream of [`Hint`]s from one watch; dropping it stops the watch.
 pub trait Hints: Send {
     /// The next hint, if one is waiting. May block briefly to watch a new directory before its
@@ -395,6 +560,45 @@ pub trait SourceTree: Send + Sync {
         &self,
         root: &FileUri,
     ) -> impl Future<Output = Result<Self::Watch, SourceTreeError>> + Send;
+
+    /// The kind of filesystem `root` lives on (`statfs`). The default, for an implementation
+    /// that cannot tell, is [`FsKind::Other`]: a view it serves is never watched, so never
+    /// claims `complete` (ADR 0037). Cancel-safe.
+    fn filesystem(
+        &self,
+        root: &FileUri,
+    ) -> impl Future<Output = Result<FsKind, SourceTreeError>> + Send {
+        let _ = root;
+        core::future::ready(Ok(FsKind::Other))
+    }
+
+    /// Removes the stale cookies in `root`: regular files directly in it whose name is exactly a
+    /// cookie's ([`is_cookie_name`], any daemon's) and whose mtime is before `before`; never
+    /// through a link, never anything else. A daemon stopped between creating a cookie and
+    /// removing it leaves one, which `git status` would show and `git add -A` commit. Returns
+    /// how many were removed. The default removes none. Cancel-safe.
+    fn sweep_cookies(
+        &self,
+        root: &FileUri,
+        before: MTime,
+    ) -> impl Future<Output = Result<u64, SourceTreeError>> + Send {
+        let _ = (root, before);
+        core::future::ready(Ok(0))
+    }
+
+    /// Creates the file `root/name` and removes it again: a cookie (ADR 0037), whose events reach
+    /// a live watch of `root` through the same in-order stream as every change made before it.
+    /// `name` is a [`cookie_name`]. A file already of that name is left alone and the call fails
+    /// with `Io(AlreadyExists)`; the caller tries the next attempt's name. The default refuses
+    /// (`Io(Unsupported)`): the cookie is then lost and the answer incomplete, never wrong.
+    fn write_cookie(
+        &self,
+        root: &FileUri,
+        name: &RelPath,
+    ) -> impl Future<Output = Result<(), SourceTreeError>> + Send {
+        let _ = (root, name);
+        core::future::ready(Err(SourceTreeError::Io(std::io::ErrorKind::Unsupported)))
+    }
 }
 
 /// What sits at `<dir>/.git`.
@@ -531,6 +735,93 @@ mod tests {
 
     fn rel(path: &str) -> RelPath {
         RelPath::new(path).unwrap()
+    }
+
+    #[test]
+    fn should_watch_only_a_known_local_filesystem_when_classifying() {
+        // given
+        let linux = [
+            0xEF53,
+            0x9123_683E,
+            0x0102_1994,
+            0x6969,
+            0xFF53_4D42,
+            0x6573_5546,
+        ];
+        let bsd = ["apfs", "hfs", "nfs", "smbfs", "macfuse", "devfs"];
+
+        // when
+        let linux = linux.map(FsKind::from_linux_magic);
+        let bsd = bsd.map(FsKind::from_bsd_name);
+
+        // then
+        assert_eq!(
+            linux,
+            [
+                FsKind::Local,
+                FsKind::Local,
+                FsKind::Local,
+                FsKind::Network,
+                FsKind::Network,
+                FsKind::Fuse
+            ]
+        );
+        assert_eq!(FsKind::from_linux_magic(0x794C_7630), FsKind::Overlay);
+        assert_eq!(FsKind::from_linux_magic(0x1234_5678), FsKind::Other);
+        assert_eq!(
+            bsd,
+            [
+                FsKind::Local,
+                FsKind::Local,
+                FsKind::Network,
+                FsKind::Network,
+                FsKind::Fuse,
+                FsKind::Other
+            ]
+        );
+        assert!(FsKind::Local.watchable());
+        assert!(!FsKind::Other.watchable() && !FsKind::Overlay.watchable());
+    }
+
+    #[test]
+    fn should_read_back_a_cookie_stamp_when_the_owner_wrote_it() {
+        // given
+        let name = cookie_name("d42", 17, 0);
+
+        // when
+        let stamp = name.as_ref().and_then(|n| cookie_stamp("d42", n));
+        let other = name.as_ref().and_then(|n| cookie_stamp("d4", n));
+
+        // then
+        assert_eq!(
+            name.as_ref().map(RelPath::as_str),
+            Some(".jfl-cookie-d42-17")
+        );
+        assert_eq!(stamp, Some(17));
+        assert_eq!(other, None);
+        assert!(name.as_ref().is_some_and(is_cookie));
+        assert!(name.is_some_and(|n| !hint_excluded(&n, HintSubject::File)));
+        assert_eq!(cookie_name("d.1", 1, 0), None);
+        let retry = cookie_name("d42", 17, 2);
+        assert_eq!(
+            retry.as_ref().map(RelPath::as_str),
+            Some(".jfl-cookie-d42-17-2")
+        );
+        assert_eq!(
+            retry.as_ref().and_then(|n| cookie_stamp("d42", n)),
+            Some(17)
+        );
+        assert!(is_cookie_name(".jfl-cookie-d42-17") && is_cookie_name(".jfl-cookie-x-1-2"));
+        let not = [
+            ".jfl-cookie-",
+            ".jfl-cookie-d42",
+            ".jfl-cookie-d.4-1",
+            ".jfl-cookie-d-1-2-3",
+            ".jfl-cookie-d-1x",
+        ];
+        assert!(not.iter().all(|n| !is_cookie_name(n)), "{not:?}");
+        assert_eq!(cookie_stamp("d42", &rel(".jfl-cookie-d42-")), None);
+        assert!(!is_cookie(&rel("A.java")));
     }
 
     #[test]

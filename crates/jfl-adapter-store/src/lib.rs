@@ -138,7 +138,7 @@ fn read<T>(
             Some(value)
         }
         Err(_) => {
-            blobs.discard(key);
+            blobs.discard(key, Some(&entry));
             None
         }
     }

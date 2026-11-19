@@ -60,6 +60,7 @@ mod support {
         golden!("jfl.handshake.response"),
         golden!("jfl.definition.request"),
         golden!("jfl.definition.response"),
+        golden!("jfl.definition.response.unwatched"),
         golden!("jfl.references.request"),
         golden!("jfl.references.response"),
         golden!("jfl.hover.request"),
@@ -165,6 +166,29 @@ mod support {
             exact: vec![location(BILL, range(40, 16, 40, 22))],
             possible: vec![],
             completeness: complete_at(118),
+            freshness: fresh(),
+            position_encoding: PositionEncoding::Utf16,
+        });
+        let query = Query {
+            op: Operation::Def,
+            uri: uri(SHOP),
+            line: 12,
+            col: 18,
+        };
+        WireEnvelope::from_domain(&envelope, Some(query))
+    }
+
+    /// A definition answered from a view that is not watched and lost events (IDX-09: a view on
+    /// a filesystem a watch cannot trust, after an overflow): ADR 0037's two reasons, worded.
+    pub(super) fn unwatched_definition_envelope() -> WireEnvelope {
+        let envelope = Envelope::new(EnvelopeParts {
+            view: view(118, Some(HEAD)),
+            target: Some(exact_target()),
+            exact: vec![location(BILL, range(40, 16, 40, 22))],
+            possible: vec![],
+            completeness: complete_at(118)
+                .and(IncompleteReason::NotWatched)
+                .and(IncompleteReason::WatcherLostEvents),
             freshness: fresh(),
             position_encoding: PositionEncoding::Utf16,
         });
@@ -433,6 +457,10 @@ fn should_match_the_golden_when_every_envelope_query_is_encoded() {
         response_case::<messages::Definition>(
             "jfl.definition.response",
             ok(1, definition_envelope()),
+        ),
+        response_case::<messages::Definition>(
+            "jfl.definition.response.unwatched",
+            ok(10, unwatched_definition_envelope()),
         ),
         request_case::<References>("jfl.references.request", 2, references),
         response_case::<References>("jfl.references.response", ok(2, references_envelope())),

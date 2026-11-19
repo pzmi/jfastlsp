@@ -368,7 +368,28 @@ Measured 2026-11-18 (IDX-09) on the 4 vCPU Xeon VM, one other lane running:
 - **Per request** the registry's part does not grow with the view: a pin reads the generation's file count and latest read stamp, both counted at publish (a first version counted the files at every pin: 13.6 µs p50 on medium). Every request was complete (the corpus did not change while it ran).
 - **A publish** copies the generation's index (a build sits beside the published one, which pinned requests keep): linear in the view's files, 1.25 ms on medium, about 4.5 ms projected to elasticsearch's 33,850 files. A persistent map would make it proportional to the change; not needed at these numbers.
 - **The rescan takes the view's listing** since the review's round 2 (new files are read, the view certified only with one): one medium rerun gave 14.3 ms for the full rescan and an unchanged request path (p50 0.70 µs), within this VM's noise, so the table keeps the first run.
-- **The cookie's round trips** (one, or two when a summary was read after the first), which plan §1.7's 100 ms freshness target bounds, are not in these numbers: they are the watcher's latency and land with the shell that writes the cookie.
+- **The cookie's round trips** (one, or two when a summary was read after the first), which plan §1.7's 100 ms freshness target bounds, are not in these numbers: they are the watcher's latency, measured by the view service's half below.
+
+#### The view service (IDX-09, the second half of `just bench-views`)
+
+`crates/jfl-composition/benches/view_service.rs` drives `jfl-application`'s view service over the real adapters: the fs tree (inotify), the git probe, the Java indexer and the on-disk summary store in a scratch directory. Reads, stats and the store run on the calling thread; each parse runs on a thread of its own, four at once (`ServiceConfig::parallelism`). The cookie's deadline polls the clock (the bench has no runtime timer).
+- **View open, cold:** the first request with an empty store: `statfs`, watch, the Git stat set, the listing unioned with `git ls-files`, every file read, parsed and stored, then the request's cookie and pin. One run.
+- **View open, warm:** the same with the store filled, as after a daemon restart: every file read and hashed, its summary read back. Median of three.
+- **Cookie round trip:** 200 requests on unchanged files spread over the view, each writing its cookie into the checkout's root and waiting for inotify to deliver it; p50 and p95, and the whole request's time.
+- **Rescan with listing:** `sync`, five times: listing and `git ls-files`, every indexed file re-statted, nothing changed, published. Median.
+
+Measured 2026-11-19 (IDX-09, slice 2, after the review) on the 4 vCPU Xeon @ 2.10 GHz VM (15 GB, ext4), one other lane building (load average about 4):
+
+| corpus | open, cold store | open, warm store | cookie round trip (p50, p95) | whole request (p50, p95) | rescan with listing | complete |
+|:--|--:|--:|--:|--:|--:|--:|
+| small junit-framework (1,813 files) | 744 ms | 158 ms | 0.026, 0.047 ms | 0.064, 0.097 ms | 22.1 ms | 200 of 200 |
+| medium spring-framework (9,294 files) | 5,723 ms | 678 ms | 0.026, 0.050 ms | 0.073, 0.189 ms | 103.0 ms | 200 of 200 |
+
+The first run, one parse at a time on the calling thread and one lane running (load 2 to 4), gave cold opens of 2,153 ms (small) and 12,847 ms (medium) and a medium rescan of 78.0 ms; the cookie and warm numbers agreed within noise.
+
+- **The cookie** costs about 0.02 ms through inotify, four thousand times inside plan §1.7's 100 ms freshness target; a request that needs a second cookie pays it twice. The 200 ms deadline (`ServiceConfig::new`) is never near.
+- **The cold open** parses four files at once: 12.8 s became 5.7 s on medium, still over plan §1.7's 2.5 s for a cold full index on 4 cores, with the reads, hashes and store writes still on one thread here and another lane building. The daemon's pool (IDX-12) runs those on the pool too; a first answer that does not wait for the whole open is on IDX-09's card. The warm open, a read and a hash per file, is what a restart pays.
+- **The rescan** is the listing (the walk, `just bench-fs`) plus `git ls-files` plus the stats of the registry's own rescan above: 78 ms on medium. The shell does not narrow a rescan with `git diff` and `status` (`changed_since`), which alone cost more (`just bench-git`: 39 ms for `status` on medium) than every stat does.
 
 ## Adding a suite
 

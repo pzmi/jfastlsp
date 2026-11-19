@@ -344,3 +344,57 @@ fn should_refuse_an_entry_when_it_is_larger_than_any_read_accepts() {
     assert_eq!((stats.refused, stats.entries), (1, 0));
     assert!(!blobs.path_of(&key(1)).exists());
 }
+
+#[test]
+fn should_keep_directories_private_when_the_store_creates_them() {
+    // given
+    let scratch = Scratch::new("dir-modes");
+    let store = open(&scratch, u64::MAX, clock()).unwrap();
+    // when
+    block_on(store.put(key(1), Arc::new(summary()))).unwrap();
+    // then
+    let entry = store.path_of(&key(1));
+    let fanout = entry.parent().unwrap().to_path_buf();
+    for dir in [scratch.root(), scratch.root().join(OBJECTS), fanout] {
+        let mode = fs::metadata(&dir).unwrap().permissions().mode();
+        assert_eq!(mode & 0o077, 0, "{}: mode {mode:o}", dir.display());
+    }
+}
+
+#[test]
+fn should_keep_counting_an_entry_when_a_read_missed_its_write() {
+    // given
+    let scratch = Scratch::new("missed-write");
+    let entry = jfl_adapter_store::codec::encode(&key(1), &summary()).unwrap();
+    let (blobs, _) = Blobs::open(&scratch.root(), u64::MAX, clock()).unwrap();
+    let lost_race = blobs.read(&key(1));
+    blobs.write(key(1), &entry).unwrap();
+    // when
+    blobs.missed(&key(1), &std::io::Error::from(std::io::ErrorKind::NotFound));
+    // then
+    assert!(lost_race.is_none());
+    let stats = blobs.stats();
+    assert_eq!(stats.entries, 1);
+    assert_eq!(stats.bytes, u64::try_from(entry.len()).unwrap());
+}
+
+#[test]
+fn should_keep_a_rewritten_entry_when_a_late_discard_names_the_torn_one() {
+    // given
+    let scratch = Scratch::new("late-discard");
+    let entry = jfl_adapter_store::codec::encode(&key(1), &summary()).unwrap();
+    let (blobs, _) = Blobs::open(&scratch.root(), u64::MAX, clock()).unwrap();
+    blobs.write(key(1), &entry).unwrap();
+    let path = blobs.path_of(&key(1));
+    fs::write(&path, entry.get(..entry.len() / 2).unwrap()).unwrap();
+    let first = blobs.read(&key(1)).unwrap();
+    let second = blobs.read(&key(1)).unwrap();
+    blobs.discard(&key(1), Some(&second));
+    blobs.write(key(1), &entry).unwrap();
+    // when
+    blobs.discard(&key(1), Some(&first));
+    // then
+    let kept = blobs.read(&key(1)).unwrap();
+    assert_eq!(kept, entry);
+    assert_eq!(blobs.stats().entries, 1);
+}

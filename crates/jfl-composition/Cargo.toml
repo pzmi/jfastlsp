@@ -42,3 +42,9 @@ harness = false
 [[bench]]
 name = "views"
 harness = false
+
+# The view service over the real adapters on the bench corpus (the second half of
+# `just bench-views SIZE`, IDX-09); reports, never gates.
+[[bench]]
+name = "view_service"
+harness = false

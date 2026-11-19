@@ -667,6 +667,7 @@ dependencies = [
  "jfl-testkit",
  "libc",
  "notify",
+ "rustix",
 ]
 
 [[package]]
@@ -756,6 +757,8 @@ name = "jfl-application"
 version = "0.1.0"
 dependencies = [
  "jfl-domain",
+ "jfl-testkit",
+ "proptest",
  "thiserror",
 ]
 
