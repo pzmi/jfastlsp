@@ -17,19 +17,7 @@
   },
   "target": null,
   "exact": [],
-  "possible": [
-    {
-      "uri": "file:///w/m/src/main/java/com/acme/probe2/Shelf.java",
-      "range": [
-        4,
-        17,
-        4,
-        20
-      ],
-      "reason": "name_and_arity",
-      "why": "matched by name and arity (bound by scope rules read from syntax, not proved)"
-    }
-  ],
+  "possible": [],
   "complete": false,
   "incomplete_because": [
     "target not resolved from syntax"

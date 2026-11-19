@@ -56,6 +56,7 @@ pub mod grammar;
 pub mod indexer;
 
 mod extract;
+mod scopes;
 mod source;
 
 pub use extract::Work;

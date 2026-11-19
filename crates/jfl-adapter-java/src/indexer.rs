@@ -5,11 +5,15 @@ use core::future::Future;
 use std::cell::RefCell;
 use std::sync::Arc;
 
-use jfl_application::BlockingPool;
-use jfl_application::syntax_indexer::{GrammarId, Indexed, SyntaxIndexError, SyntaxIndexer};
+use jfl_application::syntax_indexer::{
+    GrammarId, Indexed, SiteSyntax, SyntaxIndexError, SyntaxIndexer,
+};
+use jfl_application::{BlockingPool, FileText};
+use jfl_domain::ByteRange;
 
 use crate::extract::{self, Work, Worker};
 use crate::grammar::Grammar;
+use crate::scopes;
 
 /// The summariser's format version (a `SyntaxKey` input): bumped whenever the same bytes would
 /// summarise differently.
@@ -32,6 +36,16 @@ fn summarise_on_thread(
         }
         // Only a re-entrant call could find it borrowed; it gets a worker of its own.
         Err(_) => extract::index_counted(grammar, &mut Worker::new(), bytes),
+    })
+}
+
+/// The syntax facts of the site at `name` of `text` ([`scopes`]), parsed on this thread's worker.
+fn site_on_thread(grammar: &Grammar, text: &str, name: ByteRange) -> Option<SiteSyntax> {
+    WORKER.with(|cell| match cell.try_borrow_mut() {
+        Ok(mut slot) => {
+            scopes::site_syntax(grammar, slot.get_or_insert_with(Worker::new), text, name)
+        }
+        Err(_) => scopes::site_syntax(grammar, &mut Worker::new(), text, name),
     })
 }
 
@@ -62,6 +76,29 @@ impl<P> JavaIndexer<P> {
     ) -> (Result<Indexed, SyntaxIndexError>, Work) {
         summarise_on_thread(&self.grammar, bytes)
     }
+
+    /// [`SyntaxIndexer::site_syntax`] on the calling thread: for the benchmark and tests.
+    pub fn site_syntax_blocking(&self, text: &str, name: ByteRange) -> Option<SiteSyntax> {
+        site_on_thread(&self.grammar, text, name)
+    }
+
+    /// The same for each of `names` over one parse, on the calling thread: what keeping the facts
+    /// in the summary at index time would cost (`just bench-queries` measures it).
+    pub fn sites_syntax_blocking(
+        &self,
+        text: &str,
+        names: &[ByteRange],
+    ) -> Vec<Option<SiteSyntax>> {
+        WORKER.with(|cell| match cell.try_borrow_mut() {
+            Ok(mut slot) => scopes::sites_syntax(
+                &self.grammar,
+                slot.get_or_insert_with(Worker::new),
+                text,
+                names,
+            ),
+            Err(_) => scopes::sites_syntax(&self.grammar, &mut Worker::new(), text, names),
+        })
+    }
 }
 
 impl<P: BlockingPool> SyntaxIndexer for JavaIndexer<P> {
@@ -82,5 +119,17 @@ impl<P: BlockingPool> SyntaxIndexer for JavaIndexer<P> {
             .pool
             .run(move || summarise_on_thread(&grammar, &bytes).0);
         async move { job.await.unwrap_or(Err(SyntaxIndexError::Interrupted)) }
+    }
+
+    fn site_syntax(
+        &self,
+        text: Arc<FileText>,
+        name: ByteRange,
+    ) -> impl Future<Output = Option<SiteSyntax>> + Send {
+        let grammar = Arc::clone(&self.grammar);
+        let job = self
+            .pool
+            .run(move || site_on_thread(&grammar, &text.text, name));
+        async move { job.await.ok().flatten() }
     }
 }

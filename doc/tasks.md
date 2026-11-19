@@ -1336,7 +1336,14 @@ target repository is private, only aggregated reports under `doc/eval/` are comm
   (`fixtures/java/summaries/orchard/`): `tests/goldens.rs` writes a missing one and fails once;
   review it and lock it (`just fixtures-lock`). `grammar/ImportModule.java` and
   `grammar/FlexibleConstructorBodies.java` need Java 25 where the pinned JDK is 21.
+- **Deferred from IDX-10 (2026-11-23):** the `java-fixtures` stage also runs
+  `just javac-bindings check`, which recompiles `projects/shop` and the queries' generated corpus
+  (`crates/jfl-adapter-java/tests/fixtures/javac/generated`) and fails when javac's bindings
+  differ from the recordings the javac differential reads in `check`
+  (`jfl-adapter-java/tests/definitions/main.rs`); until then a wrong recording with right file
+  digests is caught only by `fixtures.lock` review.
 - **Accept:**
+  - [ ] `java-fixtures` runs `just javac-bindings check` (IDX-10's javac differential), and a hand-edited recording under `crates/jfl-adapter-java/tests/fixtures/javac/` fails it
   - [ ] at least 200 resolution cases, at least 8 per construct of plan §5.6; a coverage table in `fixtures/java/resolution/README.md`
   - [ ] `java-fixtures` green in `check` and CI; a broken fixture outside `fixtures/java/broken/` fails it
   - [ ] no fixture copies code from any real project (synthetic only; ADR 0004)
@@ -2012,9 +2019,11 @@ but follow in lane CLI (M2). Starts after the go decision.
   generation only, and a file's text (positions in the carrier's encoding, Javadoc) is read only
   while its bytes are the ones the generation's key names; a file that moved on is left out with
   `ModuleStale`, and a target is named only with its location. **`exact` is admitted from one
-  place, `queries::admit`, and only for constructs on its allowlist: today, the cursor on a
-  declaration's own name** (no name resolution). Every name the scope rules below bind is
-  answered `possible`, its candidate kept (`name_and_arity`, "bound by scope rules read from
+  place, `queries::admit`, and only for constructs on its allowlist: the cursor on a
+  declaration's own name** (no name resolution), **and a site the syntax-tree resolver proves**
+  (slice 2, below: the constructs of `resolve/prove.rs`'s `ALLOWLIST`, every node around the site
+  on `jfl-adapter-java`'s `scopes::KINDS`, checked against javac). Every name the scope rules
+  below bind without that proof is answered `possible`, its candidate kept (`name_and_arity`, "bound by scope rules read from
   syntax, not proved"; a proved owner's overloads `overload_not_proved`, no target) and
   incomplete (`TargetUnresolved`). Two adversarial reviews with javac as the oracle found the
   rules, which re-derive Java's structure from summary ranges and a text scanner, binding wrong
@@ -2025,8 +2034,7 @@ but follow in lane CLI (M2). Starts after the go decision.
   comments before element keys and `case` labels, class headers and `super(...)` resolved in the
   body's scope, a type's own name taken before an inherited member type of that name (JLS 6.4.1),
   annotations before a type-parameter clause). The rules now rank candidates; a construct joins
-  the allowlist only with the syntax-tree resolver (Left, first item) and a javac differential
-  test of it. The scope rules (what they offer as the one candidate):
+  the allowlist only with the syntax-tree resolver and the javac differential test of it. The scope rules (what they offer as the one candidate):
   - the cursor on a declaration's own name is that declaration;
   - a type name bound by the enclosing types and their member types (a declared member type hides
     inherited ones), the file's own top-level types, or a single-type import (one view type of
@@ -2119,25 +2127,99 @@ but follow in lane CLI (M2). Starts after the go decision.
   the sort), against a scan of 4.5 ms; the names are rebuilt with each generation, and camel humps
   are a scan either way (plan §5.5). `fst` stays ADR 0025's choice for name sets built once and
   kept (a library JAR's, PROJ-04).
+- **As built (IDX-10 slice 2, 2026-11-19, fixed after its review 2026-11-23): the syntax-tree
+  resolver.** The indexer's grammar gives the queries the tree's facts about one site:
+  `SyntaxIndexer::site_syntax` (a provided method answering `None`, so the testkit's canned
+  indexer proves nothing), reached through `Sources::site_syntax`, and asked only for a site whose
+  shape the allowlist can prove (`queries::provable`: a qualified site only behind `this.`).
+  `jfl-adapter-java`'s `scopes.rs` parses the request's file (the work budget of indexing; no
+  facts for a file with Unicode escapes or a syntax error, or over 1 MiB, whose parse could pass
+  the deadline), finds the site's path from the unit in one descent (O(depth), at most
+  `MAX_SITE_DEPTH` = 512 levels, deeper sites give no facts) and returns plain data
+  (`jfl_application::SiteSyntax`): the site's form (bare name, call, `this.` name or call, type,
+  annotation, `new T(…)` without a body, or other, from two explicit place lists; the qualifier
+  of `X.this` and `X.super` is a type name, never a bare name, JLS 15.8.4), every node around it to
+  the unit classified by `scopes::KINDS` (all 146 named kinds of the orchard grammar, each code,
+  callable, field, type, body, unit or denied;
+  `scopes::tests::should_classify_every_kind_once_when_the_grammar_is_read` fails when the
+  grammar's kinds and the table differ) with the positions a kind is denied in (a class body
+  under `new` or an enum constant, a type declared in a block, a member's initializer, a block in
+  a class body, a callable outside a type body, a record's header), and whether a variable,
+  parameter, pattern, lambda, catch, `for` or resource variable, local type or type parameter of
+  the site's name is declared anywhere in a callable or type around it (one pre-order scan, only
+  for a walk that reached the unit). The descent, the walk out and the scan are charged to the
+  parse's work budget (`scopes::tests::should_walk_in_linear_steps_when_a_site_is_deep_or_its_method_is_long`
+  counts steps on 60,000 parentheses and a 6,000-term concatenation); the adapter holds no clock
+  (fnd §2.4), so the deadline is read before the parse and by the resolution after it.
+  `queries::resolve::prove` holds the allowlist, in one place (`ALLOWLIST`: form, innermost
+  frame and summary shape to a construct), checks every frame against the summary (each type a
+  member of the next, the callable a member of the innermost), and implements, conservatively:
+  a bare name or call and `this.` in a method's or constructor's body (the innermost type with a
+  member of that name owns it, through closed hierarchies; a type whose hierarchy leaves the index
+  ends the proof; the one field declared or inherited, the one overload applicable by arity);
+  a simple type or annotation name in a body, a member's header or a field's header (member
+  types first, inherited ones included, then the type's own name, JLS 6.4.1; the file's
+  top-level types; single-type imports) and in a type's header from the type around it (JLS
+  6.3, 8.1.6); `new T(…)` of a class by its one constructor applicable by arity. A field or member
+  type a supertype declares hides every one of that name further up that branch, inherited or not
+  (JLS 8.3, 8.5; javac's access error sends the search outward: the review's H1). A supertype's
+  method is overridden only by a same-signature method of a proper subtype on the same branch of
+  the walk (JLS 8.4.8.1); same-signature methods from two branches both stay, so the call is not
+  exact (javac chooses by JLS 15.12.2.5, which the summary cannot prove; the third review). A file that uses
+  Lombok counts as having members outside the index (`resolve::generates_members`). The round-1
+  inheritance rules stand. One scoping order everywhere, the JLS one (the second review's N4 and
+  N5): three slice-1 goldens that pinned a candidate javac does not bind were corrected
+  (`def.probe2.inherited-member-type-over-own-name` now lists `SelfBase.Self`;
+  `def.probe2.type-parameter-after-annotation` and `def.probe2.member-type-parameter-after-annotation`
+  offer no candidate for a type variable). **The javac differential**
+  (`jfl-adapter-java/tests/definitions/main.rs`): every reference site of `projects/shop` (203,
+  the reviews' probes among them, `com.acme.probe3.QualThis` the slice-2 review's) and of a corpus
+  generated from a fixed seed (`tests/definitions/generator.rs`: 32 case files of anonymous classes
+  in arguments, behind a nested `new`, a `[` or a lambda, in array initialisers, lambdas, local
+  classes, enum constant bodies, `switch` rules, locals, pattern and `for` variables named like a
+  field, comments and strings holding braces, annotations whose strings spell a name, member,
+  static nested and generic classes, class headers and type-parameter bounds naming a member type,
+  a member class of a library supertype whose inherited members share the outer class's names,
+  private and cross-package package-private fields and member types hiding public ones (a
+  superclass, an interface constant, a second top-level class, `new` of the hidden type), `X.this`
+  beside a field named `X`, a record's implicit field and accessor, same-signature methods from two
+  branches of a hierarchy (an abstract superclass method against an interface default, covariant
+  returns across a class and an interface or two interfaces, identical abstract methods); 922
+  sites) is asked through
+  the view service over the real indexer, and every `exact` answer must name the declaration javac
+  binds the site to. javac's bindings are recorded by `just javac-bindings write`
+  (`tools/javac-bindings/JavacBindings.java`, the Compiler Tree API, attribution only, the pinned
+  JDK; an implicit constructor as its class, a record's implicit accessor as its component) into
+  `tests/fixtures/javac/{shop,generated}.tsv` with each file's FNV-1a digest, so the test runs in
+  `check` without a JDK and fails on a stale recording; `just javac-bindings check` recompiles and
+  compares, the step EVAL-07's `java-fixtures` stage takes on (its card). Floors: 49 of shop's 203
+  sites and 232 of the corpus's 922 are `exact`, none wrong. Mutation checks, each made by hand
+  and reverted: listed in the slice's commit. On medium, 34 of the 200 sampled reference sites are
+  `exact` (small 37), 89 possible only, 33 outside, 44 unresolved (`just bench-queries`).
+- **Proposed (IDX-10 slice 2): the facts are read at query time, (a), not kept in the summary,
+  (b). Pending owner sign-off (ADR 0031: a definition is slower than slice 1's by more than
+  10 %).** Medians of three runs, 2026-11-23, the 4 vCPU VM: a definition takes 1.0 ms p50 and
+  7.5 ms p95 alone on medium, 1.35 and 8.1 ms with its request, hover 0.94 and 8.1 ms (small 0.83
+  and 6.5 / 1.18 and 6.9 / 0.75 and 6.8 ms), against slice 1's 0.21 and 2.3 ms alone and 0.55 and
+  2.7 ms with its request; the slice's first version took 3.1 and 15.4 ms before the walk was made
+  linear and the parse skipped for unprovable shapes. All inside the `jfl def` row of plan §1.7
+  (p50 < 20, p95 < 50 ms). On medium (9,211 files with sites, one thread) a file's parse takes
+  0.18 ms p50, 1.4 ms p95, 34–55 ms for the largest (316 KB). Keeping the facts would add every
+  site's walk to the index, 14.2 s over medium beside 3.5 s of parsing, a store format bump and a
+  new summary golden for every file. A cache of parsed trees by content key, for definitions
+  repeated in one file, is the next step if the M1 definition rows need it.
 - **Left after IDX-10:**
-  - **the syntax-tree resolver (next; the orchestrator's design, 2026-11-19):** replace the text
-    scanner (`queries/scan.rs`) with the tree-sitter parse IDX-07 already has. Scopes, anonymous,
-    local and enum-constant bodies, lambdas, annotations, comments, `case` labels, element-value
-    pairs, class headers and type parameters are nodes there. Choose with measurements (query-time
-    parse cost on medium: p50 and p95 per file, the largest file, against the 300 ms deadline)
-    between parsing the request's file at query time and walking outward from the position, or
-    adding the scope facts to the summary at index time (a store format version and summary
-    goldens bumped, no unrelated golden rewritten). Then grow `admit`'s allowlist one construct at
-    a time (for example a bare name or `this.` receiver in a method body of a top-level or member
-    class with a known scope chain and no unrecognised enclosing node), named in one place, with a
-    test that fails when the grammar's scoping node kinds change without a decision. Resolve a
-    class header, its annotations and type parameters in the enclosing scope, `super(...)` in the
-    superclass's context, inherited member types before a type's own name (JLS 6.4.1), and
-    downgrade anything unclear. Add a javac differential test at the lowest level CI has javac (the
-    java-fixtures stage, EVAL-07): for every probe file, javac's binding (javap or the compile)
-    equals the `exact` target or the answer is not `exact`; and a small generator of nested
-    constructs (anonymous in lambda in array initialiser, comments in odd places, annotations with
-    strings). Today's probes (`com.acme.probe`, `com.acme.probe2`) are its first cases;
+  - **the syntax-tree resolver's next constructs** (each with its frames in `scopes.rs` and
+    `prove.rs`'s `ALLOWLIST`, generator cases and the differential): lambda bodies (their
+    parameters already shadow), field initializers and initializer blocks, `super(...)` and
+    `this(...)` (the superclass's constructors), `switch` bodies and `case` labels (an enum
+    selector's constants), qualified type names and `Outer.this`, single static imports, import
+    sites, a record's header and its implicit members, annotation element keys, receivers typed
+    by a field's or parameter's declared type; same-package and on-demand steps with PROJ;
+  - **a JDK stage** runs `just javac-bindings check` (EVAL-07's `java-fixtures`); until it lands
+    the recording is checked only when a person runs the recipe;
+  - a cache of the last parsed trees by `SyntaxKey`, if the M1 definition rows need it
+    (definitions in one file reparse it each time);
   - the daemon's part (IDX-12, LSP-02): keep one `QueryCache`; resolve `HEAD` for the view;
     fill `Freshness`; map hover to `HoverResult` (the status line, the first declaration, the
     reference summary once IDX-11 lands); pin a request for `workspace/symbol`, which names no
@@ -2154,15 +2236,18 @@ but follow in lane CLI (M2). Starts after the go decision.
   - the large tier (DEC-03): the snapshot assumes every summary of the generation is in memory;
   - LSP-06 completes the 50 golden cases (38 here) and their LSP mapping; the multi-module
     fixtures are PROJ's; BENCH-05's real-corpus cases do not exist yet;
-  - a receiver whose type a field's or parameter's declared type would give, `super.` receivers,
-    and qualified receivers (`a.B.m()`) stay unknown until the resolver (SEM-*).
+  - `super.` receivers and qualified receivers (`a.B.m()`) stay unknown until the resolver
+    (SEM-*).
 - **Accept:**
   - [x] component tests over the fixture projects for each operation, including bounded ambiguity never returning another type's member (`tests/queries.rs`: `should_list_every_overload_of_the_owner_and_no_other_type_s_when_the_overload_is_not_proved`, `should_list_inherited_overloads_and_never_another_type_s_when_a_subclass_calls_one`, and one test or more per operation)
   - [x] a deadline hit returns `complete=false` with `deadline` in `incomplete_because` (fake clock): `should_answer_incomplete_with_deadline_when_the_clock_passes_it` (`FakeWallClock::stepping`)
   - [x] envelope goldens for the cases chosen for M1's 50-case gate (started here, completed in LSP-06): 38 in `crates/jfl-application/tests/fixtures/queries/`, 26 of them the reviews' probes with javac's binding as the oracle
   - [x] runs on the bench corpus (small at least, `just bench`) and reports the metrics it affects; its correctness tests also run against the real-corpus cases that apply (BENCH-05): `just bench-queries small` and `medium` (`doc/bench/README.md`); BENCH-05 has no cases yet
+  - [x] an `exact` answer beyond a declaration's own name only where javac binds the site the same, at every site of the fixture projects and the generated corpus (slice 2): `jfl-adapter-java/tests/definitions/main.rs`'s `should_match_javac_or_stay_possible_when_any_site_of_shop_is_asked` and `…_of_the_generated_corpus_is_asked`
 - **Impact:** protocol (additive: the `supertype_not_indexed` reason code and three new
-  `incomplete_because` wordings); fixtures (the `projects/shop` corpus and its summaries).
+  `incomplete_because` wordings); fixtures (the `projects/shop` corpus and its summaries; the
+  generated corpus and javac's recorded bindings); ports (`SyntaxIndexer::site_syntax` and
+  `Sources::site_syntax`, provided methods); tooling (`just javac-bindings`).
 
 #### IDX-11: Queries: `refs`, the `possible` superset, completeness
 - **Depends on:** IDX-10. **Model:** deep. **Size:** L. **Parallel with:** IDX-12.

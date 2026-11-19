@@ -543,7 +543,7 @@ fn skip_quoted(bytes: &[u8], at: usize, quote: u8) -> Option<usize> {
     }
 }
 
-/// The modifiers that may precede a callable's type-parameter clause.
+/// The modifiers that may precede a type's keyword or a callable's type-parameter clause.
 const MODIFIERS: [&str; 12] = [
     "public",
     "protected",
@@ -563,7 +563,8 @@ const MODIFIERS: [&str; 12] = [
 /// type parameter `name`: a type's clause follows its name (`class Box<E>`), a method's or
 /// constructor's precedes its return type or name, after annotations and modifiers
 /// (`public <T> T pick(…)`). Other kinds declare none. When the signature cannot be followed (an
-/// annotation's arguments that do not end), the answer is yes, which is conservative.
+/// annotation's arguments that do not end), the answer is yes, which is conservative. A type's
+/// name is matched only after its annotations, modifiers and keyword (the second review's N5).
 ///
 /// Pinned by: `scan::tests::should_find_a_type_parameter_when_a_signature_declares_one`.
 pub(crate) fn declares_type_parameter(
@@ -574,58 +575,28 @@ pub(crate) fn declares_type_parameter(
 ) -> bool {
     let bytes = signature.as_bytes();
     let clause = if kind.is_type() {
-        let mut at = 0;
-        loop {
-            let start = skip_space(bytes, at);
-            let Some(b) = byte(bytes, start) else {
-                return false;
-            };
-            if !is_ident_byte(b) {
-                at = start.saturating_add(1);
-                continue;
-            }
-            let end = ident_end(bytes, start);
-            if signature.get(start..end) == Some(declared) {
-                break skip_space(bytes, end);
-            }
-            at = end;
+        // After the annotations and modifiers, the keyword, then the name: an annotation's
+        // argument may spell the name (`@SuppressWarnings("Box3") class Box3<Money>`), so the
+        // name is matched only there. Any other shape answers yes, which is conservative.
+        let Some(at) = past_modifiers(signature) else {
+            return true;
+        };
+        let end = ident_end(bytes, at);
+        let at = match signature.get(at..end) {
+            Some("class" | "interface" | "enum" | "record") => skip_space(bytes, end),
+            // `@interface` was read as an annotation by `past_modifiers`.
+            _ => at,
+        };
+        let end = ident_end(bytes, at);
+        if signature.get(at..end) != Some(declared) {
+            return true;
         }
+        skip_space(bytes, end)
     } else if matches!(kind, DeclKind::Method | DeclKind::Constructor) {
-        let mut at = 0;
-        loop {
-            at = skip_space(bytes, at);
-            match byte(bytes, at) {
-                Some(b'@') => {
-                    let mut end = at.saturating_add(1);
-                    while byte(bytes, end).is_some_and(|b| is_ident_byte(b) || b == b'.') {
-                        end = ident_end(bytes, end).max(end.saturating_add(1));
-                    }
-                    let open = skip_space(bytes, end);
-                    at = if byte(bytes, open) == Some(b'(') {
-                        match skip_parens(signature, open) {
-                            Some(past) => past,
-                            None => return true,
-                        }
-                    } else {
-                        end
-                    };
-                }
-                Some(b) if is_ident_byte(b) => {
-                    let end = ident_end(bytes, at);
-                    let word = signature.get(at..end).unwrap_or("");
-                    if !MODIFIERS.contains(&word) {
-                        break at;
-                    }
-                    // `non-sealed`.
-                    at = if word == "non" && byte(bytes, end) == Some(b'-') {
-                        ident_end(bytes, end.saturating_add(1))
-                    } else {
-                        end
-                    };
-                }
-                _ => break at,
-            }
-        }
+        let Some(at) = past_modifiers(signature) else {
+            return true;
+        };
+        at
     } else {
         return false;
     };
@@ -664,6 +635,44 @@ pub(crate) fn declares_type_parameter(
         i = i.saturating_add(1);
     }
     false
+}
+
+/// Where a declaration's signature goes on past its annotations (their arguments skipped, strings
+/// included) and modifiers; `None` when an annotation's arguments do not close.
+fn past_modifiers(signature: &str) -> Option<usize> {
+    let bytes = signature.as_bytes();
+    let mut at = 0;
+    loop {
+        at = skip_space(bytes, at);
+        match byte(bytes, at) {
+            Some(b'@') => {
+                let mut end = at.saturating_add(1);
+                while byte(bytes, end).is_some_and(|b| is_ident_byte(b) || b == b'.') {
+                    end = ident_end(bytes, end).max(end.saturating_add(1));
+                }
+                let open = skip_space(bytes, end);
+                at = if byte(bytes, open) == Some(b'(') {
+                    skip_parens(signature, open)?
+                } else {
+                    end
+                };
+            }
+            Some(b) if is_ident_byte(b) => {
+                let end = ident_end(bytes, at);
+                let word = signature.get(at..end).unwrap_or("");
+                if !MODIFIERS.contains(&word) {
+                    return Some(at);
+                }
+                // `non-sealed`.
+                at = if word == "non" && byte(bytes, end) == Some(b'-') {
+                    ident_end(bytes, end.saturating_add(1))
+                } else {
+                    end
+                };
+            }
+            _ => return Some(at),
+        }
+    }
 }
 
 /// Past the parenthesised group opened at `at`, string and character literals skipped.
@@ -914,6 +923,9 @@ mod tests {
         let generic_return = "public List<Receipt> receipts()";
         let class = "class Box<E extends Base<Money>> extends Base<Receipt>";
         let field = "private final List<Receipt> receipts";
+        // The second review's N5: the class's name inside an annotation's argument.
+        let annotated = "@SuppressWarnings(\"Box3\") class Box3<Money>";
+        let annotation_type = "public @interface Tag";
         // when
         let found = [
             declares_type_parameter(method, "pick", DeclKind::Method, "T"),
@@ -924,9 +936,16 @@ mod tests {
             declares_type_parameter(class, "Box", DeclKind::Class, "Money"),
             declares_type_parameter(class, "Box", DeclKind::Class, "Receipt"),
             declares_type_parameter(field, "receipts", DeclKind::Field, "Receipt"),
+            declares_type_parameter(annotated, "Box3", DeclKind::Class, "Money"),
+            declares_type_parameter(annotation_type, "Tag", DeclKind::Annotation, "Tag"),
         ];
         // then
-        assert_eq!(found, [true, true, false, false, true, false, false, false]);
+        assert_eq!(
+            found,
+            [
+                true, true, false, false, true, false, false, false, true, false
+            ]
+        );
     }
 
     #[test]

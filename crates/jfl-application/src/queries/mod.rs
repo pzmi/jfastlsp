@@ -18,14 +18,18 @@
 //!   one says why (pinned by
 //!   `tests/queries.rs::should_say_why_when_a_definition_finds_nothing`).
 //!
-//! **`exact` only on the allowlist** (`admit`): today that is the cursor on a declaration's own
-//! name, which needs no name resolution. A name the scope rules of [`resolve`] bind is answered
-//! `possible` (its candidate kept, with the reason the binding is not proved) and incomplete:
-//! two adversarial reviews with javac as the oracle found the rules, read from summary ranges and
-//! a text scanner, binding wrong declarations, so they rank candidates and prove nothing until
-//! the syntax-tree resolver (the card's next item) earns a place on the allowlist. Bounded
-//! ambiguity (plan §2.2) lists the overloads of the owner the rules found, never a same-name
-//! member of another type. A target is named only with its location.
+//! **`exact` only on the allowlist** (`admit`): the cursor on a declaration's own name, which
+//! needs no name resolution, and a site the syntax-tree resolver proves (`resolve::prove`, IDX-10's
+//! second slice): the indexer's parse of the request's file ([`Sources::site_syntax`]) places the
+//! site on an explicit allowlist of constructs and frames, and the JLS rules it implements bind it
+//! to one declaration; javac's recorded bindings check every such answer over the fixture
+//! projects (`jfl-adapter-java`'s `tests/definitions/main.rs`). A name the scope rules of [`resolve`]
+//! bind without that proof is answered `possible` (its candidate kept, with the reason the
+//! binding is not proved) and incomplete: two adversarial reviews with javac as the oracle found
+//! the rules, read from summary ranges and a text scanner, binding wrong declarations, so they
+//! rank candidates and prove nothing. Bounded ambiguity (plan §2.2) lists the overloads of the
+//! owner the rules found, never a same-name member of another type. A target is named only with
+//! its location.
 
 mod resolve;
 mod scan;
@@ -40,12 +44,13 @@ use std::sync::{Arc, Mutex, PoisonError, Weak};
 use jfl_domain::{
     ByteRange, Completeness, DeclKind, Envelope, EnvelopeParts, FileUri, Freshness,
     IncompleteReason, LineIndex, Location, ModuleName, ObjectId, Position, PositionEncoding,
-    PositionError, PossibleHit, Range, Reason, RelPath, SymbolId, SyntaxKey, Target, TargetStatus,
-    View, Why,
+    PositionError, PossibleHit, Range, Reason, RefShape, ReferenceSite, RelPath, SymbolId,
+    SyntaxKey, Target, TargetStatus, View, Why,
 };
 
 use crate::clock::{WallClock, elapsed};
 use crate::source_tree::MTime;
+use crate::syntax_indexer::SiteSyntax;
 use crate::view_service::{self, Answer, GitObserved, Summary};
 use crate::views::{FileSeen, Published};
 
@@ -140,6 +145,17 @@ pub trait Sources: Sync {
         path: &RelPath,
         key: &SyntaxKey,
     ) -> impl Future<Output = Option<Arc<FileText>>> + Send;
+
+    /// The syntax tree's facts about the reference site named at `name` of `text` (the request's
+    /// file, as [`Sources::text`] read it): what [`crate::SyntaxIndexer::site_syntax`] gives.
+    /// `None` proves nothing, so every resolved name stays `possible`.
+    fn site_syntax(
+        &self,
+        _text: &Arc<FileText>,
+        _name: ByteRange,
+    ) -> impl Future<Output = Option<SiteSyntax>> + Send {
+        core::future::ready(None)
+    }
 }
 
 /// A pinned request as the queries read it: the answer, and what the caller knows beside it.
@@ -409,14 +425,29 @@ async fn define<S: Sources, D: Deadline>(
         .file_at(&answer.path)
         .ok_or(QueryError::NotInGeneration)?;
     let resolver = Resolver::with_deadline(&snapshot, Some(deadline));
-    let outcome = match cursor {
-        Cursor::Declaration(decl) => Outcome::Exact(Hit {
-            file: request_file,
-            decl,
-        }),
-        Cursor::Site(site) => {
-            resolver.resolve_site(request_file, &own.text, &site, config.candidates)
+    // The syntax tree around a site, read only while the deadline allows (its parse is bounded
+    // by the indexer's work budget, not by the deadline) and only for a site the allowlist could
+    // prove: the parse is most of a definition's time.
+    let syntax = match cursor {
+        Cursor::Site(site) if !deadline.passed() && provable(&site, &own.text) => {
+            sources.site_syntax(&own, site.range).await
         }
+        _ => None,
+    };
+    let (outcome, proved) = match cursor {
+        Cursor::Declaration(decl) => (
+            Outcome::Exact(Hit {
+                file: request_file,
+                decl,
+            }),
+            None,
+        ),
+        Cursor::Site(site) => (
+            resolver.resolve_site(request_file, &own.text, &site, config.candidates),
+            syntax
+                .as_ref()
+                .and_then(|syntax| resolver.prove(request_file, &site, syntax)),
+        ),
     };
     if resolver.cut() {
         // Every lookup after the deadline answered "outside": the outcome is no answer.
@@ -426,7 +457,7 @@ async fn define<S: Sources, D: Deadline>(
             described: Vec::new(),
         });
     }
-    let outcome = admit(cursor, outcome);
+    let outcome = admit(cursor, outcome, proved);
     // What the outcome lists, and how it is read.
     let mut target: Option<(Hit, TargetStatus)> = None;
     let mut exact: Vec<Hit> = Vec::new();
@@ -571,31 +602,57 @@ async fn define<S: Sources, D: Deadline>(
     })
 }
 
-/// **The allowlist of `exact`: the one place a definition may say `exact`.** A construct is on
-/// it only when its binding needs no name resolution at all:
+/// Whether `site` has a shape `resolve::prove`'s allowlist can prove: a bare name or call, a type,
+/// an annotation or an instance creation, or a qualified name or call whose receiver is `this`.
+/// A filter before the parse, never evidence: when the text scanner misreads a receiver (a
+/// comment between `this` and the dot) the site is only left unproved.
 ///
-/// - the cursor on a declaration's own name ([`Cursor::Declaration`]).
+/// Pinned by: `jfl-adapter-java`'s `tests/definitions/main.rs` (the floors of proved sites).
+fn provable(site: &ReferenceSite, text: &str) -> bool {
+    match site.shape {
+        RefShape::Name
+        | RefShape::Call
+        | RefShape::TypeUse
+        | RefShape::Annotation
+        | RefShape::New => true,
+        RefShape::QualifiedName | RefShape::QualifiedCall => {
+            usize::try_from(site.range.start().get())
+                .is_ok_and(|start| scan::before(text, start) == scan::Before::This)
+        }
+        RefShape::MethodRef => false,
+    }
+}
+
+/// **The allowlist of `exact`: the one place a definition may say `exact`.** A site is `exact`
+/// only when its binding needs no name resolution, or when the syntax-tree resolver proved it:
 ///
-/// Everything the scope rules of [`resolve`] bind is admitted only as `possible` (its candidates
-/// kept, the owner of overloads no longer claimed): the rules read Java's structure from summary
-/// ranges and a text scanner, and two adversarial reviews found false `exact`s there (anonymous
-/// classes behind nested arguments, comments before keys and labels, class headers resolved in
-/// the body's scope, member types against a type's own name, annotations before type
-/// parameters). A construct joins the allowlist only with the syntax-tree resolver (the card's
-/// next item) and a javac differential test of it.
+/// - the cursor on a declaration's own name ([`Cursor::Declaration`]);
+/// - a site whose construct and every node around it are on the resolver's allowlist and whose
+///   binding follows from the JLS rules it implements (`proved`, from
+///   [`resolve::Resolver::prove`]; the constructs are listed there, in one place).
 ///
-/// Pinned by: `tests/queries.rs::should_match_javac_or_stay_possible_when_the_review_s_probes_are_asked`
-/// and `tests/queries.rs::should_answer_exact_only_on_a_declaration_s_own_name_when_any_name_is_asked`.
-fn admit(cursor: Cursor, outcome: Outcome) -> Outcome {
-    match (cursor, outcome) {
-        (Cursor::Declaration(_), outcome) => outcome,
-        (Cursor::Site(_), Outcome::Exact(hit)) => {
+/// Everything the scope rules of [`resolve`] bind without that proof is admitted only as
+/// `possible` (its candidates kept, the owner of overloads no longer claimed): the rules read
+/// Java's structure from summary ranges and a text scanner, and two adversarial reviews found
+/// false `exact`s there (anonymous classes behind nested arguments, comments before keys and
+/// labels, class headers resolved in the body's scope, member types against a type's own name,
+/// annotations before type parameters).
+///
+/// Pinned by: `tests/queries.rs::should_answer_exact_only_on_a_declaration_s_own_name_when_any_name_is_asked`
+/// (no tree: nothing proved) and `jfl-adapter-java`'s
+/// `tests/definitions/main.rs::should_match_javac_or_stay_possible_when_any_site_is_asked` (the tree,
+/// against javac's bindings).
+fn admit(cursor: Cursor, outcome: Outcome, proved: Option<Hit>) -> Outcome {
+    match (cursor, outcome, proved) {
+        (Cursor::Declaration(_), outcome, _) => outcome,
+        (Cursor::Site(_), _, Some(hit)) => Outcome::Exact(hit),
+        (Cursor::Site(_), Outcome::Exact(hit), None) => {
             Outcome::Unproved(vec![hit], Unproved::ScopeRules)
         }
-        (Cursor::Site(_), Outcome::Overloads { all, .. }) => {
+        (Cursor::Site(_), Outcome::Overloads { all, .. }, None) => {
             Outcome::Unproved(all, Unproved::Overloads)
         }
-        (Cursor::Site(_), other) => other,
+        (Cursor::Site(_), other, None) => other,
     }
 }
 

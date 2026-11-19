@@ -8,7 +8,7 @@ use std::sync::OnceLock;
 
 use jfl_adapter_java::{Grammar, GrammarSpec, JavaIndexer};
 use jfl_application::syntax_indexer::{Indexed, SyntaxIndexError, source_text};
-use jfl_domain::{LineIndex, PositionEncoding};
+use jfl_domain::{ByteOffset, ByteRange, LineIndex, PositionEncoding};
 use jfl_testkit::exec::InlinePool;
 use jfl_testkit::golden::{self, CorpusFile};
 use proptest::prelude::*;
@@ -217,6 +217,33 @@ proptest! {
         let answered = answers(&bytes);
         // then
         prop_assert_eq!(answered, Ok(()), "{} mutated by {:?}", original.path, mutations);
+    }
+
+    #[test]
+    fn should_give_site_facts_without_panicking_when_a_corpus_file_is_mutated(
+        file in 0usize..64,
+        mutations in proptest::collection::vec(mutation(), 1..8),
+        start in 0u32..4096,
+        len in 0u32..16,
+    ) {
+        // given: a mutated file, and every reference site of the original plus an arbitrary
+        // range (IDX-10's syntax facts read the request's file at query time)
+        let corpus = corpus().unwrap();
+        let original = corpus.get(file.checked_rem(corpus.len()).unwrap()).unwrap();
+        let bytes = apply(&original.bytes, &mutations);
+        let indexer = indexer().unwrap();
+        let mut ranges: Vec<ByteRange> = indexer
+            .index_blocking(&original.bytes)
+            .map(|i| i.summary.references().iter().map(|r| r.range).collect())
+            .unwrap_or_default();
+        ranges.extend(
+            ByteRange::new(ByteOffset::new(start), ByteOffset::new(start.saturating_add(len))).ok(),
+        );
+        let text = String::from_utf8_lossy(&bytes).into_owned();
+        // when
+        let facts = indexer.sites_syntax_blocking(&text, &ranges);
+        // then: an answer (or none) for each range
+        prop_assert_eq!(facts.len(), ranges.len());
     }
 }
 

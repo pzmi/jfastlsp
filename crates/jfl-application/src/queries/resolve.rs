@@ -2,14 +2,17 @@
 //! the pinned generation a name at a site binds to, following the Java scoping rules a summary
 //! lets this crate follow, and nothing more.
 //!
-//! **What this proves: nothing yet.** The rules below rank candidates; `super::admit` answers
-//! every binding they find as `possible`, because two adversarial reviews (javac as the oracle)
-//! found them wrong where Java's structure is re-derived from text: an anonymous class behind a
-//! nested `new`, a `[` or a lambda block in its arguments; a comment before an element key or a
-//! `case` label; a class header or `super(...)` resolved in the body's scope; a type's own name
-//! taken before an inherited member type of that name; an annotation before a type parameter
-//! clause. The syntax-tree resolver replaces this module's text scanning (the card's next item).
-//! Where the rules call a binding "exact" below, read "the one candidate they offer".
+//! **What this proves: only what `prove` proves.** The scope rules below rank candidates;
+//! `super::admit` answers every binding they find as `possible`, because two adversarial reviews
+//! (javac as the oracle) found them wrong where Java's structure is re-derived from text: an
+//! anonymous class behind a nested `new`, a `[` or a lambda block in its arguments; a comment
+//! before an element key or a `case` label; a class header or `super(...)` resolved in the
+//! body's scope; a type's own name taken before an inherited member type of that name; an
+//! annotation before a type parameter clause. The syntax-tree resolver (`prove`, over the
+//! indexer's parse of the request's file) proves a site from the tree's facts and this module's
+//! member walks; both read a type name in the JLS order (inherited member types before the type's
+//! own name, the second review's N4). Where the rules call a binding "exact" below, read "the one
+//! candidate they offer".
 //!
 //! **The principle: this does not model Java.** When syntax cannot prove a binding, the answer
 //! is `possible` with a reason, or nothing with the reason the target is unresolved. The rules
@@ -66,6 +69,8 @@ use jfl_domain::{
 use super::Deadline;
 use super::scan::{self, Before, Scope};
 
+mod prove;
+
 /// The deepest supertype chain followed; a deeper one (or a cycle) is treated as leaving the
 /// index, which is conservative.
 const MAX_DEPTH: usize = 16;
@@ -117,6 +122,9 @@ struct Walk {
     inherited: bool,
     /// The package every type from the owner down to here is in; `None` once two differ.
     package: Option<String>,
+    /// The types walked from the lookup's owner down to here, this one left out: each is a proper
+    /// subtype of this one along the walk's own edges.
+    below: Vec<Hit>,
 }
 
 /// A declaration of the snapshot: its file and its id there.
@@ -151,6 +159,26 @@ pub(crate) struct Snapshot {
     /// Per file, `(parent, child)` for every declaration with a parent, by parent: a type's
     /// members are a binary search away, so a lookup's cost does not grow with its file.
     children: Vec<Vec<(DeclId, DeclId)>>,
+    /// Per file, whether its types may hold members its summary lacks ([`generates_members`]).
+    generated: Vec<bool>,
+}
+
+/// Whether the types of a file may hold members its source does not declare: Lombok rewrites the
+/// classes it annotates inside javac (accessors, constructors, a `log` field, a `Fields` type),
+/// so a file that imports it or names one of its annotations qualified is treated as having
+/// members outside the index. Other annotation processors write new files, which are not in the
+/// view and so are outside anyway.
+///
+/// Pinned by: `resolve::tests::should_count_members_outside_when_a_file_uses_lombok`.
+fn generates_members(summary: &FileSummary) -> bool {
+    let lombok = |name: &str| name == "lombok" || name.starts_with("lombok.");
+    summary
+        .imports()
+        .iter()
+        .any(|i| lombok(summary.str(i.name)))
+        || summary
+            .declarations()
+            .any(|(_, d)| summary.list(d.annotations).any(lombok))
 }
 
 /// The distinct declaration names laid out in one text, each with its declarations: what a
@@ -413,12 +441,17 @@ impl Snapshot {
                 pairs
             })
             .collect();
+        let generated = files
+            .iter()
+            .map(|f| generates_members(&f.summary))
+            .collect();
         Self {
             files,
             types,
             names,
             table,
             children,
+            generated,
         }
     }
 
@@ -523,6 +556,15 @@ impl Snapshot {
             .collect()
     }
 
+    /// Whether `file`'s types may hold members its summary lacks ([`generates_members`]).
+    fn generated(&self, file: u32) -> bool {
+        usize::try_from(file)
+            .ok()
+            .and_then(|f| self.generated.get(f))
+            .copied()
+            .unwrap_or(true)
+    }
+
     /// The package of `file` (`""` for the default package).
     fn package(&self, file: u32) -> &str {
         self.file(file)
@@ -590,6 +632,7 @@ impl Resolver<'_> {
             depth,
             inherited: false,
             package: Some(self.package(owner.file).to_owned()),
+            below: Vec::new(),
         };
         self.walk_members(owner, name, member, &walk, &mut seen, &mut out);
         out.own = out
@@ -607,7 +650,9 @@ impl Resolver<'_> {
     /// never an interface's static method, and a package-private one only when every type from
     /// the lookup's owner down to it is in its package. A supertype's method is left out as
     /// overridden only when its parameter types are proved the same as a method already
-    /// collected ([`Resolver::same_parameters`]); otherwise both are overloads.
+    /// collected from a proper subtype on the same branch of the walk
+    /// ([`Resolver::same_parameters`]); otherwise both are kept. A type that
+    /// declares a field or member type of that name ends its branch, the member inherited or not.
     fn walk_members(
         &self,
         owner: Hit,
@@ -625,8 +670,17 @@ impl Resolver<'_> {
             out.outside = true;
             return;
         };
+        if self.generated(owner.file) {
+            out.outside = true;
+        }
         let interface = matches!(d.kind, DeclKind::Interface | DeclKind::Annotation);
         let mut declared = self.declared(owner, name, member);
+        // A field or member type declared here hides every one of that name further up this
+        // branch, inherited or not (JLS 8.3, 8.5): javac's lookup stops at the first class that
+        // declares the name and answers an access error when the member is not inherited, which
+        // sends the search to the enclosing class (the slice-2 review's H1). Methods are not
+        // hidden so: a non-inherited method of the same signature is a compile error.
+        let hides = member != Member::Method && !declared.is_empty();
         if walk.inherited {
             declared.retain(|&h| {
                 self.decl(h).is_some_and(|m| {
@@ -655,15 +709,27 @@ impl Resolver<'_> {
             });
         }
         for hit in declared {
+            // Overridden only by a method of a proper subtype on this branch of the walk (JLS
+            // 8.4.8.1): a same-signature method from another branch (a superclass's against an
+            // interface's, or two interfaces') does not override it, and javac chooses between
+            // the two by JLS 15.12.2.5, which the summary cannot prove, so both stay (the
+            // slice-2 review's third pass).
             let overridden = walk.inherited
                 && member == Member::Method
-                && out
-                    .hits
-                    .iter()
-                    .any(|&h| self.same_parameters(h, hit, walk.depth));
+                && out.hits.iter().any(|&h| {
+                    let owner = self
+                        .decl(h)
+                        .and_then(|d| d.parent)
+                        .map(|decl| Hit { file: h.file, decl });
+                    owner.is_some_and(|o| walk.below.contains(&o))
+                        && self.same_parameters(h, hit, walk.depth)
+                });
             if !overridden {
                 out.hits.push(hit);
             }
+        }
+        if hides {
+            return;
         }
         let supertypes: Vec<&str> = f.summary.list(d.supertypes).collect();
         // A type with no supertype clause still has implicit ones (Object, Enum, Record,
@@ -699,10 +765,13 @@ impl Resolver<'_> {
                 }
             };
             let package = self.package(up.file);
+            let mut below = walk.below.clone();
+            below.push(owner);
             let next = Walk {
                 depth: deeper,
                 inherited: true,
                 package: walk.package.clone().filter(|p| p == package),
+                below,
             };
             self.walk_members(up, name, member, &next, seen, out);
         }
@@ -891,9 +960,6 @@ impl Resolver<'_> {
             if !d.kind.is_type() {
                 continue;
             }
-            if declared == name {
-                return TypeBinding::Found(hit);
-            }
             let members = self.members_at(hit, name, Member::Type, depth);
             if members.own > 0 {
                 // A declared member type hides every inherited one.
@@ -918,6 +984,9 @@ impl Resolver<'_> {
                 [] => {}
                 [one] => return TypeBinding::Found(*one),
                 many => return TypeBinding::Unproved(many.to_vec(), Unproved::Ambiguous),
+            }
+            if declared == name {
+                return TypeBinding::Found(hit);
             }
         }
         // The file's own top-level types.
@@ -1084,14 +1153,19 @@ impl Resolver<'_> {
                     .is_some_and(|d| d.kind == DeclKind::Constructor)
             })
             .collect();
+        let generated = self.generated(owner.file);
         if all.is_empty() {
-            return Outcome::Exact(owner);
+            return if generated {
+                Outcome::Unproved(vec![owner], Unproved::Supertype)
+            } else {
+                Outcome::Exact(owner)
+            };
         }
         self.overloads(
             Members {
                 hits: all,
                 own: 0,
-                outside: false,
+                outside: generated,
             },
             arity,
         )
@@ -1691,5 +1765,40 @@ mod tests {
         let binding = resolver.resolve_written(1, &[], "Map.Entry", 0);
         // then: java.util.Map.Entry, outside the index, never the view's type
         assert_eq!(binding, TypeBinding::Outside);
+    }
+
+    #[test]
+    fn should_count_members_outside_when_a_file_uses_lombok() {
+        // given: two classes declaring no member `log`, one in a file that imports Lombok
+        let snapshot = Snapshot::new(vec![
+            file("p/Plain.java", Some("p"), &[], &["Plain"]),
+            file(
+                "p/Logged.java",
+                Some("p"),
+                &["lombok.extern.slf4j.Slf4j"],
+                &["Logged"],
+            ),
+        ]);
+        let resolver = Resolver::new(&snapshot);
+        let plain = Hit {
+            file: 0,
+            decl: DeclId(0),
+        };
+        let logged = Hit {
+            file: 1,
+            decl: DeclId(0),
+        };
+        // when
+        let fields = [
+            resolver.members(plain, "log", Member::Field).outside,
+            resolver.members(logged, "log", Member::Field).outside,
+        ];
+        let constructors = resolver.constructors(logged, Some(0));
+        // then: `@Slf4j` may add `log`, `@AllArgsConstructor` a constructor
+        assert_eq!(fields, [false, true]);
+        assert_eq!(
+            constructors,
+            Outcome::Unproved(vec![logged], Unproved::Supertype)
+        );
     }
 }

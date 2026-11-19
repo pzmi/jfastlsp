@@ -33,14 +33,19 @@ pub(crate) struct Budget {
 const UNITS_PER_CALLBACK: usize = 100;
 
 impl Budget {
-    fn new(len: usize) -> Self {
+    pub(crate) fn new(len: usize) -> Self {
         Self {
             used: core::cell::Cell::new(0),
             limit: work_budget(len).saturating_mul(UNITS_PER_CALLBACK),
         }
     }
 
-    fn charge(&self, units: usize) {
+    /// The units spent so far.
+    pub(crate) fn used(&self) -> usize {
+        self.used.get()
+    }
+
+    pub(crate) fn charge(&self, units: usize) {
         self.used.set(self.used.get().saturating_add(units));
     }
 
@@ -53,7 +58,7 @@ impl Budget {
         );
     }
 
-    fn check(&self) -> Result<(), SyntaxIndexError> {
+    pub(crate) fn check(&self) -> Result<(), SyntaxIndexError> {
         if self.used.get() > self.limit {
             Err(SyntaxIndexError::TooMuchWork)
         } else {
@@ -225,7 +230,7 @@ fn index_within(
     })
 }
 
-fn parse(
+pub(crate) fn parse(
     grammar: &Grammar,
     worker: &mut Worker,
     src: &[u8],

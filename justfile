@@ -333,6 +333,21 @@ bench-queries corpus="small": _preflight
     { printf '%s\n' "$root"; git -C "$root" ls-files -z -- '*.java'; } \
       | {{cargo}} bench --locked -p jfl-composition --bench queries
 
+# javac's binding of every name of the queries' differential projects (IDX-10, ver §7): compiles
+# fixtures/java/projects/shop and the generated corpus of crates/jfl-adapter-java/tests/fixtures/
+# javac/generated with the pinned JDK (tools/javac-bindings/JavacBindings.java, attribution only)
+# and writes (`write`) or compares (`check`) tests/fixtures/javac/<project>.tsv, which
+# jfl-adapter-java's tests/definitions/main.rs reads without a JDK. Not a stage of `check`: the JDK is
+# installed with `bash scripts/bootstrap-tools.sh --formal-verify`; the java-fixtures stage
+# (EVAL-07) runs `just javac-bindings check`. `just javac-bindings write` after a fixture changes.
+javac-bindings mode="check": _preflight
+    #!/usr/bin/env bash
+    set -euo pipefail
+    case {{quote(mode)}} in write|check) ;; *) echo "javac-bindings: mode must be write or check" >&2; exit 2;; esac
+    out=crates/jfl-adapter-java/tests/fixtures/javac
+    java tools/javac-bindings/JavacBindings.java {{quote(mode)}} "$out/shop.tsv" fixtures/java/projects/shop
+    java tools/javac-bindings/JavacBindings.java {{quote(mode)}} "$out/generated.tsv" "$out/generated"
+
 # Rewrite fixtures.lock from the tree after reviewing the changed goldens (ver §4,
 # ARCH-fixtures-lock): the SHA-256 of every file under fixtures/ and each crate's tests/fixtures/.
 fixtures-lock:

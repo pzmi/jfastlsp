@@ -531,6 +531,57 @@ pub fn check_corpus(
     out
 }
 
+/// Every file under `dir` whose name ends with `suffix`: its path relative to `dir`
+/// (`/`-separated) and its bytes, sorted by path. For fixtures outside `fixtures/java/` (a crate's
+/// `tests/fixtures/`), read by tests of crates that hold no filesystem grant.
+pub fn files_under(dir: &Path, suffix: &str) -> Result<Vec<(String, Vec<u8>)>, String> {
+    let mut found = Vec::new();
+    let mut pending = vec![dir.to_path_buf()];
+    while let Some(current) = pending.pop() {
+        let entries =
+            std::fs::read_dir(&current).map_err(|e| format!("{}: {e}", current.display()))?;
+        for entry in entries {
+            let entry = entry.map_err(|e| e.to_string())?;
+            let path = entry.path();
+            if entry.file_type().map_err(|e| e.to_string())?.is_dir() {
+                pending.push(path);
+                continue;
+            }
+            let rel = path
+                .strip_prefix(dir)
+                .map_err(|e| e.to_string())?
+                .to_string_lossy()
+                .replace('\\', "/");
+            if rel.ends_with(suffix) {
+                let bytes = std::fs::read(&path).map_err(|e| format!("{rel}: {e}"))?;
+                found.push((rel, bytes));
+            }
+        }
+    }
+    found.sort_by(|a, b| a.0.cmp(&b.0));
+    Ok(found)
+}
+
+/// Compares `got` with the file at `path`; writes it when there is none and fails, so a new
+/// generated fixture is reviewed (and given its `fixtures.lock` line) before it passes.
+pub fn check_file(path: &Path, got: &str) -> Result<(), String> {
+    match std::fs::read_to_string(path) {
+        Ok(want) => {
+            first_difference(&want, got).map_or(Ok(()), |d| Err(format!("{}: {d}", path.display())))
+        }
+        Err(_) => {
+            path.parent()
+                .map_or(Ok(()), std::fs::create_dir_all)
+                .and_then(|()| std::fs::write(path, got))
+                .map_err(|e| format!("{}: writing it failed: {e}", path.display()))?;
+            Err(format!(
+                "{}: no such file: wrote it; review it, then commit it with its fixtures.lock line",
+                path.display()
+            ))
+        }
+    }
+}
+
 /// Every golden of `grammar` whose corpus file is not among `files`: a deleted fixture's golden.
 pub fn stale_goldens(grammar: &str, files: &[CorpusFile]) -> Result<Vec<String>, String> {
     let root = corpus_root().join(SUMMARIES).join(grammar);

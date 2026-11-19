@@ -88,8 +88,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use jfl_domain::{
-    Completeness, FileSummary, FileUri, Generation, IncompleteReason, KeyHasher, ModuleName,
-    RelPath, SyntaxInputs, SyntaxKey,
+    ByteRange, Completeness, FileSummary, FileUri, Generation, IncompleteReason, KeyHasher,
+    ModuleName, RelPath, SyntaxInputs, SyntaxKey,
 };
 
 use crate::clock::{WallClock, elapsed};
@@ -102,7 +102,7 @@ use crate::source_tree::{
     SourceTree, SourceTreeError, cookie_name, cookie_stamp, is_cookie, is_java_file_name,
 };
 use crate::summary_store::SummaryStore;
-use crate::syntax_indexer::{MAX_SOURCE_BYTES, SyntaxIndexer, strip_bom};
+use crate::syntax_indexer::{MAX_SOURCE_BYTES, SiteSyntax, SyntaxIndexer, strip_bom};
 use crate::views::{
     Cookie, Event, FileSeen, GitSeen, Observed, Published, RequestId, Stamp, Stored, ViewError,
     ViewRegistry,
@@ -537,6 +537,14 @@ where
             let text = core::str::from_utf8(bytes).ok()?.to_owned();
             FileText::new(text).map(Arc::new)
         }
+    }
+
+    fn site_syntax(
+        &self,
+        text: &Arc<FileText>,
+        name: ByteRange,
+    ) -> impl Future<Output = Option<SiteSyntax>> + Send {
+        self.indexer.site_syntax(Arc::clone(text), name)
     }
 }
 

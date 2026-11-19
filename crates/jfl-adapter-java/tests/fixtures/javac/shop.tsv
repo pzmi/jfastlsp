@@ -1,0 +1,476 @@
+# javac-bindings 1: javac's binding of every name in the project; written by `just javac-bindings`, never by hand
+file	src/main/java/Map.java	cb158b2f941dc862
+file	src/main/java/com/acme/billing/Billing.java	2c28f436134dd2c4
+site	src/main/java/com/acme/billing/Billing.java	8	11	package	com
+site	src/main/java/com/acme/billing/Billing.java	12	16	package	com.acme
+site	src/main/java/com/acme/billing/Billing.java	17	24	package	com.acme.billing
+site	src/main/java/com/acme/billing/Billing.java	34	37	package	com
+site	src/main/java/com/acme/billing/Billing.java	38	42	package	com.acme
+site	src/main/java/com/acme/billing/Billing.java	43	48	package	com.acme.money
+site	src/main/java/com/acme/billing/Billing.java	49	54	decl	CLASS	Money	src/main/java/com/acme/money/Money.java	67	606
+site	src/main/java/com/acme/billing/Billing.java	217	224	decl	RECORD	Receipt	src/main/java/com/acme/billing/Receipt.java	87	125
+site	src/main/java/com/acme/billing/Billing.java	232	237	decl	CLASS	Money	src/main/java/com/acme/money/Money.java	67	606
+site	src/main/java/com/acme/billing/Billing.java	256	263	decl	FIELD	charged	src/main/java/com/acme/billing/Billing.java	144	164
+site	src/main/java/com/acme/billing/Billing.java	275	278	decl	METHOD	log	src/main/java/com/acme/billing/Billing.java	899	959
+site	src/main/java/com/acme/billing/Billing.java	279	285	local	PARAMETER	amount
+site	src/main/java/com/acme/billing/Billing.java	307	314	decl	IMPLICIT_CONSTRUCTOR	Receipt	src/main/java/com/acme/billing/Receipt.java	87	125
+site	src/main/java/com/acme/billing/Billing.java	315	321	local	PARAMETER	amount
+site	src/main/java/com/acme/billing/Billing.java	389	396	decl	RECORD	Receipt	src/main/java/com/acme/billing/Receipt.java	87	125
+site	src/main/java/com/acme/billing/Billing.java	404	409	decl	CLASS	Money	src/main/java/com/acme/money/Money.java	67	606
+site	src/main/java/com/acme/billing/Billing.java	418	424	outside	CLASS	java.lang.String
+site	src/main/java/com/acme/billing/Billing.java	448	454	decl	METHOD	charge	src/main/java/com/acme/billing/Billing.java	210	329
+site	src/main/java/com/acme/billing/Billing.java	455	461	local	PARAMETER	amount
+site	src/main/java/com/acme/billing/Billing.java	515	522	decl	RECORD	Receipt	src/main/java/com/acme/billing/Receipt.java	87	125
+site	src/main/java/com/acme/billing/Billing.java	530	535	decl	CLASS	Money	src/main/java/com/acme/money/Money.java	67	606
+site	src/main/java/com/acme/billing/Billing.java	558	563	decl	CLASS	Money	src/main/java/com/acme/money/Money.java	67	606
+site	src/main/java/com/acme/billing/Billing.java	576	581	decl	CONSTRUCTOR	<init>	src/main/java/com/acme/money/Money.java	176	236
+site	src/main/java/com/acme/billing/Billing.java	599	604	decl	CLASS	Money	src/main/java/com/acme/money/Money.java	67	606
+site	src/main/java/com/acme/billing/Billing.java	614	621	local	PARAMETER	amounts
+site	src/main/java/com/acme/billing/Billing.java	637	642	local	LOCAL_VARIABLE	total
+site	src/main/java/com/acme/billing/Billing.java	645	650	local	LOCAL_VARIABLE	total
+site	src/main/java/com/acme/billing/Billing.java	651	655	decl	METHOD	plus	src/main/java/com/acme/money/Money.java	519	604
+site	src/main/java/com/acme/billing/Billing.java	656	662	local	LOCAL_VARIABLE	amount
+site	src/main/java/com/acme/billing/Billing.java	690	696	decl	METHOD	charge	src/main/java/com/acme/billing/Billing.java	382	469
+site	src/main/java/com/acme/billing/Billing.java	697	702	local	LOCAL_VARIABLE	total
+site	src/main/java/com/acme/billing/Billing.java	786	793	decl	CLASS	Billing	src/main/java/com/acme/billing/Billing.java	82	961
+site	src/main/java/com/acme/billing/Billing.java	826	833	decl	IMPLICIT_CONSTRUCTOR	Billing	src/main/java/com/acme/billing/Billing.java	82	961
+site	src/main/java/com/acme/billing/Billing.java	879	886	decl	FIELD	RETRIES	src/main/java/com/acme/billing/Billing.java	109	138
+site	src/main/java/com/acme/billing/Billing.java	916	921	decl	CLASS	Money	src/main/java/com/acme/money/Money.java	67	606
+site	src/main/java/com/acme/billing/Billing.java	940	947	decl	FIELD	charged	src/main/java/com/acme/billing/Billing.java	144	164
+file	src/main/java/com/acme/billing/PremiumBilling.java	bd437002214a4eac
+site	src/main/java/com/acme/billing/PremiumBilling.java	8	11	package	com
+site	src/main/java/com/acme/billing/PremiumBilling.java	12	16	package	com.acme
+site	src/main/java/com/acme/billing/PremiumBilling.java	17	24	package	com.acme.billing
+site	src/main/java/com/acme/billing/PremiumBilling.java	34	37	package	com
+site	src/main/java/com/acme/billing/PremiumBilling.java	38	42	package	com.acme
+site	src/main/java/com/acme/billing/PremiumBilling.java	43	48	package	com.acme.money
+site	src/main/java/com/acme/billing/PremiumBilling.java	49	54	decl	CLASS	Money	src/main/java/com/acme/money/Money.java	67	606
+site	src/main/java/com/acme/billing/PremiumBilling.java	125	132	decl	CLASS	Billing	src/main/java/com/acme/billing/Billing.java	82	961
+site	src/main/java/com/acme/billing/PremiumBilling.java	202	209	decl	RECORD	Receipt	src/main/java/com/acme/billing/Receipt.java	87	125
+site	src/main/java/com/acme/billing/PremiumBilling.java	217	222	decl	CLASS	Money	src/main/java/com/acme/money/Money.java	67	606
+site	src/main/java/com/acme/billing/PremiumBilling.java	261	267	decl	METHOD	charge	src/main/java/com/acme/billing/Billing.java	210	329
+site	src/main/java/com/acme/billing/PremiumBilling.java	268	274	local	PARAMETER	amount
+site	src/main/java/com/acme/billing/PremiumBilling.java	317	324	decl	METHOD	retries	src/main/java/com/acme/billing/Billing.java	848	893
+file	src/main/java/com/acme/billing/Receipt.java	e724114e7f7ba7fa
+site	src/main/java/com/acme/billing/Receipt.java	8	11	package	com
+site	src/main/java/com/acme/billing/Receipt.java	12	16	package	com.acme
+site	src/main/java/com/acme/billing/Receipt.java	17	24	package	com.acme.billing
+site	src/main/java/com/acme/billing/Receipt.java	34	37	package	com
+site	src/main/java/com/acme/billing/Receipt.java	38	42	package	com.acme
+site	src/main/java/com/acme/billing/Receipt.java	43	48	package	com.acme.money
+site	src/main/java/com/acme/billing/Receipt.java	49	54	decl	CLASS	Money	src/main/java/com/acme/money/Money.java	67	606
+site	src/main/java/com/acme/billing/Receipt.java	109	114	decl	CLASS	Money	src/main/java/com/acme/money/Money.java	67	606
+file	src/main/java/com/acme/money/Money.java	138a75ac1b86d982
+site	src/main/java/com/acme/money/Money.java	8	11	package	com
+site	src/main/java/com/acme/money/Money.java	12	16	package	com.acme
+site	src/main/java/com/acme/money/Money.java	17	22	package	com.acme.money
+site	src/main/java/com/acme/money/Money.java	211	215	outside	FIELD	com.acme.money.Money#this
+site	src/main/java/com/acme/money/Money.java	216	221	decl	FIELD	cents	src/main/java/com/acme/money/Money.java	98	123
+site	src/main/java/com/acme/money/Money.java	224	229	local	PARAMETER	cents
+site	src/main/java/com/acme/money/Money.java	336	340	decl	CONSTRUCTOR	<init>	src/main/java/com/acme/money/Money.java	176	236
+site	src/main/java/com/acme/money/Money.java	341	346	local	PARAMETER	units
+site	src/main/java/com/acme/money/Money.java	356	361	local	PARAMETER	cents
+site	src/main/java/com/acme/money/Money.java	450	455	decl	FIELD	cents	src/main/java/com/acme/money/Money.java	98	123
+site	src/main/java/com/acme/money/Money.java	526	531	decl	CLASS	Money	src/main/java/com/acme/money/Money.java	67	606
+site	src/main/java/com/acme/money/Money.java	537	542	decl	CLASS	Money	src/main/java/com/acme/money/Money.java	67	606
+site	src/main/java/com/acme/money/Money.java	571	576	decl	CONSTRUCTOR	<init>	src/main/java/com/acme/money/Money.java	176	236
+site	src/main/java/com/acme/money/Money.java	577	582	decl	FIELD	cents	src/main/java/com/acme/money/Money.java	98	123
+site	src/main/java/com/acme/money/Money.java	585	590	local	PARAMETER	other
+site	src/main/java/com/acme/money/Money.java	591	596	decl	FIELD	cents	src/main/java/com/acme/money/Money.java	98	123
+file	src/main/java/com/acme/probe/Base.java	2ec648d4c8572b0c
+site	src/main/java/com/acme/probe/Base.java	8	11	package	com
+site	src/main/java/com/acme/probe/Base.java	12	16	package	com.acme
+site	src/main/java/com/acme/probe/Base.java	17	22	package	com.acme.probe
+file	src/main/java/com/acme/probe/Calc.java	b6c765256e86c0d1
+site	src/main/java/com/acme/probe/Calc.java	8	11	package	com
+site	src/main/java/com/acme/probe/Calc.java	12	16	package	com.acme
+site	src/main/java/com/acme/probe/Calc.java	17	22	package	com.acme.probe
+site	src/main/java/com/acme/probe/Calc.java	289	297	outside	ANNOTATION_TYPE	java.lang.Override
+site	src/main/java/com/acme/probe/Calc.java	347	353	decl	METHOD	helper	src/main/java/com/acme/probe/Calc.java	220	274
+file	src/main/java/com/acme/probe/Color.java	111e477d5aa8c321
+site	src/main/java/com/acme/probe/Color.java	8	11	package	com
+site	src/main/java/com/acme/probe/Color.java	12	16	package	com.acme
+site	src/main/java/com/acme/probe/Color.java	17	22	package	com.acme.probe
+file	src/main/java/com/acme/probe/Column.java	283217dcd97d0965
+site	src/main/java/com/acme/probe/Column.java	8	11	package	com
+site	src/main/java/com/acme/probe/Column.java	12	16	package	com.acme
+site	src/main/java/com/acme/probe/Column.java	17	22	package	com.acme.probe
+site	src/main/java/com/acme/probe/Column.java	128	134	outside	CLASS	java.lang.String
+file	src/main/java/com/acme/probe/Entity.java	c884cd70c28dc269
+site	src/main/java/com/acme/probe/Entity.java	8	11	package	com
+site	src/main/java/com/acme/probe/Entity.java	12	16	package	com.acme
+site	src/main/java/com/acme/probe/Entity.java	17	22	package	com.acme.probe
+site	src/main/java/com/acme/probe/Entity.java	118	124	decl	ANNOTATION_TYPE	Column	src/main/java/com/acme/probe/Column.java	104	144
+site	src/main/java/com/acme/probe/Entity.java	125	129	decl	METHOD	name	src/main/java/com/acme/probe/Column.java	128	142
+site	src/main/java/com/acme/probe/Entity.java	141	147	outside	CLASS	java.lang.String
+file	src/main/java/com/acme/probe/Host.java	b2e618d66c35176f
+site	src/main/java/com/acme/probe/Host.java	8	11	package	com
+site	src/main/java/com/acme/probe/Host.java	12	16	package	com.acme
+site	src/main/java/com/acme/probe/Host.java	17	22	package	com.acme.probe
+site	src/main/java/com/acme/probe/Host.java	165	169	decl	CLASS	Base	src/main/java/com/acme/probe/Base.java	67	110
+site	src/main/java/com/acme/probe/Host.java	203	209	decl	METHOD	helper	src/main/java/com/acme/probe/Host.java	125	141
+file	src/main/java/com/acme/probe/Host2.java	77bb4c4edb8ac168
+site	src/main/java/com/acme/probe/Host2.java	8	11	package	com
+site	src/main/java/com/acme/probe/Host2.java	12	16	package	com.acme
+site	src/main/java/com/acme/probe/Host2.java	17	22	package	com.acme.probe
+site	src/main/java/com/acme/probe/Host2.java	165	169	decl	INTERFACE	Util	src/main/java/com/acme/probe/Util.java	102	146
+site	src/main/java/com/acme/probe/Host2.java	203	207	decl	METHOD	tool	src/main/java/com/acme/probe/Host2.java	116	137
+file	src/main/java/com/acme/probe/Outer.java	2563db4ae471849b
+site	src/main/java/com/acme/probe/Outer.java	8	11	package	com
+site	src/main/java/com/acme/probe/Outer.java	12	16	package	com.acme
+site	src/main/java/com/acme/probe/Outer.java	17	22	package	com.acme.probe
+site	src/main/java/com/acme/probe/Outer.java	176	181	decl	CLASS	Outer	src/main/java/com/acme/probe/Outer.java	88	213
+site	src/main/java/com/acme/probe/Outer.java	182	186	outside	FIELD	com.acme.probe.Outer#this
+site	src/main/java/com/acme/probe/Outer.java	187	192	decl	METHOD	close	src/main/java/com/acme/probe/Outer.java	106	121
+file	src/main/java/com/acme/probe/Painter.java	3c81dcc8f96f5e98
+site	src/main/java/com/acme/probe/Painter.java	8	11	package	com
+site	src/main/java/com/acme/probe/Painter.java	12	16	package	com.acme
+site	src/main/java/com/acme/probe/Painter.java	17	22	package	com.acme.probe
+site	src/main/java/com/acme/probe/Painter.java	181	186	decl	ENUM	Color	src/main/java/com/acme/probe/Color.java	58	91
+site	src/main/java/com/acme/probe/Painter.java	208	209	local	PARAMETER	c
+site	src/main/java/com/acme/probe/Painter.java	230	233	decl	ENUM_CONSTANT	RED	src/main/java/com/acme/probe/Color.java	75	78
+file	src/main/java/com/acme/probe/Patterns.java	ae428b695c164392
+site	src/main/java/com/acme/probe/Patterns.java	8	11	package	com
+site	src/main/java/com/acme/probe/Patterns.java	12	16	package	com.acme
+site	src/main/java/com/acme/probe/Patterns.java	17	22	package	com.acme.probe
+site	src/main/java/com/acme/probe/Patterns.java	32	36	package	java
+site	src/main/java/com/acme/probe/Patterns.java	37	41	package	java.util
+site	src/main/java/com/acme/probe/Patterns.java	42	46	outside	INTERFACE	java.util.List
+site	src/main/java/com/acme/probe/Patterns.java	178	184	outside	CLASS	java.lang.String
+site	src/main/java/com/acme/probe/Patterns.java	195	201	outside	CLASS	java.lang.Object
+site	src/main/java/com/acme/probe/Patterns.java	225	231	outside	CLASS	java.lang.Object
+site	src/main/java/com/acme/probe/Patterns.java	249	250	local	PARAMETER	o
+site	src/main/java/com/acme/probe/Patterns.java	262	269	outside	CLASS	java.lang.Integer
+site	src/main/java/com/acme/probe/Patterns.java	298	303	local	BINDING_VARIABLE	count
+site	src/main/java/com/acme/probe/Patterns.java	355	359	outside	INTERFACE	java.util.List
+site	src/main/java/com/acme/probe/Patterns.java	360	366	outside	CLASS	java.lang.String
+site	src/main/java/com/acme/probe/Patterns.java	386	392	local	PARAMETER	values
+site	src/main/java/com/acme/probe/Patterns.java	393	400	outside	METHOD	java.lang.Iterable#forEach
+site	src/main/java/com/acme/probe/Patterns.java	409	413	local	PARAMETER	text
+site	src/main/java/com/acme/probe/Patterns.java	414	420	outside	METHOD	java.lang.String#length
+site	src/main/java/com/acme/probe/Patterns.java	440	446	local	PARAMETER	values
+site	src/main/java/com/acme/probe/Patterns.java	447	451	outside	METHOD	java.util.List#size
+site	src/main/java/com/acme/probe/Patterns.java	534	550	outside	CLASS	java.lang.RuntimeException
+site	src/main/java/com/acme/probe/Patterns.java	578	582	local	EXCEPTION_PARAMETER	item
+site	src/main/java/com/acme/probe/Patterns.java	583	591	outside	METHOD	java.lang.Object#hashCode
+site	src/main/java/com/acme/probe/Patterns.java	625	629	outside	INTERFACE	java.util.List
+site	src/main/java/com/acme/probe/Patterns.java	630	636	outside	CLASS	java.lang.Object
+site	src/main/java/com/acme/probe/Patterns.java	680	686	outside	CLASS	java.lang.Object
+site	src/main/java/com/acme/probe/Patterns.java	694	700	local	PARAMETER	values
+site	src/main/java/com/acme/probe/Patterns.java	716	717	local	LOCAL_VARIABLE	n
+site	src/main/java/com/acme/probe/Patterns.java	721	725	local	LOCAL_VARIABLE	item
+site	src/main/java/com/acme/probe/Patterns.java	726	734	outside	METHOD	java.lang.Object#hashCode
+site	src/main/java/com/acme/probe/Patterns.java	763	764	local	LOCAL_VARIABLE	n
+site	src/main/java/com/acme/probe/Patterns.java	806	811	decl	FIELD	count	src/main/java/com/acme/probe/Patterns.java	163	173
+file	src/main/java/com/acme/probe/SubDates.java	f1b2c02a3a1f81fb
+site	src/main/java/com/acme/probe/SubDates.java	8	11	package	com
+site	src/main/java/com/acme/probe/SubDates.java	12	16	package	com.acme
+site	src/main/java/com/acme/probe/SubDates.java	17	22	package	com.acme.probe
+site	src/main/java/com/acme/probe/SubDates.java	32	36	package	java
+site	src/main/java/com/acme/probe/SubDates.java	37	40	package	java.sql
+site	src/main/java/com/acme/probe/SubDates.java	41	45	outside	CLASS	java.sql.Date
+site	src/main/java/com/acme/probe/SubDates.java	168	178	decl	CLASS	SuperDates	src/main/java/com/acme/probe/SuperDates.java	91	134
+site	src/main/java/com/acme/probe/SubDates.java	193	197	outside	CLASS	java.sql.Date
+site	src/main/java/com/acme/probe/SubDates.java	219	223	package	java
+site	src/main/java/com/acme/probe/SubDates.java	224	228	package	java.util
+site	src/main/java/com/acme/probe/SubDates.java	229	233	outside	CLASS	java.util.Date
+site	src/main/java/com/acme/probe/SubDates.java	247	249	decl	METHOD	at	src/main/java/com/acme/probe/SuperDates.java	114	132
+site	src/main/java/com/acme/probe/SubDates.java	250	251	local	PARAMETER	u
+file	src/main/java/com/acme/probe/SuperDates.java	c465a4b308878ada
+site	src/main/java/com/acme/probe/SuperDates.java	8	11	package	com
+site	src/main/java/com/acme/probe/SuperDates.java	12	16	package	com.acme
+site	src/main/java/com/acme/probe/SuperDates.java	17	22	package	com.acme.probe
+site	src/main/java/com/acme/probe/SuperDates.java	32	36	package	java
+site	src/main/java/com/acme/probe/SuperDates.java	37	41	package	java.util
+site	src/main/java/com/acme/probe/SuperDates.java	42	46	outside	CLASS	java.util.Date
+site	src/main/java/com/acme/probe/SuperDates.java	122	126	outside	CLASS	java.util.Date
+file	src/main/java/com/acme/probe/UsesEntry.java	a4a681dfafb7a29d
+site	src/main/java/com/acme/probe/UsesEntry.java	8	11	package	com
+site	src/main/java/com/acme/probe/UsesEntry.java	12	16	package	com.acme
+site	src/main/java/com/acme/probe/UsesEntry.java	17	22	package	com.acme.probe
+site	src/main/java/com/acme/probe/UsesEntry.java	32	36	package	java
+site	src/main/java/com/acme/probe/UsesEntry.java	37	41	package	java.util
+site	src/main/java/com/acme/probe/UsesEntry.java	42	45	outside	INTERFACE	java.util.Map
+site	src/main/java/com/acme/probe/UsesEntry.java	158	161	outside	INTERFACE	java.util.Map
+site	src/main/java/com/acme/probe/UsesEntry.java	162	167	outside	INTERFACE	java.util.Map.Entry
+site	src/main/java/com/acme/probe/UsesEntry.java	168	174	outside	CLASS	java.lang.String
+site	src/main/java/com/acme/probe/UsesEntry.java	176	182	outside	CLASS	java.lang.String
+file	src/main/java/com/acme/probe/Util.java	38f3194d5ff3f3ad
+site	src/main/java/com/acme/probe/Util.java	8	11	package	com
+site	src/main/java/com/acme/probe/Util.java	12	16	package	com.acme
+site	src/main/java/com/acme/probe/Util.java	17	22	package	com.acme.probe
+file	src/main/java/com/acme/probe2/AnonBase.java	6c1960682bdaa840
+site	src/main/java/com/acme/probe2/AnonBase.java	8	11	package	com
+site	src/main/java/com/acme/probe2/AnonBase.java	12	16	package	com.acme
+site	src/main/java/com/acme/probe2/AnonBase.java	17	23	package	com.acme.probe2
+site	src/main/java/com/acme/probe2/AnonBase.java	161	167	outside	CLASS	java.lang.Object
+site	src/main/java/com/acme/probe2/AnonBase.java	212	220	outside	INTERFACE	java.lang.Runnable
+file	src/main/java/com/acme/probe2/AnonNested.java	9e019a95b2261152
+site	src/main/java/com/acme/probe2/AnonNested.java	8	11	package	com
+site	src/main/java/com/acme/probe2/AnonNested.java	12	16	package	com.acme
+site	src/main/java/com/acme/probe2/AnonNested.java	17	23	package	com.acme.probe2
+site	src/main/java/com/acme/probe2/AnonNested.java	218	226	decl	CLASS	AnonBase	src/main/java/com/acme/probe2/AnonBase.java	122	254
+site	src/main/java/com/acme/probe2/AnonNested.java	235	243	decl	IMPLICIT_CONSTRUCTOR		src/main/java/com/acme/probe2/AnonNested.java	258	424
+site	src/main/java/com/acme/probe2/AnonNested.java	248	254	outside	CONSTRUCTOR	java.lang.Object#<init>
+site	src/main/java/com/acme/probe2/AnonNested.java	341	349	outside	ANNOTATION_TYPE	java.lang.Override
+site	src/main/java/com/acme/probe2/AnonNested.java	391	397	decl	METHOD	helper	src/main/java/com/acme/probe2/AnonNested.java	272	326
+site	src/main/java/com/acme/probe2/AnonNested.java	475	483	decl	CLASS	AnonBase	src/main/java/com/acme/probe2/AnonBase.java	122	254
+site	src/main/java/com/acme/probe2/AnonNested.java	492	500	decl	IMPLICIT_CONSTRUCTOR		src/main/java/com/acme/probe2/AnonNested.java	508	674
+site	src/main/java/com/acme/probe2/AnonNested.java	501	503	local	PARAMETER	xs
+site	src/main/java/com/acme/probe2/AnonNested.java	591	599	outside	ANNOTATION_TYPE	java.lang.Override
+site	src/main/java/com/acme/probe2/AnonNested.java	641	647	decl	METHOD	helper	src/main/java/com/acme/probe2/AnonNested.java	522	576
+site	src/main/java/com/acme/probe2/AnonNested.java	716	724	decl	CLASS	AnonBase	src/main/java/com/acme/probe2/AnonBase.java	122	254
+site	src/main/java/com/acme/probe2/AnonNested.java	733	741	decl	IMPLICIT_CONSTRUCTOR		src/main/java/com/acme/probe2/AnonNested.java	753	919
+site	src/main/java/com/acme/probe2/AnonNested.java	836	844	outside	ANNOTATION_TYPE	java.lang.Override
+site	src/main/java/com/acme/probe2/AnonNested.java	886	892	decl	METHOD	helper	src/main/java/com/acme/probe2/AnonNested.java	767	821
+file	src/main/java/com/acme/probe2/Box3.java	5ff82f9a9c457073
+site	src/main/java/com/acme/probe2/Box3.java	8	11	package	com
+site	src/main/java/com/acme/probe2/Box3.java	12	16	package	com.acme
+site	src/main/java/com/acme/probe2/Box3.java	17	23	package	com.acme.probe2
+site	src/main/java/com/acme/probe2/Box3.java	33	36	package	com
+site	src/main/java/com/acme/probe2/Box3.java	37	41	package	com.acme
+site	src/main/java/com/acme/probe2/Box3.java	42	47	package	com.acme.money
+site	src/main/java/com/acme/probe2/Box3.java	48	53	decl	CLASS	Money	src/main/java/com/acme/money/Money.java	67	606
+site	src/main/java/com/acme/probe2/Box3.java	141	157	outside	ANNOTATION_TYPE	java.lang.SuppressWarnings
+site	src/main/java/com/acme/probe2/Box3.java	190	195	local	TYPE_PARAMETER	Money
+file	src/main/java/com/acme/probe2/Col2.java	c6e03260f1a0fa53
+site	src/main/java/com/acme/probe2/Col2.java	8	11	package	com
+site	src/main/java/com/acme/probe2/Col2.java	12	16	package	com.acme
+site	src/main/java/com/acme/probe2/Col2.java	17	23	package	com.acme.probe2
+site	src/main/java/com/acme/probe2/Col2.java	105	111	outside	CLASS	java.lang.String
+file	src/main/java/com/acme/probe2/Entity2.java	77df395a9593b476
+site	src/main/java/com/acme/probe2/Entity2.java	8	11	package	com
+site	src/main/java/com/acme/probe2/Entity2.java	12	16	package	com.acme
+site	src/main/java/com/acme/probe2/Entity2.java	17	23	package	com.acme.probe2
+site	src/main/java/com/acme/probe2/Entity2.java	85	91	outside	CLASS	java.lang.String
+site	src/main/java/com/acme/probe2/Entity2.java	104	108	decl	ANNOTATION_TYPE	Col2	src/main/java/com/acme/probe2/Col2.java	66	121
+site	src/main/java/com/acme/probe2/Entity2.java	109	113	decl	METHOD	size	src/main/java/com/acme/probe2/Col2.java	88	99
+site	src/main/java/com/acme/probe2/Entity2.java	136	140	decl	METHOD	name	src/main/java/com/acme/probe2/Col2.java	105	119
+site	src/main/java/com/acme/probe2/Entity2.java	152	158	outside	CLASS	java.lang.String
+file	src/main/java/com/acme/probe2/HBase.java	b874a42697bb5d69
+site	src/main/java/com/acme/probe2/HBase.java	8	11	package	com
+site	src/main/java/com/acme/probe2/HBase.java	12	16	package	com.acme
+site	src/main/java/com/acme/probe2/HBase.java	17	23	package	com.acme.probe2
+file	src/main/java/com/acme/probe2/HSub.java	a6e384f4c10d7cb1
+site	src/main/java/com/acme/probe2/HSub.java	8	11	package	com
+site	src/main/java/com/acme/probe2/HSub.java	12	16	package	com.acme
+site	src/main/java/com/acme/probe2/HSub.java	17	23	package	com.acme.probe2
+site	src/main/java/com/acme/probe2/HSub.java	143	148	decl	CLASS	HBase	src/main/java/com/acme/probe2/HBase.java	79	114
+site	src/main/java/com/acme/probe2/HSub.java	228	233	decl	CONSTRUCTOR	<init>	src/main/java/com/acme/probe2/HBase.java	97	112
+file	src/main/java/com/acme/probe2/Hue.java	dfcae303da98d51a
+site	src/main/java/com/acme/probe2/Hue.java	8	11	package	com
+site	src/main/java/com/acme/probe2/Hue.java	12	16	package	com.acme
+site	src/main/java/com/acme/probe2/Hue.java	17	23	package	com.acme.probe2
+file	src/main/java/com/acme/probe2/Marker.java	4848ec7e4f6f1b17
+site	src/main/java/com/acme/probe2/Marker.java	8	11	package	com
+site	src/main/java/com/acme/probe2/Marker.java	12	16	package	com.acme
+site	src/main/java/com/acme/probe2/Marker.java	17	23	package	com.acme.probe2
+file	src/main/java/com/acme/probe2/Painter2.java	fea7b170c0c46883
+site	src/main/java/com/acme/probe2/Painter2.java	8	11	package	com
+site	src/main/java/com/acme/probe2/Painter2.java	12	16	package	com.acme
+site	src/main/java/com/acme/probe2/Painter2.java	17	23	package	com.acme.probe2
+site	src/main/java/com/acme/probe2/Painter2.java	129	132	decl	ENUM	Hue	src/main/java/com/acme/probe2/Hue.java	59	90
+site	src/main/java/com/acme/probe2/Painter2.java	154	155	local	PARAMETER	h
+site	src/main/java/com/acme/probe2/Painter2.java	176	179	decl	ENUM_CONSTANT	RED	src/main/java/com/acme/probe2/Hue.java	74	77
+site	src/main/java/com/acme/probe2/Painter2.java	201	206	decl	ENUM_CONSTANT	GREEN	src/main/java/com/acme/probe2/Hue.java	83	88
+file	src/main/java/com/acme/probe2/Self.java	822dfa717fc92de5
+site	src/main/java/com/acme/probe2/Self.java	8	11	package	com
+site	src/main/java/com/acme/probe2/Self.java	12	16	package	com.acme
+site	src/main/java/com/acme/probe2/Self.java	17	23	package	com.acme.probe2
+site	src/main/java/com/acme/probe2/Self.java	135	143	decl	CLASS	SelfBase	src/main/java/com/acme/probe2/SelfBase.java	81	124
+site	src/main/java/com/acme/probe2/Self.java	150	154	decl	CLASS	Self	src/main/java/com/acme/probe2/SelfBase.java	102	122
+file	src/main/java/com/acme/probe2/SelfBase.java	82bddabc33135248
+site	src/main/java/com/acme/probe2/SelfBase.java	8	11	package	com
+site	src/main/java/com/acme/probe2/SelfBase.java	12	16	package	com.acme
+site	src/main/java/com/acme/probe2/SelfBase.java	17	23	package	com.acme.probe2
+file	src/main/java/com/acme/probe2/Shelf.java	be22e72469d12c98
+site	src/main/java/com/acme/probe2/Shelf.java	8	11	package	com
+site	src/main/java/com/acme/probe2/Shelf.java	12	16	package	com.acme
+site	src/main/java/com/acme/probe2/Shelf.java	17	23	package	com.acme.probe2
+site	src/main/java/com/acme/probe2/Shelf.java	163	179	outside	ANNOTATION_TYPE	java.lang.SuppressWarnings
+site	src/main/java/com/acme/probe2/Shelf.java	225	228	local	TYPE_PARAMETER	Row
+site	src/main/java/com/acme/probe2/Shelf.java	280	283	local	TYPE_PARAMETER	Row
+file	src/main/java/com/acme/probe2/Tagged.java	c4eb9035d58a5b74
+site	src/main/java/com/acme/probe2/Tagged.java	8	11	package	com
+site	src/main/java/com/acme/probe2/Tagged.java	12	16	package	com.acme
+site	src/main/java/com/acme/probe2/Tagged.java	17	23	package	com.acme.probe2
+site	src/main/java/com/acme/probe2/Tagged.java	98	104	decl	ANNOTATION_TYPE	Marker	src/main/java/com/acme/probe2/Marker.java	55	75
+file	src/main/java/com/acme/probe3/QualThis.java	5622a40174a92955
+site	src/main/java/com/acme/probe3/QualThis.java	8	11	package	com
+site	src/main/java/com/acme/probe3/QualThis.java	12	16	package	com.acme
+site	src/main/java/com/acme/probe3/QualThis.java	17	23	package	com.acme.probe3
+site	src/main/java/com/acme/probe3/QualThis.java	270	278	decl	CLASS	QualThis	src/main/java/com/acme/probe3/QualThis.java	122	369
+site	src/main/java/com/acme/probe3/QualThis.java	279	283	outside	FIELD	com.acme.probe3.QualThis#this
+site	src/main/java/com/acme/probe3/QualThis.java	284	289	decl	FIELD	count	src/main/java/com/acme/probe3/QualThis.java	161	171
+site	src/main/java/com/acme/probe3/QualThis.java	333	341	decl	CLASS	QualThis	src/main/java/com/acme/probe3/QualThis.java	122	369
+site	src/main/java/com/acme/probe3/QualThis.java	342	346	outside	FIELD	com.acme.probe3.QualThis#this
+site	src/main/java/com/acme/probe3/QualThis.java	347	348	decl	METHOD	m	src/main/java/com/acme/probe3/QualThis.java	177	193
+file	src/main/java/com/acme/shop/Cart.java	88d2320090399463
+site	src/main/java/com/acme/shop/Cart.java	8	11	package	com
+site	src/main/java/com/acme/shop/Cart.java	12	16	package	com.acme
+site	src/main/java/com/acme/shop/Cart.java	17	21	package	com.acme.shop
+site	src/main/java/com/acme/shop/Cart.java	31	34	package	com
+site	src/main/java/com/acme/shop/Cart.java	35	39	package	com.acme
+site	src/main/java/com/acme/shop/Cart.java	40	45	package	com.acme.money
+site	src/main/java/com/acme/shop/Cart.java	46	51	decl	CLASS	Money	src/main/java/com/acme/money/Money.java	67	606
+site	src/main/java/com/acme/shop/Cart.java	130	135	decl	CLASS	Money	src/main/java/com/acme/money/Money.java	67	606
+site	src/main/java/com/acme/shop/Cart.java	148	153	decl	CONSTRUCTOR	<init>	src/main/java/com/acme/money/Money.java	176	236
+site	src/main/java/com/acme/shop/Cart.java	223	228	decl	CLASS	Money	src/main/java/com/acme/money/Money.java	67	606
+site	src/main/java/com/acme/shop/Cart.java	246	251	decl	FIELD	total	src/main/java/com/acme/shop/Cart.java	122	157
+site	src/main/java/com/acme/shop/Cart.java	254	259	decl	FIELD	total	src/main/java/com/acme/shop/Cart.java	122	157
+site	src/main/java/com/acme/shop/Cart.java	260	264	decl	METHOD	plus	src/main/java/com/acme/money/Money.java	519	604
+site	src/main/java/com/acme/shop/Cart.java	265	270	local	PARAMETER	price
+site	src/main/java/com/acme/shop/Cart.java	366	371	decl	CLASS	Money	src/main/java/com/acme/money/Money.java	67	606
+site	src/main/java/com/acme/shop/Cart.java	379	384	decl	CLASS	Money	src/main/java/com/acme/money/Money.java	67	606
+site	src/main/java/com/acme/shop/Cart.java	410	416	local	PARAMETER	amount
+site	src/main/java/com/acme/shop/Cart.java	465	470	decl	CLASS	Money	src/main/java/com/acme/money/Money.java	67	606
+site	src/main/java/com/acme/shop/Cart.java	496	501	decl	FIELD	total	src/main/java/com/acme/shop/Cart.java	122	157
+site	src/main/java/com/acme/shop/Cart.java	518	519	local	TYPE_PARAMETER	T
+site	src/main/java/com/acme/shop/Cart.java	525	526	local	TYPE_PARAMETER	T
+site	src/main/java/com/acme/shop/Cart.java	534	535	local	TYPE_PARAMETER	T
+site	src/main/java/com/acme/shop/Cart.java	561	566	local	PARAMETER	first
+file	src/main/java/com/acme/shop/Checkout.java	5226f193730ed6cf
+site	src/main/java/com/acme/shop/Checkout.java	8	11	package	com
+site	src/main/java/com/acme/shop/Checkout.java	12	16	package	com.acme
+site	src/main/java/com/acme/shop/Checkout.java	17	21	package	com.acme.shop
+site	src/main/java/com/acme/shop/Checkout.java	38	41	package	com
+site	src/main/java/com/acme/shop/Checkout.java	42	46	package	com.acme
+site	src/main/java/com/acme/shop/Checkout.java	47	54	package	com.acme.billing
+site	src/main/java/com/acme/shop/Checkout.java	55	62	decl	CLASS	Billing	src/main/java/com/acme/billing/Billing.java	82	961
+site	src/main/java/com/acme/shop/Checkout.java	81	84	package	com
+site	src/main/java/com/acme/shop/Checkout.java	85	89	package	com.acme
+site	src/main/java/com/acme/shop/Checkout.java	90	97	package	com.acme.billing
+site	src/main/java/com/acme/shop/Checkout.java	98	105	decl	RECORD	Receipt	src/main/java/com/acme/billing/Receipt.java	87	125
+site	src/main/java/com/acme/shop/Checkout.java	114	117	package	com
+site	src/main/java/com/acme/shop/Checkout.java	118	122	package	com.acme
+site	src/main/java/com/acme/shop/Checkout.java	123	128	package	com.acme.money
+site	src/main/java/com/acme/shop/Checkout.java	129	134	decl	CLASS	Money	src/main/java/com/acme/money/Money.java	67	606
+site	src/main/java/com/acme/shop/Checkout.java	198	205	decl	RECORD	Receipt	src/main/java/com/acme/billing/Receipt.java	87	125
+site	src/main/java/com/acme/shop/Checkout.java	210	215	decl	CLASS	Money	src/main/java/com/acme/money/Money.java	67	606
+site	src/main/java/com/acme/shop/Checkout.java	241	249	decl	METHOD	standard	src/main/java/com/acme/billing/Billing.java	772	842
+site	src/main/java/com/acme/shop/Checkout.java	252	258	decl	METHOD	charge	src/main/java/com/acme/billing/Billing.java	210	329
+site	src/main/java/com/acme/shop/Checkout.java	259	265	local	PARAMETER	amount
+file	src/main/java/com/acme/shop/Discount.java	d4c1ee775029005a
+site	src/main/java/com/acme/shop/Discount.java	8	11	package	com
+site	src/main/java/com/acme/shop/Discount.java	12	16	package	com.acme
+site	src/main/java/com/acme/shop/Discount.java	17	21	package	com.acme.shop
+site	src/main/java/com/acme/shop/Discount.java	31	34	package	com
+site	src/main/java/com/acme/shop/Discount.java	35	39	package	com.acme
+site	src/main/java/com/acme/shop/Discount.java	40	47	package	com.acme.billing
+site	src/main/java/com/acme/shop/Discount.java	48	55	decl	CLASS	Billing	src/main/java/com/acme/billing/Billing.java	82	961
+site	src/main/java/com/acme/shop/Discount.java	193	200	decl	CLASS	Billing	src/main/java/com/acme/billing/Billing.java	82	961
+site	src/main/java/com/acme/shop/Discount.java	207	214	decl	CLASS	Billing	src/main/java/com/acme/billing/Billing.java	82	961
+site	src/main/java/com/acme/shop/Discount.java	240	248	decl	METHOD	standard	src/main/java/com/acme/billing/Billing.java	772	842
+file	src/main/java/com/acme/shop/Ledger.java	93a727eb210f6a5
+site	src/main/java/com/acme/shop/Ledger.java	8	11	package	com
+site	src/main/java/com/acme/shop/Ledger.java	12	16	package	com.acme
+site	src/main/java/com/acme/shop/Ledger.java	17	21	package	com.acme.shop
+site	src/main/java/com/acme/shop/Ledger.java	31	34	package	com
+site	src/main/java/com/acme/shop/Ledger.java	35	39	package	com.acme
+site	src/main/java/com/acme/shop/Ledger.java	40	45	package	com.acme.money
+site	src/main/java/com/acme/shop/Ledger.java	46	51	decl	CLASS	Money	src/main/java/com/acme/money/Money.java	67	606
+site	src/main/java/com/acme/shop/Ledger.java	60	64	package	java
+site	src/main/java/com/acme/shop/Ledger.java	65	69	package	java.util
+site	src/main/java/com/acme/shop/Ledger.java	70	79	outside	CLASS	java.util.ArrayList
+site	src/main/java/com/acme/shop/Ledger.java	184	193	outside	CLASS	java.util.ArrayList
+site	src/main/java/com/acme/shop/Ledger.java	194	199	decl	CLASS	Money	src/main/java/com/acme/money/Money.java	67	606
+site	src/main/java/com/acme/shop/Ledger.java	207	212	decl	CLASS	Money	src/main/java/com/acme/money/Money.java	67	606
+site	src/main/java/com/acme/shop/Ledger.java	229	234	decl	CLASS	Money	src/main/java/com/acme/money/Money.java	67	606
+site	src/main/java/com/acme/shop/Ledger.java	247	252	decl	CONSTRUCTOR	<init>	src/main/java/com/acme/money/Money.java	176	236
+site	src/main/java/com/acme/shop/Ledger.java	270	275	decl	CLASS	Money	src/main/java/com/acme/money/Money.java	67	606
+site	src/main/java/com/acme/shop/Ledger.java	285	289	outside	FIELD	com.acme.shop.Ledger#this
+site	src/main/java/com/acme/shop/Ledger.java	305	310	local	LOCAL_VARIABLE	total
+site	src/main/java/com/acme/shop/Ledger.java	313	318	local	LOCAL_VARIABLE	total
+site	src/main/java/com/acme/shop/Ledger.java	319	323	decl	METHOD	plus	src/main/java/com/acme/money/Money.java	519	604
+site	src/main/java/com/acme/shop/Ledger.java	324	330	local	LOCAL_VARIABLE	amount
+site	src/main/java/com/acme/shop/Ledger.java	358	363	local	LOCAL_VARIABLE	total
+site	src/main/java/com/acme/shop/Ledger.java	388	393	decl	CLASS	Money	src/main/java/com/acme/money/Money.java	67	606
+site	src/main/java/com/acme/shop/Ledger.java	412	415	outside	METHOD	java.util.ArrayList#add
+site	src/main/java/com/acme/shop/Ledger.java	416	422	local	PARAMETER	amount
+site	src/main/java/com/acme/shop/Ledger.java	436	441	decl	CLASS	Money	src/main/java/com/acme/money/Money.java	67	606
+site	src/main/java/com/acme/shop/Ledger.java	467	470	decl	METHOD	sum	src/main/java/com/acme/shop/Ledger.java	207	370
+file	src/main/java/com/acme/shop/Obscure.java	f69f6f6d2f54a167
+site	src/main/java/com/acme/shop/Obscure.java	8	11	package	com
+site	src/main/java/com/acme/shop/Obscure.java	12	16	package	com.acme
+site	src/main/java/com/acme/shop/Obscure.java	17	21	package	com.acme.shop
+site	src/main/java/com/acme/shop/Obscure.java	31	34	package	com
+site	src/main/java/com/acme/shop/Obscure.java	35	39	package	com.acme
+site	src/main/java/com/acme/shop/Obscure.java	40	47	package	com.acme.billing
+site	src/main/java/com/acme/shop/Obscure.java	48	55	decl	CLASS	Billing	src/main/java/com/acme/billing/Billing.java	82	961
+site	src/main/java/com/acme/shop/Obscure.java	64	67	package	com
+site	src/main/java/com/acme/shop/Obscure.java	68	72	package	com.acme
+site	src/main/java/com/acme/shop/Obscure.java	73	80	package	com.acme.billing
+site	src/main/java/com/acme/shop/Obscure.java	81	88	decl	RECORD	Receipt	src/main/java/com/acme/billing/Receipt.java	87	125
+site	src/main/java/com/acme/shop/Obscure.java	97	100	package	com
+site	src/main/java/com/acme/shop/Obscure.java	101	105	package	com.acme
+site	src/main/java/com/acme/shop/Obscure.java	106	111	package	com.acme.money
+site	src/main/java/com/acme/shop/Obscure.java	112	117	decl	CLASS	Money	src/main/java/com/acme/money/Money.java	67	606
+site	src/main/java/com/acme/shop/Obscure.java	258	265	decl	CLASS	Billing	src/main/java/com/acme/billing/Billing.java	82	961
+site	src/main/java/com/acme/shop/Obscure.java	280	287	decl	IMPLICIT_CONSTRUCTOR	Billing	src/main/java/com/acme/billing/Billing.java	82	961
+site	src/main/java/com/acme/shop/Obscure.java	296	303	decl	RECORD	Receipt	src/main/java/com/acme/billing/Receipt.java	87	125
+site	src/main/java/com/acme/shop/Obscure.java	308	313	decl	CLASS	Money	src/main/java/com/acme/money/Money.java	67	606
+site	src/main/java/com/acme/shop/Obscure.java	339	346	decl	FIELD	Billing	src/main/java/com/acme/shop/Obscure.java	244	290
+site	src/main/java/com/acme/shop/Obscure.java	347	353	decl	METHOD	charge	src/main/java/com/acme/billing/Billing.java	210	329
+site	src/main/java/com/acme/shop/Obscure.java	354	360	local	PARAMETER	amount
+file	src/main/java/com/acme/shop/Retry.java	d569524833b8c301
+site	src/main/java/com/acme/shop/Retry.java	8	11	package	com
+site	src/main/java/com/acme/shop/Retry.java	12	16	package	com.acme
+site	src/main/java/com/acme/shop/Retry.java	17	21	package	com.acme.shop
+site	src/main/java/com/acme/shop/Retry.java	31	34	package	com
+site	src/main/java/com/acme/shop/Retry.java	35	39	package	com.acme
+site	src/main/java/com/acme/shop/Retry.java	40	47	package	com.acme.billing
+site	src/main/java/com/acme/shop/Retry.java	48	55	decl	CLASS	Billing	src/main/java/com/acme/billing/Billing.java	82	961
+site	src/main/java/com/acme/shop/Retry.java	243	250	decl	CLASS	Billing	src/main/java/com/acme/billing/Billing.java	82	961
+site	src/main/java/com/acme/shop/Retry.java	294	301	decl	METHOD	retries	src/main/java/com/acme/shop/Retry.java	178	217
+file	src/main/java/com/acme/shop/Shop.java	178c84c71919a257
+site	src/main/java/com/acme/shop/Shop.java	8	11	package	com
+site	src/main/java/com/acme/shop/Shop.java	12	16	package	com.acme
+site	src/main/java/com/acme/shop/Shop.java	17	21	package	com.acme.shop
+site	src/main/java/com/acme/shop/Shop.java	31	34	package	com
+site	src/main/java/com/acme/shop/Shop.java	35	39	package	com.acme
+site	src/main/java/com/acme/shop/Shop.java	40	47	package	com.acme.billing
+site	src/main/java/com/acme/shop/Shop.java	48	55	decl	CLASS	Billing	src/main/java/com/acme/billing/Billing.java	82	961
+site	src/main/java/com/acme/shop/Shop.java	64	67	package	com
+site	src/main/java/com/acme/shop/Shop.java	68	72	package	com.acme
+site	src/main/java/com/acme/shop/Shop.java	73	80	package	com.acme.billing
+site	src/main/java/com/acme/shop/Shop.java	81	88	decl	RECORD	Receipt	src/main/java/com/acme/billing/Receipt.java	87	125
+site	src/main/java/com/acme/shop/Shop.java	97	100	package	com
+site	src/main/java/com/acme/shop/Shop.java	101	105	package	com.acme
+site	src/main/java/com/acme/shop/Shop.java	106	111	package	com.acme.money
+site	src/main/java/com/acme/shop/Shop.java	122	126	package	java
+site	src/main/java/com/acme/shop/Shop.java	127	131	package	java.util
+site	src/main/java/com/acme/shop/Shop.java	132	141	outside	CLASS	java.util.ArrayList
+site	src/main/java/com/acme/shop/Shop.java	150	154	package	java
+site	src/main/java/com/acme/shop/Shop.java	155	159	package	java.util
+site	src/main/java/com/acme/shop/Shop.java	160	164	outside	INTERFACE	java.util.List
+site	src/main/java/com/acme/shop/Shop.java	228	235	decl	CLASS	Billing	src/main/java/com/acme/billing/Billing.java	82	961
+site	src/main/java/com/acme/shop/Shop.java	246	253	decl	CLASS	Billing	src/main/java/com/acme/billing/Billing.java	82	961
+site	src/main/java/com/acme/shop/Shop.java	254	262	decl	METHOD	standard	src/main/java/com/acme/billing/Billing.java	772	842
+site	src/main/java/com/acme/shop/Shop.java	285	289	outside	INTERFACE	java.util.List
+site	src/main/java/com/acme/shop/Shop.java	290	297	decl	RECORD	Receipt	src/main/java/com/acme/billing/Receipt.java	87	125
+site	src/main/java/com/acme/shop/Shop.java	314	323	outside	CONSTRUCTOR	java.util.ArrayList#<init>
+site	src/main/java/com/acme/shop/Shop.java	400	407	decl	RECORD	Receipt	src/main/java/com/acme/billing/Receipt.java	87	125
+site	src/main/java/com/acme/shop/Shop.java	417	421	decl	CLASS	Cart	src/main/java/com/acme/shop/Cart.java	98	575
+site	src/main/java/com/acme/shop/Shop.java	438	445	decl	RECORD	Receipt	src/main/java/com/acme/billing/Receipt.java	87	125
+site	src/main/java/com/acme/shop/Shop.java	456	463	decl	FIELD	billing	src/main/java/com/acme/shop/Shop.java	214	265
+site	src/main/java/com/acme/shop/Shop.java	464	470	decl	METHOD	charge	src/main/java/com/acme/billing/Billing.java	210	329
+site	src/main/java/com/acme/shop/Shop.java	471	475	local	PARAMETER	cart
+site	src/main/java/com/acme/shop/Shop.java	476	481	decl	METHOD	total	src/main/java/com/acme/shop/Cart.java	458	508
+site	src/main/java/com/acme/shop/Shop.java	494	502	decl	FIELD	receipts	src/main/java/com/acme/shop/Shop.java	271	328
+site	src/main/java/com/acme/shop/Shop.java	503	506	outside	METHOD	java.util.List#add
+site	src/main/java/com/acme/shop/Shop.java	507	514	local	LOCAL_VARIABLE	receipt
+site	src/main/java/com/acme/shop/Shop.java	525	529	outside	FIELD	com.acme.shop.Shop#this
+site	src/main/java/com/acme/shop/Shop.java	530	535	decl	METHOD	audit	src/main/java/com/acme/shop/Shop.java	581	657
+site	src/main/java/com/acme/shop/Shop.java	536	543	local	LOCAL_VARIABLE	receipt
+site	src/main/java/com/acme/shop/Shop.java	561	568	local	LOCAL_VARIABLE	receipt
+site	src/main/java/com/acme/shop/Shop.java	592	599	decl	RECORD	Receipt	src/main/java/com/acme/billing/Receipt.java	87	125
+site	src/main/java/com/acme/shop/Shop.java	619	624	decl	CLASS	Money	src/main/java/com/acme/money/Money.java	67	606
+site	src/main/java/com/acme/shop/Shop.java	634	641	local	PARAMETER	receipt
+site	src/main/java/com/acme/shop/Shop.java	642	648	decl	RECORD_COMPONENT	amount	src/main/java/com/acme/billing/Receipt.java	109	121
+site	src/main/java/com/acme/shop/Shop.java	691	699	decl	FIELD	receipts	src/main/java/com/acme/shop/Shop.java	271	328
+site	src/main/java/com/acme/shop/Shop.java	700	704	outside	METHOD	java.util.List#size
+site	src/main/java/com/acme/shop/Shop.java	719	727	outside	INTERFACE	java.lang.Runnable
+site	src/main/java/com/acme/shop/Shop.java	756	764	decl	IMPLICIT_CONSTRUCTOR		src/main/java/com/acme/shop/Shop.java	767	870
+site	src/main/java/com/acme/shop/Shop.java	782	790	outside	ANNOTATION_TYPE	java.lang.Override
+site	src/main/java/com/acme/shop/Shop.java	839	843	decl	METHOD	size	src/main/java/com/acme/shop/Shop.java	663	713
+site	src/main/java/com/acme/shop/Shop.java	989	994	decl	FIELD	count	src/main/java/com/acme/shop/Shop.java	943	953

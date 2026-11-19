@@ -51,7 +51,8 @@ pub use summary_store::{
     StoreStats, SummaryStore, SummaryStoreError,
 };
 pub use syntax_indexer::{
-    GrammarId, Indexed, SyntaxDiagnostic, SyntaxIndexError, SyntaxIndexer, SyntaxProblem,
+    Around, GrammarId, Indexed, SiteForm, SiteSyntax, SyntaxDiagnostic, SyntaxIndexError,
+    SyntaxIndexer, SyntaxProblem,
 };
 pub use view_service::{
     Answer, GitObserved, ServiceConfig, ServiceError, ServiceSources, Summary, ViewService,

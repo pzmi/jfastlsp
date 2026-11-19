@@ -15,10 +15,20 @@
 //! after a work budget proportional to the input ([`work_budget`]) and refuses with
 //! [`SyntaxIndexError::TooMuchWork`], which is again a gap and never a partial summary passed off
 //! as whole.
+//!
+//! **Scope facts at query time** ([`SyntaxIndexer::site_syntax`], IDX-10's syntax-tree resolver):
+//! the same grammar's tree around one reference site, as plain data ([`SiteSyntax`]): what the
+//! site's name is ([`SiteForm`]), every node around it up to the compilation unit, classified
+//! ([`Around`]), and whether a local, a parameter, a pattern or a type parameter of that name is
+//! declared where it may be in scope. The queries read it to prove a binding (`queries::admit`);
+//! an indexer that gives none (the testkit's canned one) leaves every resolved name `possible`.
 
 use core::future::Future;
+use std::sync::Arc;
 
 use jfl_domain::{ByteRange, FileSummary, SummaryError};
+
+use crate::queries::FileText;
 
 /// The largest file indexed: 16 MiB (the pinned corpus's largest `.java` is 1.6 MB). A larger file
 /// is refused before it is parsed.
@@ -112,6 +122,74 @@ pub enum SyntaxIndexError {
     Interrupted,
 }
 
+/// What a reference site's name is, read from the syntax tree at the site.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum SiteForm {
+    /// A bare name in an expression (`total`, the `total` of `total.add(x)`): a variable, or a
+    /// type or package when no variable of that name is in scope (JLS 6.5.2).
+    Name,
+    /// The name of an unqualified call: `charge(…)`.
+    Call,
+    /// `this.name`.
+    ThisName,
+    /// `this.name(…)`.
+    ThisCall,
+    /// A simple type name where a type is expected: `Money total`, `List<Money>`, `(Money) x`,
+    /// `extends Money`, `throws Failure`.
+    Type,
+    /// The simple name of an annotation: `Tag` of `@Tag` or `@Tag(…)`.
+    Annotation,
+    /// The simple type name of an instance creation without a class body: `Money` of
+    /// `new Money(…)`.
+    New,
+    /// Anything else (a qualified name, `super.`, a method reference, an element key, a `case`
+    /// label, ...): never proved.
+    Other,
+}
+
+/// One node around a site, innermost first, as the resolver reads scopes from it. An indexer
+/// classifies every node kind of its grammar into exactly one of these (pinned by
+/// `jfl-adapter-java`'s `scopes::tests`), and anything it does not place in a position it
+/// knows is [`Around::Denied`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Around {
+    /// Expressions, statements, blocks and type syntax between the site and the next frame below:
+    /// nodes that declare no member and open no class body (consecutive ones are one entry).
+    Code,
+    /// The body of a method or constructor, by the callable's name.
+    CallableBody(ByteRange),
+    /// A method's or constructor's header (modifiers, type parameters, result, parameters,
+    /// `throws`), by its name.
+    CallableHeader(ByteRange),
+    /// A field declaration's modifiers or type (never its initializer).
+    FieldHeader,
+    /// The body of a top-level or member type, by the type's name.
+    TypeBody(ByteRange),
+    /// A top-level or member type's header (modifiers, type parameters, `extends`, `implements`,
+    /// `permits`), by its name.
+    TypeHeader(ByteRange),
+    /// The compilation unit.
+    Unit,
+    /// A node kind, or a node in a position, the resolver does not handle (an anonymous, local
+    /// or enum constant body, a lambda, a `switch`, an annotation's arguments, an initializer,
+    /// a syntax error, ...), by its kind: the site is never proved.
+    Denied(&'static str),
+}
+
+/// The syntax tree's facts about one reference site ([`SyntaxIndexer::site_syntax`]).
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct SiteSyntax {
+    /// What the site's name is.
+    pub form: SiteForm,
+    /// The nodes around it, innermost first, ending with [`Around::Unit`] or at the first
+    /// [`Around::Denied`].
+    pub around: Vec<Around>,
+    /// Whether a local variable, parameter, pattern, lambda, catch, `for` or resource variable,
+    /// local type or type parameter of the site's name is declared in a callable or type around
+    /// it, wherever in that callable or type: such a name may be the one meant.
+    pub shadowed: bool,
+}
+
 /// Indexes Java source.
 pub trait SyntaxIndexer: Send + Sync + 'static {
     /// The grammar, for the `SyntaxKey`.
@@ -129,6 +207,19 @@ pub trait SyntaxIndexer: Send + Sync + 'static {
         &self,
         bytes: Vec<u8>,
     ) -> impl Future<Output = Result<Indexed, SyntaxIndexError>> + Send;
+
+    /// The syntax tree's facts about the reference site whose name is at `name` of `text` (a
+    /// file's text after a dropped byte-order mark, as the queries read it), or `None` when the
+    /// indexer gives none: the text does not parse cleanly, holds Unicode escapes, spends its
+    /// work budget, or `name` is not one name's bytes. `None` proves nothing, so the provided
+    /// implementation (a fake's) is never looser than a real one.
+    fn site_syntax(
+        &self,
+        _text: Arc<FileText>,
+        _name: ByteRange,
+    ) -> impl Future<Output = Option<SiteSyntax>> + Send {
+        core::future::ready(None)
+    }
 }
 
 /// `bytes` without a leading byte-order mark.

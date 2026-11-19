@@ -26,8 +26,19 @@
         3,
         10
       ],
-      "reason": "name_and_arity",
-      "why": "matched by name and arity (bound by scope rules read from syntax, not proved)"
+      "reason": "supertype_not_indexed",
+      "why": "a supertype outside the index may declare it"
+    },
+    {
+      "uri": "file:///w/m/src/main/java/com/acme/probe2/SelfBase.java",
+      "range": [
+        4,
+        17,
+        4,
+        21
+      ],
+      "reason": "supertype_not_indexed",
+      "why": "a supertype outside the index may declare it"
     }
   ],
   "complete": false,

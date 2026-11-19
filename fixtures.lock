@@ -2,6 +2,46 @@
 # every file under fixtures/ and under each crate's tests/fixtures/, sorted. A golden is
 # never rewritten to get green: a deliberate change moves its line here in the same commit
 # (just fixtures-lock), and review reads the line as a change of the promise.
+00472be3f43197a1d517299a2ef63b2fa9f3ac534463b1cb9b8b77973b59d461  crates/jfl-adapter-java/tests/fixtures/javac/generated.tsv
+ad2cd44938d5b6279d4b550fe19ff433819c901af246bf84b0d5cea951bce189  crates/jfl-adapter-java/tests/fixtures/javac/generated/src/main/java/gen/Base.java
+ed55d61cc1bec98ca1a485d212339fb09702a08633e1b7dcf1c55db443830dda  crates/jfl-adapter-java/tests/fixtures/javac/generated/src/main/java/gen/Case00.java
+25eba47747e966cf02747dc1586f957db9478460fbe791fffd5f345a73feb0d9  crates/jfl-adapter-java/tests/fixtures/javac/generated/src/main/java/gen/Case01.java
+8329dd1cd96fefba8a5284cee13120aa18d1d250af1ac90c75f6c47b8d87eacf  crates/jfl-adapter-java/tests/fixtures/javac/generated/src/main/java/gen/Case02.java
+cc389fe48bd4fcb34922f2b1d2254281131a2e927271076046b8ae5c0c029a31  crates/jfl-adapter-java/tests/fixtures/javac/generated/src/main/java/gen/Case03.java
+84ab073364f0957f27ace7f3fa0d398cc974805f7729a655ba4b7c164fa6beb1  crates/jfl-adapter-java/tests/fixtures/javac/generated/src/main/java/gen/Case04.java
+09d3a6ce651c455f54c00069a10edbfe08825350179cd88f7d7df68270b496f6  crates/jfl-adapter-java/tests/fixtures/javac/generated/src/main/java/gen/Case05.java
+5b97ff75abeacc94bf16e0905da9235c3190bc46ed906c6d29c96a8bc6c97e8d  crates/jfl-adapter-java/tests/fixtures/javac/generated/src/main/java/gen/Case06.java
+cf0155f6f442f1324d9596492cce42cbaac0b8b7ba812ad3fe8c96d63b458abf  crates/jfl-adapter-java/tests/fixtures/javac/generated/src/main/java/gen/Case07.java
+0822d2abb0fb816b3e0f2f5af6dc4774752848bf86281b2de048b73429454099  crates/jfl-adapter-java/tests/fixtures/javac/generated/src/main/java/gen/Case08.java
+ea76e192ae3c01973a0d0caf9151df8e1f9ee8c2cd8c7be764f9081eed9ad15b  crates/jfl-adapter-java/tests/fixtures/javac/generated/src/main/java/gen/Case09.java
+5ef0d59a74759d0985fae42f881d1be7fd71eb86fa7881187cdb4b4aa8094c9a  crates/jfl-adapter-java/tests/fixtures/javac/generated/src/main/java/gen/Case10.java
+320988ba78fc88234fd03f01308e51845f63c7581a01ae2905402754c66c984a  crates/jfl-adapter-java/tests/fixtures/javac/generated/src/main/java/gen/Case11.java
+08d5d3cd8559282f6d9cf88cb4c9fbb0a354b03b9045a8087cb9632981e929da  crates/jfl-adapter-java/tests/fixtures/javac/generated/src/main/java/gen/Case12.java
+3bbe2e4146e97bfd6dbce45eb0ee98329654a9d07c1e58598c340907f0bc7364  crates/jfl-adapter-java/tests/fixtures/javac/generated/src/main/java/gen/Case13.java
+5efd1ecff37f17312d8ab2ce898130a6d1fc5bb52560052c583414c32e685388  crates/jfl-adapter-java/tests/fixtures/javac/generated/src/main/java/gen/Case14.java
+a5c1dd11f11c443ab88e7acb14b0404f5500026f80fd49fbb241f6785e23f398  crates/jfl-adapter-java/tests/fixtures/javac/generated/src/main/java/gen/Case15.java
+0d29b90d42f3b585eedd476e08c007127c72440b27df8c18f6be1a2a20b6f5b8  crates/jfl-adapter-java/tests/fixtures/javac/generated/src/main/java/gen/Case16.java
+58d0a688d564a3c0f273935b658f1083b5f0ae3bfa93046c1ec72634e11ee9c6  crates/jfl-adapter-java/tests/fixtures/javac/generated/src/main/java/gen/Case17.java
+83f2529a998b66ecded469787c297d5f37204617b307fcd99bb9d0501c570fa2  crates/jfl-adapter-java/tests/fixtures/javac/generated/src/main/java/gen/Case18.java
+f71afbf9728c34b986afb56f9b80ff55833121bf16815756bb396efea4f020a9  crates/jfl-adapter-java/tests/fixtures/javac/generated/src/main/java/gen/Case19.java
+d408fba78539bee24f676612a9c11aedf3bb4e0c005ab22aee2046980ac6298c  crates/jfl-adapter-java/tests/fixtures/javac/generated/src/main/java/gen/Case20.java
+c26c8a4d47c457a709222bacfa38df23a7a813910f68f5e99796240765989112  crates/jfl-adapter-java/tests/fixtures/javac/generated/src/main/java/gen/Case21.java
+dee5b31daa9ac72f381f5da04abdf2dd32b88ba2e0ed1ff3fb69940ece2f3a2c  crates/jfl-adapter-java/tests/fixtures/javac/generated/src/main/java/gen/Case22.java
+fb91663b41d36bbd25daff8a2d0e3b98b9e66560897f12f70afcae3167bcf5fd  crates/jfl-adapter-java/tests/fixtures/javac/generated/src/main/java/gen/Case23.java
+14b5c7fe8477ddb0d3215d3568263273a36c9f9f3b9f46ff427540c7a4ee851f  crates/jfl-adapter-java/tests/fixtures/javac/generated/src/main/java/gen/Case24.java
+3259ba5862e2773d5604932a25d5529931dfa687846e4ef6dead8f29c4fe2a21  crates/jfl-adapter-java/tests/fixtures/javac/generated/src/main/java/gen/Case25.java
+272103e3d6d89f55fec0b7bcd3b4a1ed4b5a4f9e171c6bcac329bf803430e954  crates/jfl-adapter-java/tests/fixtures/javac/generated/src/main/java/gen/Case26.java
+66ba41a2ddaa25102e9056ce362641b61c97ce8eff0e2db80cd3ef824300e569  crates/jfl-adapter-java/tests/fixtures/javac/generated/src/main/java/gen/Case27.java
+54077fe891dcef5d3db428dceb64e546a3da5993c82c8fd9e71598052b9fe561  crates/jfl-adapter-java/tests/fixtures/javac/generated/src/main/java/gen/Case28.java
+876d2540a35ee0fdd810e4e92dc36ae428749b83499376560c93aa460e53ab6d  crates/jfl-adapter-java/tests/fixtures/javac/generated/src/main/java/gen/Case29.java
+2d126ab31003baf0a59dcae5d5b850e2b942ed70afd336f13a024085fa64a4e1  crates/jfl-adapter-java/tests/fixtures/javac/generated/src/main/java/gen/Case30.java
+9cf0098983f60f8ea79afe03d90ba0fcdbb3e179b0fa856c9e8a97d3fa822198  crates/jfl-adapter-java/tests/fixtures/javac/generated/src/main/java/gen/Case31.java
+b5b234fd2900d366fa2830f46d7db1cd57f496135f462008b290e1d859fac25c  crates/jfl-adapter-java/tests/fixtures/javac/generated/src/main/java/gen/Constants.java
+440cb39e68392856ce136422e061e8de2ae8b59740a3de5f7083fa7075c2114b  crates/jfl-adapter-java/tests/fixtures/javac/generated/src/main/java/gen/Item.java
+f4bcdfd6c1ed0a72ea41356faf35effe9eb4a88e371d358918a342d0b6944d66  crates/jfl-adapter-java/tests/fixtures/javac/generated/src/main/java/gen/other/Item.java
+4066f111bfba12f73e6afe610438483888ec95bd7db8d14d23e9f34fff2f1f7f  crates/jfl-adapter-java/tests/fixtures/javac/generated/src/main/java/gen/other/PBase1.java
+067c5084f50a749cdd1ff1fe6a399e6b8b13052eb7c1089747aaf099cc63b207  crates/jfl-adapter-java/tests/fixtures/javac/generated/src/main/java/gen/other/PBase2.java
+6edd12fb8ef5a598b9909340b5c4b50d8cef223235fe9c5a9f996a286f0f00f4  crates/jfl-adapter-java/tests/fixtures/javac/shop.tsv
 9c951569ba7294a18b25fe4c6831302dec89e9ec70602f03bae02d102cabc154  crates/jfl-application/tests/fixtures/queries/def.anonymous-class.json
 0aca89de5037aea644e732beb798fb1f4a0ba15cd8ac8be8b7e47407ac9ee297  crates/jfl-application/tests/fixtures/queries/def.bounded-ambiguity.json
 88dbd0541eaaf6657d1df09d21fb06037e297a3585cb1d7a1506c5363e7a400f  crates/jfl-application/tests/fixtures/queries/def.deadline.json
@@ -29,11 +69,11 @@ a253fda8f2033563ccb6481771105f26540fe6c051749abaa6baaefa65530ee6  crates/jfl-app
 5d60ecc9296c5e0ce6447166c9732a7becee605575043045414963726d331983  crates/jfl-application/tests/fixtures/queries/def.probe2.element-key-after-comment.json
 f0cac22547b09ec2bc0aa354a1132ac39e5a88e0773575de925ee8c4192f47eb  crates/jfl-application/tests/fixtures/queries/def.probe2.header-annotation.json
 40fecb1c029d0eb00a39f251f6d3eb30870d9188cc410d0ca3cb8e6aa2daf802  crates/jfl-application/tests/fixtures/queries/def.probe2.header-extends.json
-724b45db94fad502866a89da055cd86fb5a9431ea9e0b65e759837fe4c4f3baa  crates/jfl-application/tests/fixtures/queries/def.probe2.inherited-member-type-over-own-name.json
-f9abb104c3b7452edeed05b523d13d270e4a49c5d493d4f69e6c7807b64ee1bd  crates/jfl-application/tests/fixtures/queries/def.probe2.member-type-parameter-after-annotation.json
+36e1447ec3268af4fbca3a003e4e8a0277fa06c637173725abc7ed07120862bd  crates/jfl-application/tests/fixtures/queries/def.probe2.inherited-member-type-over-own-name.json
+a2282f325039a0438f611e0f7d4c7fc39935dcf068ecbdc49a54747750434a7e  crates/jfl-application/tests/fixtures/queries/def.probe2.member-type-parameter-after-annotation.json
 90c15c2184d29d157ab06e205c9254b7b00a1576700226d17ebf76f4e455559f  crates/jfl-application/tests/fixtures/queries/def.probe2.member-type-parameter-control.json
 48e39b66ab25c57cad5d72db58944c9265a67b35e8a3b45a61021ff0958adb8b  crates/jfl-application/tests/fixtures/queries/def.probe2.super-call.json
-8237b8130b247362e749cc36d86d9e05fed23ccdf9e261ba33ea1ea1b3a0dd3a  crates/jfl-application/tests/fixtures/queries/def.probe2.type-parameter-after-annotation.json
+332f5cc56e05674b5d2185f91d638dbfccf26594a996ff031746d381ddac2146  crates/jfl-application/tests/fixtures/queries/def.probe2.type-parameter-after-annotation.json
 7dd5dca9709d03c5b2eb6fc03abca92b1cd712e84231c791af14fda2b91fed2c  crates/jfl-application/tests/fixtures/queries/def.receiver-unknown.json
 ed47730391ed4b5fa639e838feedd13097d5119d2106709579db1eee9dd1f3e7  crates/jfl-application/tests/fixtures/queries/def.same-package-supertype.json
 76fd2c9dd3923cddc45273c3814ca072692b9c4169f9659d4d6a56817ca5ab95  crates/jfl-application/tests/fixtures/queries/def.static-call.json
@@ -77,7 +117,7 @@ f1d09d8b08b3ba117dee16a8eacebc84f3933e132148193ef58c72318611975b  crates/jfl-pro
 f9d541c067c6c59c54f0f3db9a847b681f2b02ded6b64df034ad0335890c6db9  crates/jfl-protocol/tests/fixtures/v1/jfl.symbols.response.json
 0f750e761fbcbccff85b867c750ff9d8c8a6ad72ad210b39e5b4b10fe92d7f7a  crates/jfl-protocol/tests/fixtures/v1/jfl.sync.request.json
 4df9929c93417744464411601a5527c6f7eea1fcd00b37e9c4d5f883c71f60e9  crates/jfl-protocol/tests/fixtures/v1/jfl.sync.response.json
-1c8702671aa9626f699d07bafa542b436c209c4bf8f749d8bef6bce7ece002ff  fixtures/java/README.md
+390a7d42292379212dd89a7173dd0bee681414d118e818274a626af37fb7665b  fixtures/java/README.md
 1f79123fdb25b9811164021ddecc821432e096e31a1ee46029d20495642d693c  fixtures/java/broken/StringTemplate.java
 0f91ea76da78dab4b8f6f986883892de978518f41fa360ff1d9e0dceb6fa6d04  fixtures/java/broken/SyntaxErrors.java
 e3105aa0e4371c630c6984dced7b28f9300cfabf7b754d0110fdf9d73323bc36  fixtures/java/grammar/AnnotationsEverywhere.java
@@ -120,6 +160,7 @@ a106b20460d984d28aa37a4fc8e9696017c8e95b08d012c3ece54ebdc85736b6  fixtures/java/
 18d8f23feeeb79df9cc073c9cb6fd7a0090fb3b8238e59ed79f040f57e269012  fixtures/java/projects/shop/src/main/java/com/acme/probe2/SelfBase.java
 ce30c9bff3e93969cf20c40fab63a9d0a592416f57f07601de090e08a498d53b  fixtures/java/projects/shop/src/main/java/com/acme/probe2/Shelf.java
 4815b7f2f08853de764034c571696e992139e2bbb31ea49649c9ed0361504f8c  fixtures/java/projects/shop/src/main/java/com/acme/probe2/Tagged.java
+ecded1a00728f44d3bb4e3ced1c02807843055585936995cb8f2b4d9077f3412  fixtures/java/projects/shop/src/main/java/com/acme/probe3/QualThis.java
 aee2e437ef9838d6364fd0844294aba6bf62a85f563a22b3047e8d93f0668893  fixtures/java/projects/shop/src/main/java/com/acme/shop/Cart.java
 b3af1dab4c189102fb18b662fc418e4497da325118264886e3828ce74e35db0c  fixtures/java/projects/shop/src/main/java/com/acme/shop/Checkout.java
 cae53494967b4e4f99b7d560efa61b3e466a4972e48f6aaa984ae2926ae70acd  fixtures/java/projects/shop/src/main/java/com/acme/shop/Discount.java
@@ -170,6 +211,7 @@ ccfe544eba1465cac4247b0b6b40eb9d1eba4dc95d647372e5cf7d38fecd09bb  fixtures/java/
 1c38fcb279cc70c61663ac8961815840f17a513b33640b3416c1ac951023c97c  fixtures/java/summaries/orchard/projects/shop/src/main/java/com/acme/probe2/SelfBase.java.json
 35f5d429ac1b010ad3d4a18c64feaae856888861316da9b07742bf3f131316e0  fixtures/java/summaries/orchard/projects/shop/src/main/java/com/acme/probe2/Shelf.java.json
 4320db742d583ad35709e730f251bc92497aafe1ef53ac6317ab2fc0d6c4142a  fixtures/java/summaries/orchard/projects/shop/src/main/java/com/acme/probe2/Tagged.java.json
+128b5bc96a638da83e212c6623450d1287e6358540968215739f13ad0539fae3  fixtures/java/summaries/orchard/projects/shop/src/main/java/com/acme/probe3/QualThis.java.json
 5a34046be77bec8436a499f3fe7338c066b225090496e851438f532d1191a950  fixtures/java/summaries/orchard/projects/shop/src/main/java/com/acme/shop/Cart.java.json
 c199cd05bc4009419e8e05e046996cd9cbfa9477cf036c4e87b23338197bab56  fixtures/java/summaries/orchard/projects/shop/src/main/java/com/acme/shop/Checkout.java.json
 d0e403dd12037033ea71c5f588361e2a06942f176e57aa0bcd7747a485739eff  fixtures/java/summaries/orchard/projects/shop/src/main/java/com/acme/shop/Discount.java.json

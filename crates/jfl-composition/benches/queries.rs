@@ -12,6 +12,11 @@
 //!   outside the index, unresolved, refused);
 //! - **the first query of a generation**, which builds its name tables (`QueryCache`): what the
 //!   first query after each publish pays;
+//! - **the syntax facts** a definition proves `exact` from (IDX-10's syntax-tree resolver), for
+//!   every file of the view: the parse of the file alone, the parse and the walk from one site
+//!   (what each definition pays: the design taken, a parse at query time), and the walk from every
+//!   site of the file beyond its parse (what keeping the facts in the summary would add to the
+//!   index: the design not taken); p50, p95 and the largest file;
 //! - **workspace symbols**: the first three letters of picked declaration names (prefix), the
 //!   whole names (exact), their humps' initials (`NPE` for `NullPointerException`), and one
 //!   letter (the widest scan), and the prefixes again with a limit of one (the scan with a single
@@ -43,7 +48,8 @@ use jfl_application::{
     QueryConfig, QueryError, ServiceConfig, Summary, SymbolQuery, ViewService, WallClock,
 };
 use jfl_domain::{
-    ByteOffset, Envelope, FileUri, Freshness, LineIndex, PositionEncoding, RelPath, TargetStatus,
+    ByteOffset, ByteRange, Envelope, FileUri, Freshness, LineIndex, PositionEncoding, RelPath,
+    TargetStatus,
 };
 
 /// Reference sites picked when `--picks` is not given.
@@ -279,6 +285,68 @@ fn initials(name: &str) -> Option<String> {
     (caps.len() >= 2).then_some(caps)
 }
 
+/// The syntax facts' cost over every file of `files` (each with its sites' ranges): the parse
+/// alone, the parse and one site's walk (a definition, design (a)), and every site's walk beyond
+/// the parse (design (b)'s addition to the index).
+fn syntax_facts(checkout: &Path, files: &[(RelPath, Vec<ByteRange>)]) -> Result<(), String> {
+    let indexer = JavaIndexer::new(
+        Grammar::new(&GrammarSpec::orchard()).map_err(|e| e.to_string())?,
+        (),
+    );
+    let mut parse = Vec::new();
+    let mut one = Vec::new();
+    let mut walks = Duration::ZERO;
+    let mut all_parses = Duration::ZERO;
+    let mut largest: (usize, Duration, Duration) = (0, Duration::ZERO, Duration::ZERO);
+    let nowhere =
+        ByteRange::new(ByteOffset::new(0), ByteOffset::new(0)).map_err(|e| e.to_string())?;
+    for (path, ranges) in files {
+        let Some(&first) = ranges.first() else {
+            continue;
+        };
+        let bytes = std::fs::read(checkout.join(path.as_str())).map_err(|e| e.to_string())?;
+        let text = String::from_utf8_lossy(jfl_application::syntax_indexer::strip_bom(&bytes))
+            .into_owned();
+        let started = Instant::now();
+        let _ = indexer.site_syntax_blocking(&text, nowhere);
+        let parsed = started.elapsed();
+        let started = Instant::now();
+        let _ = indexer.site_syntax_blocking(&text, first);
+        let single = started.elapsed();
+        let started = Instant::now();
+        let _ = indexer.sites_syntax_blocking(&text, ranges);
+        let every = started.elapsed();
+        parse.push(parsed);
+        one.push(single);
+        all_parses = all_parses.saturating_add(parsed);
+        walks = walks.saturating_add(every.saturating_sub(parsed));
+        if text.len() > largest.0 {
+            largest = (text.len(), parsed, single);
+        }
+    }
+    println!("  {}", line("syntax facts: parse of the file", &parse));
+    println!(
+        "  {}",
+        line(
+            "syntax facts: parse and one site's walk (each definition)",
+            &one
+        )
+    );
+    println!(
+        "  syntax facts: the largest file ({} bytes): parse {:.2} ms, with one site {:.2} ms",
+        largest.0,
+        ms(largest.1),
+        ms(largest.2)
+    );
+    println!(
+        "  syntax facts kept at index time: every site's walk {:.0} ms over {} files, beside their parses' {:.0} ms (one thread)",
+        ms(walks),
+        parse.len(),
+        ms(all_parses)
+    );
+    Ok(())
+}
+
 fn main() -> Result<(), String> {
     let mut input = Vec::new();
     std::io::stdin()
@@ -319,6 +387,7 @@ fn main() -> Result<(), String> {
 
     // The sites and declaration names to query, picked by seed from the generation.
     let mut sites: Vec<(RelPath, u32)> = Vec::new();
+    let mut by_file: Vec<(RelPath, Vec<ByteRange>)> = Vec::new();
     let mut names: Vec<String> = Vec::new();
     for (path, entry) in &answer.generation.index {
         if let Some(Summary::Indexed { summary, .. }) = &entry.summary {
@@ -328,6 +397,10 @@ fn main() -> Result<(), String> {
                     .iter()
                     .map(|r| (path.clone(), r.range.start().get())),
             );
+            by_file.push((
+                path.clone(),
+                summary.references().iter().map(|r| r.range).collect(),
+            ));
             names.extend(
                 summary
                     .declarations()
@@ -428,6 +501,7 @@ fn main() -> Result<(), String> {
         "  definition answers: {tally:?}; name tables built {} times",
         cache.builds()
     );
+    syntax_facts(Path::new(checkout), &by_file)?;
 
     let answer = block_on(service.request(&first)).map_err(|e| e.to_string())?;
     let pinned = Pinned {
