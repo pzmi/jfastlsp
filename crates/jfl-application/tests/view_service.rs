@@ -126,10 +126,26 @@ mod given {
             self.service_over(self.tree.clone())
         }
 
+        /// A service that opens whole only views of at most `open_whole` files.
+        pub(crate) fn deferring(&self, open_whole: usize) -> Service {
+            let mut config = ServiceConfig::new("t1");
+            config.open_whole = open_whole;
+            self.service_with(self.tree.clone(), config)
+        }
+
         /// A service over `tree` in place of the world's tree (a wrapper around it).
         pub(crate) fn service_over<T: SourceTree>(
             &self,
             tree: T,
+        ) -> ViewService<T, FakeRepoProbe, Indexer, MemorySummaryStore, FakeWallClock, FnvHasher>
+        {
+            self.service_with(tree, ServiceConfig::new("t1"))
+        }
+
+        pub(crate) fn service_with<T: SourceTree>(
+            &self,
+            tree: T,
+            config: ServiceConfig,
         ) -> ViewService<T, FakeRepoProbe, Indexer, MemorySummaryStore, FakeWallClock, FnvHasher>
         {
             let store = MemorySummaryStore::open(
@@ -141,13 +157,26 @@ mod given {
                 (tree, self.probe.clone(), self.indexer.clone(), store),
                 FakeWallClock::at(1_800_000_000),
                 FnvHasher::default(),
-                ServiceConfig::new("t1"),
+                config,
             )
         }
     }
 
     pub(crate) fn ask(service: &mut Service, file: &str) -> Answer {
         block_on(service.request(&uri(file))).unwrap()
+    }
+
+    /// The summary the answer's generation holds for `path`.
+    pub(crate) fn summary_of(answer: &Answer, path: &str) -> Option<Summary> {
+        answer
+            .generation
+            .index
+            .get(&rel(path))
+            .and_then(|e| e.summary.clone())
+    }
+
+    pub(crate) fn indexed(world: &World) -> usize {
+        world.indexer.0.load(Ordering::Relaxed)
     }
 
     pub(crate) fn reasons(answer: &Answer) -> Vec<IncompleteReason> {
@@ -205,7 +234,7 @@ mod given {
         }
     }
 }
-use given::{LateWriter, MAIN, NESTED, World, ask, paths, reasons, rel, uri};
+use given::{LateWriter, MAIN, NESTED, World, ask, indexed, paths, reasons, rel, summary_of, uri};
 
 #[test]
 fn should_answer_complete_when_the_view_is_watched_and_nothing_changed() {
@@ -450,6 +479,7 @@ fn should_publish_when_the_store_lost_a_summary_the_generation_names() {
     let mut service = world.service();
     let first = ask(&mut service, "/w/m/A.java");
     service.finish(first.id).unwrap();
+    assert_eq!(block_on(service.write_back(usize::MAX)), 0);
     world.backing.wipe();
     world.tree.write("m/B.java", b"class B { int z; }").unwrap();
 
@@ -457,6 +487,7 @@ fn should_publish_when_the_store_lost_a_summary_the_generation_names() {
     let answer = ask(&mut service, "/w/m/A.java");
 
     // then
+    assert_eq!(block_on(service.write_back(usize::MAX)), 0);
     assert_eq!(service.ports().2.stats().entries, 1);
     assert!(answer.generation.generation > first.generation.generation);
     assert!(answer.completeness.is_complete(), "{:?}", reasons(&answer));
@@ -472,12 +503,205 @@ fn should_read_from_the_store_when_a_second_view_holds_the_same_content() {
     service.finish(first.id).unwrap();
     let indexed = world.indexer.0.load(Ordering::Relaxed);
 
+    assert_eq!(block_on(service.write_back(usize::MAX)), 0);
+
     // when
     let nested = ask(&mut service, "/w/m/.claude/worktrees/n/A.java");
 
     // then
     assert_eq!(world.indexer.0.load(Ordering::Relaxed), indexed);
     assert!(nested.completeness.is_complete(), "{:?}", reasons(&nested));
+}
+
+#[test]
+fn should_index_the_same_content_once_when_a_second_view_opens_before_the_write_back() {
+    // given
+    let world = World::new(&[("A.java", b"class A {}")]);
+    world.nested(&[("A.java", b"class A {}")]);
+    let mut service = world.service();
+    let first = ask(&mut service, "/w/m/A.java");
+    service.finish(first.id).unwrap();
+
+    // when
+    let nested = ask(&mut service, "/w/m/.claude/worktrees/n/A.java");
+
+    // then
+    assert_eq!(indexed(&world), 1);
+    assert_eq!(service.ports().2.stats().entries, 0);
+    assert!(nested.completeness.is_complete(), "{:?}", reasons(&nested));
+}
+
+#[test]
+fn should_store_the_summaries_only_when_written_back() {
+    // given
+    let world = World::new(&[
+        ("A.java", b"class A {}"),
+        ("B.java", b"class B {}"),
+        ("C.java", b"class C {}"),
+    ]);
+    let mut service = world.service();
+    let answer = ask(&mut service, "/w/m/A.java");
+    service.finish(answer.id).unwrap();
+
+    // when
+    let stored_before = service.ports().2.stats().entries;
+    let left = block_on(service.write_back(1));
+    let stored_after_one = service.ports().2.stats().entries;
+    let left_at_end = block_on(service.write_back(usize::MAX));
+
+    // then
+    assert_eq!(stored_before, 0);
+    assert_eq!((left, stored_after_one), (2, 1));
+    assert_eq!(left_at_end, 0);
+    assert_eq!(service.ports().2.stats().entries, 3);
+}
+
+/// Two packages, `p` and `q`, in a view that opens whole only up to no files at all.
+fn two_packages() -> (World, given::Service) {
+    let world = World::new(&[
+        ("p/A.java", b"class A {}"),
+        ("p/B.java", b"class B {}"),
+        ("q/C.java", b"class C {}"),
+        ("q/D.java", b"class D {}"),
+    ]);
+    let service = world.deferring(0);
+    (world, service)
+}
+
+#[test]
+fn should_answer_partly_indexed_and_then_complete_when_the_open_defers_the_rest() {
+    // given
+    let (world, mut service) = two_packages();
+
+    // when
+    let first = ask(&mut service, "/w/m/p/A.java");
+    service.finish(first.id).unwrap();
+    let settled = block_on(service.settle()).unwrap();
+    let after = ask(&mut service, "/w/m/p/A.java");
+
+    // then
+    assert!(!first.completeness.is_complete());
+    assert!(
+        reasons(&first).contains(&IncompleteReason::ModulePartlyIndexed {
+            module: ModuleName::worktree(),
+            indexed: 2,
+            files: 4,
+        }),
+        "{:?}",
+        reasons(&first)
+    );
+    assert_eq!(summary_of(&first, "q/C.java"), Some(Summary::Pending));
+    assert!(matches!(
+        summary_of(&first, "p/B.java"),
+        Some(Summary::Indexed { .. })
+    ));
+    assert!(settled);
+    assert_eq!(indexed(&world), 4);
+    assert!(after.completeness.is_complete(), "{:?}", reasons(&after));
+    assert!(matches!(
+        summary_of(&after, "q/D.java"),
+        Some(Summary::Indexed { .. })
+    ));
+    assert!(!block_on(service.settle()).unwrap());
+}
+
+#[test]
+fn should_read_only_the_requested_file_when_a_request_finds_it_pending() {
+    // given
+    let (world, mut service) = two_packages();
+    let first = ask(&mut service, "/w/m/p/A.java");
+    service.finish(first.id).unwrap();
+
+    // when
+    let answer = ask(&mut service, "/w/m/q/C.java");
+
+    // then
+    assert_eq!(indexed(&world), 3);
+    assert!(matches!(
+        summary_of(&answer, "q/C.java"),
+        Some(Summary::Indexed { .. })
+    ));
+    assert_eq!(summary_of(&answer, "q/D.java"), Some(Summary::Pending));
+    assert!(!answer.completeness.is_complete());
+}
+
+#[test]
+fn should_settle_from_the_disk_when_a_pending_file_changes_before_settle() {
+    // given
+    let (world, mut service) = two_packages();
+    let first = ask(&mut service, "/w/m/p/A.java");
+    service.finish(first.id).unwrap();
+    world
+        .tree
+        .write("m/q/C.java", b"class C { int longer; }")
+        .unwrap();
+
+    // when
+    block_on(service.settle()).unwrap();
+    let answer = ask(&mut service, "/w/m/q/C.java");
+
+    // then
+    let entry = answer.generation.index.get(&rel("q/C.java")).unwrap();
+    assert_eq!(entry.seen.stat.map(|s| s.size), Some(23));
+    assert!(answer.completeness.is_complete(), "{:?}", reasons(&answer));
+}
+
+#[test]
+fn should_drop_a_pending_file_from_the_count_when_it_is_deleted_before_settle() {
+    // given
+    let (world, mut service) = two_packages();
+    let first = ask(&mut service, "/w/m/p/A.java");
+    service.finish(first.id).unwrap();
+    world.tree.remove("m/q/D.java").unwrap();
+
+    // when
+    block_on(service.settle()).unwrap();
+    let answer = ask(&mut service, "/w/m/p/A.java");
+
+    // then
+    assert_eq!(indexed(&world), 3);
+    assert_eq!(summary_of(&answer, "q/D.java"), Some(Summary::Absent));
+    assert!(answer.completeness.is_complete(), "{:?}", reasons(&answer));
+}
+
+#[test]
+fn should_keep_at_most_the_cap_for_the_store_when_more_summaries_wait() {
+    // given
+    let world = World::new(&[
+        ("A.java", b"class A {}"),
+        ("B.java", b"class B {}"),
+        ("C.java", b"class C {}"),
+    ]);
+    let mut config = ServiceConfig::new("t1");
+    config.unwritten_cap = 2;
+    let mut service = world.service_with(world.tree.clone(), config);
+    let answer = ask(&mut service, "/w/m/A.java");
+    service.finish(answer.id).unwrap();
+
+    // when
+    let left = block_on(service.write_back(usize::MAX));
+
+    // then
+    assert_eq!(left, 0);
+    assert_eq!(service.ports().2.stats().entries, 2);
+    assert!(answer.completeness.is_complete(), "{:?}", reasons(&answer));
+}
+
+#[test]
+fn should_read_every_pending_file_when_sync_runs_before_settle() {
+    // given
+    let (world, mut service) = two_packages();
+    let first = ask(&mut service, "/w/m/p/A.java");
+    service.finish(first.id).unwrap();
+
+    // when
+    block_on(service.sync(&uri("/w/m/p/A.java"))).unwrap();
+    let answer = ask(&mut service, "/w/m/p/A.java");
+
+    // then
+    assert_eq!(indexed(&world), 4);
+    assert!(answer.completeness.is_complete(), "{:?}", reasons(&answer));
+    assert!(!block_on(service.settle()).unwrap());
 }
 
 #[test]

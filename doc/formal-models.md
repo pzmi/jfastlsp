@@ -202,7 +202,46 @@ the testkit's fakes, and `tests/views_machine.rs` runs the registry against a re
 - **Atomic publish** (plan §7.1) holds by construction in the shell: each generation entry carries
   its summary, so the registry's `NotStored` guard is never what stops a shell build (the store is
   only the reopen cache); the guard is exercised by the `views` driver and
-  `tests/views.rs::should_refuse_publish_when_a_named_summary_is_not_stored`.
+  `tests/views.rs::should_refuse_publish_when_a_named_summary_is_not_stored`. The model's `store`
+  is therefore the generation's own summaries, and the disk store is a cache outside the model:
+  the shell writes it after the publish (`ViewService::write_back`, IDX-09 slice 3), which
+  changes no transition and no guard.
+- **The open in two steps** (IDX-09 slice 3, plan §1.7's first useful answer). The model starts
+  with every view published (`init`); the shell's open stands for it. A view of more than
+  `ServiceConfig::open_whole` files reads only the request's directory and publishes every other
+  file as `Summary::Pending`. In model terms a pending entry is the model's entry at the listed
+  version (the listing's stat) with a racy summary (`recent: true`, reachable by a `summarise`
+  within the file's write tick, so no later stat proves it fresh), plus a **coverage gap**, which
+  the model does not contain (as with slice 2's `Summary::Gap`: coverage is outside the views
+  model). The watch was up before the listing, so any change after it raises a hint, as the model
+  assumes.
+  - **The guard is the shell's coverage rule, not the registry.** The registry alone would call
+    such a generation complete once its cookie is back. What keeps it incomplete is `count`
+    (`view_service.rs`), which counts a pending file among the files and never among the
+    indexed, and `ViewService::request`'s `indexed < files` rule, which adds
+    `ModulePartlyIndexed` to every answer from that generation. It is pinned by
+    `should_answer_partly_indexed_and_then_complete_when_the_open_defers_the_rest` and
+    `should_read_only_the_requested_file_when_a_request_finds_it_pending`, both of which fail
+    when `count` takes a pending file as indexed.
+  - **AtomicPublish** ("every summary a published generation names is stored") holds in the shell
+    only when a declared gap (`Gap`, `Pending`) counts as stored: generation 1 of a large view
+    names files with no readable summary. It is safe for the same reason `Gap` is, since a gap is
+    never read as an empty summary and always makes the answer partly indexed.
+  - **Every exit from Pending reads the file or removes it**, through the model's transitions: a
+    request's stat finds it changed (racy), so it is dirty (`requestStart`) and a build reads just
+    it; a hint for it is `deliver` of a file event; a rescan re-reads every entry a stat cannot
+    prove (`reconcileStart`), or leaves out what its listing lacks. `ViewService::settle` is the
+    exception: its file events are **made by the shell, not raised by a watcher**, so they are not
+    the model's `deliver`, which takes a queued event. They are a harmless over-approximation
+    (an extra dirty path is re-read), after which `reconcileStart`, `summarise` and `publish`
+    are the model's.
+  - No transition is added and no invariant changes, so `views.qnt` and its driver are unchanged
+    (review of 2026-11-19: writing the store after the publish is a sound refinement of
+    `store`, and Pending is a coverage gap). Pinned by `tests/view_service.rs`: the two tests
+    above and `should_settle_from_the_disk_when_a_pending_file_changes_before_settle`,
+    `should_drop_a_pending_file_from_the_count_when_it_is_deleted_before_settle` and
+    `should_read_every_pending_file_when_sync_runs_before_settle`. Letting a stat prove a pending
+    file fresh fails two of them.
 - **6, the cookie:** written into the view's root through its own watch, waited for with a
   deadline, at most two (`should_answer_from_the_new_content_when_a_write_lands_before_the_request`).
 - **7, the re-stat at the pin:** `HEAD`, the ref it names and `packed-refs`, and the index, from

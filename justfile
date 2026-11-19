@@ -302,17 +302,23 @@ bench-store corpus="small" cold="warm": _preflight
 # then jfl-application's registry over those stats: the open of a view, one request's freshness path
 # (its file's `lstat`, start, cookie back, pin with the re-stat and completeness, finish) at p50 and
 # p95, one changed file reconciled and published, and a full rescan; then the view service over the
-# real adapters (view open cold and warm, the cookie's round trip through inotify, a rescan with the
-# listing). Reports, never gates. `just bench-views medium`.
-bench-views corpus="small": _preflight
+# real adapters (each stage of an open alone; the view opened with an empty store and with a filled
+# one, first answer and whole view; the cookie's round trip through inotify; a rescan with the
+# listing). With `cold`, only the view service: three opens with an empty store, each after a
+# page-cache drop (Linux, root; it disturbs everything else on the machine). Reports, never gates.
+# `just bench-views medium`, `just bench-views medium cold`.
+bench-views corpus="small" cold="warm": _preflight
     #!/usr/bin/env bash
     set -euo pipefail
+    case {{quote(cold)}} in cold|warm) ;; *) echo "bench-views: cold must be cold or warm" >&2; exit 2;; esac
     bash scripts/bench-corpus.sh fetch {{quote(corpus)}}
     root="$(bash scripts/bench-corpus.sh path {{quote(corpus)}})"
+    if [ {{quote(cold)}} = warm ]; then
+      { printf '%s\n' "$root"; git -C "$root" ls-files -z -- '*.java'; } \
+        | {{cargo}} bench --locked -p jfl-composition --bench views
+    fi
     { printf '%s\n' "$root"; git -C "$root" ls-files -z -- '*.java'; } \
-      | {{cargo}} bench --locked -p jfl-composition --bench views
-    { printf '%s\n' "$root"; git -C "$root" ls-files -z -- '*.java'; } \
-      | {{cargo}} bench --locked -p jfl-composition --bench view_service
+      | {{cargo}} bench --locked -p jfl-composition --bench view_service -- {{quote(cold)}}
 
 # Rewrite fixtures.lock from the tree after reviewing the changed goldens (ver §4,
 # ARCH-fixtures-lock): the SHA-256 of every file under fixtures/ and each crate's tests/fixtures/.

@@ -372,24 +372,57 @@ Measured 2026-11-18 (IDX-09) on the 4 vCPU Xeon VM, one other lane running:
 
 #### The view service (IDX-09, the second half of `just bench-views`)
 
-`crates/jfl-composition/benches/view_service.rs` drives `jfl-application`'s view service over the real adapters: the fs tree (inotify), the git probe, the Java indexer and the on-disk summary store in a scratch directory. Reads, stats and the store run on the calling thread; each parse runs on a thread of its own, four at once (`ServiceConfig::parallelism`). The cookie's deadline polls the clock (the bench has no runtime timer).
-- **View open, cold:** the first request with an empty store: `statfs`, watch, the Git stat set, the listing unioned with `git ls-files`, every file read, parsed and stored, then the request's cookie and pin. One run.
-- **View open, warm:** the same with the store filled, as after a daemon restart: every file read and hashed, its summary read back. Median of three.
+`crates/jfl-composition/benches/view_service.rs` drives `jfl-application`'s view service over the real adapters: the fs tree (inotify), the git probe, the Java indexer and the on-disk summary store in a scratch directory. Every port runs its blocking work on one pool of four threads, as composition's bounded pool will (the bench has no runtime). The service keeps 16 files in flight (`ServiceConfig::parallelism`) and opens whole only views of up to 256 files (`ServiceConfig::open_whole`); `--parallelism N` and `--open-whole N` override both. The cookie's deadline polls the clock (no runtime timer).
+- **Stages:** each step of a cold open alone, over the adapters' blocking calls, on 1 and 4 threads: the listing with stats, stat, read, blake3, parse and summarise, encode, encode and write into a fresh store (in the files' order and in key order), a store miss; and one hand-off to the pool and back.
+- **View open, empty store, warm page cache:** a fresh service with an empty store, after the stages have read every file. *First answer*: the first request returns, its view opened with only its file's directory read. *Whole view published*: `settle` has read every other file and published the full syntax index. *Store written*: `write_back` has written every summary, after the publish. One run.
+- **View open, page cache dropped** (`just bench-views SIZE cold`; Linux, root): only the open above, three times, each with an empty store after `echo 3 > /proc/sys/vm/drop_caches`, which is what plan §1.7's "cold" rows mean (E1's). Nothing else runs. `--pool N` sets the pool's threads.
+- **View open, warm:** the same with the store filled (a daemon restart): every file read and hashed, its summary read back. Three runs.
 - **Cookie round trip:** 200 requests on unchanged files spread over the view, each writing its cookie into the checkout's root and waiting for inotify to deliver it; p50 and p95, and the whole request's time.
 - **Rescan with listing:** `sync`, five times: listing and `git ls-files`, every indexed file re-statted, nothing changed, published. Median.
 
-Measured 2026-11-19 (IDX-09, slice 2, after the review) on the 4 vCPU Xeon @ 2.10 GHz VM (15 GB, ext4), one other lane building (load average about 4):
+Measured 2026-11-19 (IDX-09, slice 3, after its review) on the 4 vCPU Xeon @ 2.10 GHz VM (15 GB, ext4 mounted with `discard`). The other lane was idle; the load average was 0.5 to 2.9, mostly from the bench itself. Medium is the median of three runs (each run's value in brackets), small one run of each kind.
 
-| corpus | open, cold store | open, warm store | cookie round trip (p50, p95) | whole request (p50, p95) | rescan with listing | complete |
-|:--|--:|--:|--:|--:|--:|--:|
-| small junit-framework (1,813 files) | 744 ms | 158 ms | 0.026, 0.047 ms | 0.064, 0.097 ms | 22.1 ms | 200 of 200 |
-| medium spring-framework (9,294 files) | 5,723 ms | 678 ms | 0.026, 0.050 ms | 0.073, 0.189 ms | 103.0 ms | 200 of 200 |
+| corpus | page cache dropped, empty store: first answer / whole view published | warm page cache, empty store: first answer / whole view published | store written (warm cache, from start) | warm store: first answer / whole view | cookie round trip (p50, p95) | whole request (p50, p95) | rescan with listing | complete |
+|:--|--:|--:|--:|--:|--:|--:|--:|--:|
+| small junit-framework (1,813 files) | 133 ms (141, 133, 131) / 524 ms (525, 524, 497) | 62 / 399 ms | 1,184 ms | 86–101 / 152–180 ms | 0.094, 0.215 ms | 0.343, 0.502 ms | 25.4 ms | 200 of 200 |
+| medium spring-framework (9,294 files) | **385 ms** (712, 385, 376) / **2,742 ms** (3,299, 2,742, 2,740) | 194 ms (205, 194, 191) / 2,207 ms (2,207, 2,295, 2,180) | 3.7–6.5 s | 251–358 / 592–754 ms | 0.091, 0.177 ms | 0.305, 0.505 ms | 100.0 ms | 200 of 200 |
 
-The first run, one parse at a time on the calling thread and one lane running (load 2 to 4), gave cold opens of 2,153 ms (small) and 12,847 ms (medium) and a medium rescan of 78.0 ms; the cookie and warm numbers agreed within noise.
+Against plan §1.7 on medium, where cold means after a page-cache drop (E1's runs):
+- **The first useful answer on a fresh worktree is under 2 s:** 385 ms with the page cache dropped, 194 ms warm. It is incomplete (`ModulePartlyIndexed`), as the row allows.
+- **The full syntax index, cold, on 4 cores is over its 2.5 s:** 2,742 ms with the page cache dropped. With a warm page cache it is 2,207 ms.
+  - The drop costs about 0.5 s, against E1's 0.38 s (1.42 s cold, 1.04 s warm). About 170 ms of it is before the first answer: the walk of 2,800 directories, the watch, `git` and the binary's own pages. About 300 ms is in `settle`'s 53.7 MB of reads.
+  - A pool of 6 or 8 threads, so that reads waiting on the disk overlap the parse, gave 2,603–2,818 ms (`--pool 6`, `--pool 8`, 24 files in flight), within noise of four.
+  - The rest of the gap is the parse itself: 1.90–1.97 s on four threads here, against E1's extract at about 1.04 s warm (the adapter's summary does more, `just bench-syntax`).
+  - This VM's disk sits on the host's cache, so a guest drop may not be a cold disk (`just bench-store`'s note); EVAL-05 measures CI hardware.
+- **Under a neighbour's build** (load 3 to 4) the parse alone took 2.5 s, so even the warm-cache index is over budget then.
 
-- **The cookie** costs about 0.02 ms through inotify, four thousand times inside plan §1.7's 100 ms freshness target; a request that needs a second cookie pays it twice. The 200 ms deadline (`ServiceConfig::new`) is never near.
-- **The cold open** parses four files at once: 12.8 s became 5.7 s on medium, still over plan §1.7's 2.5 s for a cold full index on 4 cores, with the reads, hashes and store writes still on one thread here and another lane building. The daemon's pool (IDX-12) runs those on the pool too; a first answer that does not wait for the whole open is on IDX-09's card. The warm open, a read and a hash per file, is what a restart pays.
-- **The rescan** is the listing (the walk, `just bench-fs`) plus `git ls-files` plus the stats of the registry's own rescan above: 78 ms on medium. The shell does not narrow a rescan with `git diff` and `status` (`changed_since`), which alone cost more (`just bench-git`: 39 ms for `status` on medium) than every stat does.
+**Where the cold open's time goes** (medium, the stages, three runs; 4 threads unless noted):
+
+| step | time | in the open |
+|:--|--:|:--|
+| watch, `HEAD` stat set, listing with stats, `git ls-files`, the request's directory, cookie, pin | about 200 ms | the first answer (the watch alone is about 100 ms: `just bench-fs`) |
+| listing with stats | 23–29 ms | once, at the open |
+| stat / read / blake3 | 7–8 / 41–46 / 8–11 ms | each file in `settle` |
+| store miss | 72–76 ms | skipped: an empty store is not asked |
+| parse and summarise | **1,919–1,926 ms** (6,681–6,951 ms on 1 thread) | each file in `settle`: the floor |
+| hand-offs to the pool | 66 µs a round trip, four per file, overlapped by 16 files in flight | about 150–250 ms over the floor |
+| publish | a copy of the index, 1.3–2 ms (the registry's own numbers above) | once |
+| encode | 71–78 ms | in `write_back`, after the publish |
+| encode and write, files' order | 590–1,546 ms (2,202–2,320 ms on 1 thread) | in `write_back`, after the publish |
+| encode and write, key order | 272–396 ms (449–474 ms on 1 thread) | the order `write_back` writes in |
+
+So with a warm page cache the whole view publishes at about the parse's floor plus the first answer's open plus the hand-offs; a dropped cache adds about 0.5 s of reads. What changed, and what each was worth (medium, warm page cache, quiet, one run each unless noted):
+- **Store writes off the publish path.** Before, each file was written to the store before the publish, from the bench's single thread: 1.5 to 3 s of a cold open. They now run after the publish (`ViewService::write_back`). The registry's atomic-publish guard is untouched: a generation holds its own summaries (slice 2), so the disk store is only the reopen cache.
+- **Every port on the pool.** Before, the reads, hashes and store calls ran on the calling thread and only the parse was parallel (a thread per parse): 5.7 s. With every port on the four-thread pool, 4 files in flight published at 3,143 ms, 8 at 2,598 ms, 16 at 2,328 ms and 32 at 2,214 ms. Each step is a hand-off to a pool thread and back (66 µs here, a parked vCPU's wake-up), so the pool needs more files in flight than threads. The default is 16; 32 was within noise of it.
+- **No store lookup when the store is empty.** A cold open's every lookup misses: 2,160–2,207 ms against 2,214–2,328 ms before (four runs).
+- **The first answer does not wait for the open.** The view opens with the request's directory (7 files here) and answers `ModulePartlyIndexed` in about 200 ms (385 ms cold). `settle` then reads the rest; a request on a file still pending reads just that file.
+- **Bytes in flight are capped** (`ServiceConfig::read_budget`, 32 MiB; a larger file is read alone), not only the count: 16 files of the 16 MiB maximum would otherwise be 256 MiB, the whole syntax-tier budget. The corpus's files never reach it (medium's mean is 6 KB), and the medium numbers did not move.
+- **The store's writes** take 1.5 to 4.3 s after the publish on this VM, more than the stages' 0.3 to 1.5 s for the same writes. The spread follows what the disk did just before (each run deletes the previous stores, and the root filesystem discards freed blocks online) and the write order: one file per entry, created and renamed under the store's lock. Neither plan row includes them, but they hold the service (`&mut self`) while they run, so a daemon writes back in slices between requests (the bench writes 256 at a time). A cheaper write (an entry pack per batch, or a writer that does not take the service) is left to the store's owner (IDX-08, DEC-03's large tier).
+
+Before slice 3 (2026-11-19, slice 2 after its review, another lane building at load about 4), the cold open read, parsed and stored every file before the first answer: 744 ms on small and 5,723 ms on medium (12,847 ms with one parse at a time, the slice's first run). The warm open (153–180 ms small, 620–737 ms medium) is unchanged within noise. The cookie round trip and the whole request now go through the pool (the file's stat, the Git stat set at the start and at the pin, and the cookie's write each hand off to it), so a request costs 0.3 ms p50 where the calling thread took 0.06 ms; that is composition's choice of where a stat runs (IDX-12), far inside plan §1.7's 100 ms freshness target.
+
+- **The cookie** costs well under 0.1 ms through inotify, more than a thousand times inside plan §1.7's 100 ms freshness target; a request that needs a second cookie pays it twice. The 200 ms deadline (`ServiceConfig::new`) is never near.
+- **The rescan** is the listing (the walk, `just bench-fs`) plus `git ls-files` plus the stats of every indexed file, 16 at a time on the pool: 96–120 ms on medium. The shell does not narrow a rescan with `git diff` and `status` (`changed_since`), which alone cost more (`just bench-git`: 39 ms for `status` on medium) than every stat does.
 
 ## Adding a suite
 

@@ -1,17 +1,24 @@
 //! The view service on the pinned corpus (IDX-09, ADR 0031): the second half of
 //! `just bench-views SIZE`.
 //!
-//! Reads the checkout's path (stdin: the path, a newline, then the tracked `.java` files, which
-//! this half ignores) and drives `jfl-application`'s view service over the real adapters: the fs
-//! tree (inotify), the git probe, the Java indexer and the on-disk summary store in a scratch
-//! directory. Reads, stats and the store run on the calling thread; each parse runs on a thread of
-//! its own, four at once (`ServiceConfig::parallelism`).
+//! Reads the checkout's path (stdin: the path, a newline, then the tracked `.java` files) and
+//! drives `jfl-application`'s view service over the real adapters: the fs tree (inotify), the git
+//! probe, the Java indexer and the on-disk summary store in a scratch directory, every port bound
+//! to one pool of four threads (what composition's bounded blocking pool does; the bench has no
+//! runtime). `--parallelism N` and `--open-whole N` override `ServiceConfig`'s, `--pool N` the
+//! pool's threads.
 //!
-//! - **View open, cold:** the first request with an empty store: filesystem check, watch, the Git
-//!   stat set, the listing unioned with `git ls-files`, every file read, parsed and stored, then
-//!   the request's own cookie and pin. One run.
-//! - **View open, warm:** the same with the store filled (a daemon restart): every file read and
-//!   hashed, its summary read back from the store. Median of three.
+//! - **Stages:** each step of a cold open alone over the adapters' blocking calls, on 1 and 4
+//!   threads (the listing, stat, read, hash, parse, encode, store write, store miss) and one
+//!   hand-off to the pool and back: where the open's time goes.
+//! - **View open, empty store, warm page cache:** a fresh service with an empty store, after the
+//!   stages have read every file. The first request's answer (the
+//!   view opened with only its file's directory read: plan §1.7's first useful answer), then
+//!   `settle` (every other file read and published: the full syntax index), then `write_back`
+//!   (the store written, after the publish). One run. With the argument `cold` (`just
+//!   bench-views SIZE cold`) only this, three times, each after a page-cache drop, as plan §1.7's
+//!   cold rows mean it (Linux, root).
+//! - **View open, warm:** the same with the store filled (a daemon restart). Three runs.
 //! - **Cookie round trip:** a request on an unchanged file writes its cookie into the checkout's
 //!   root and waits for the watcher to deliver it (plan §1.7's 100 ms freshness target); p50 and
 //!   p95 over the requests, with the whole request's time beside it.
@@ -27,7 +34,8 @@ use std::future::Future;
 use std::io::Read as _;
 use std::path::Path;
 use std::pin::pin;
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex, PoisonError, mpsc};
 use std::task::{Context, Poll, Wake, Waker};
 use std::thread::{self, Thread};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -35,15 +43,108 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use jfl_adapter_fs::{FsConfig, FsSourceTree};
 use jfl_adapter_git::{GitConfig, GitRepoProbe};
 use jfl_adapter_java::{Grammar, GrammarSpec, JavaIndexer};
-use jfl_adapter_store::{Blake3, DiskSummaryStore};
-use jfl_application::source_tree::MTime;
+use jfl_adapter_store::{Blake3, DiskSummaryStore, codec};
+use jfl_application::source_tree::{ListMode, MTime};
+use jfl_application::syntax_indexer::MAX_SOURCE_BYTES;
 use jfl_application::{
-    BlockingPool, CountingClock, Interrupted, ServiceConfig, ViewService, WallClock,
+    BlockingPool, CountingClock, Interrupted, ServiceConfig, Summary, SummaryStore as _,
+    ViewService, WallClock,
 };
-use jfl_domain::{FileUri, RelPath};
+use jfl_domain::{FileSummary, FileUri, RelPath, SyntaxInputs, SyntaxKey};
 
 /// Requests timed for the cookie round trip.
 const REQUESTS: usize = 200;
+/// Opens timed after a page-cache drop (`cold`); the median is reported.
+const COLD_RUNS: usize = 3;
+
+/// Drops the page cache, dentries and inodes (Linux, root), as E1's cold runs did (plan §1.7):
+/// the next open reads every file from the disk. On this kind of VM the host's own cache may
+/// still serve the guest's reads.
+fn drop_caches() -> bool {
+    std::fs::write("/proc/sys/vm/drop_caches", b"3\n").is_ok()
+}
+
+/// The blocking pool's threads: E1's four cores (plan §1.7).
+const POOL_THREADS: usize = 4;
+/// Store writes per [`ViewService::write_back`] call, as a daemon would slice them between
+/// requests.
+const WRITE_BACK_BUDGET: usize = 256;
+
+/// The value after `flag` on the command line.
+fn arg_after(flag: &str) -> Option<usize> {
+    let args: Vec<String> = std::env::args().collect();
+    let at = args.iter().position(|a| a == flag)?;
+    args.get(at.checked_add(1)?)?.parse().ok()
+}
+
+/// One view open: the first answer, then the rest of the view, then the store's writes.
+struct Opened {
+    service: Service,
+    first_answer: Duration,
+    first_files: usize,
+    first_indexed: usize,
+    first_complete: bool,
+    settled: Duration,
+    written: Duration,
+    files: usize,
+    complete: bool,
+}
+
+impl Opened {
+    fn line(&self) -> String {
+        format!(
+            "first answer {:.0} ms ({} of {} files indexed, complete: {}); whole view published {:.0} ms ({} files, then complete: {}); store written {:.0} ms",
+            ms(self.first_answer),
+            self.first_indexed,
+            self.first_files,
+            self.first_complete,
+            ms(self.settled),
+            self.files,
+            self.complete,
+            ms(self.written)
+        )
+    }
+}
+
+fn open(
+    store: &Path,
+    pool: &Pool,
+    config: &ServiceConfig,
+    first: &FileUri,
+) -> Result<Opened, String> {
+    let started = Instant::now();
+    let mut service = service(store, pool, config.clone())?;
+    let answer = block_on(service.request(first)).map_err(|e| e.to_string())?;
+    let first_answer = started.elapsed();
+    let first_files = answer.generation.index.len();
+    let first_indexed = answer
+        .generation
+        .index
+        .values()
+        .filter(|e| matches!(e.summary, Some(Summary::Indexed { .. })))
+        .count();
+    let first_complete = answer.completeness.is_complete();
+    service.finish(answer.id).map_err(|e| e.to_string())?;
+    block_on(service.settle()).map_err(|e| e.to_string())?;
+    let settled = started.elapsed();
+    while block_on(service.write_back(WRITE_BACK_BUDGET)) > 0 {}
+    let written = started.elapsed();
+    let answer = block_on(service.request(first)).map_err(|e| e.to_string())?;
+    let files = answer.generation.index.len();
+    let complete = answer.completeness.is_complete();
+    service.finish(answer.id).map_err(|e| e.to_string())?;
+    Ok(Opened {
+        service,
+        first_answer,
+        first_files,
+        first_indexed,
+        first_complete,
+        settled,
+        written,
+        files,
+        complete,
+    })
+}
 
 /// Runs each job on the calling thread.
 #[derive(Debug, Clone, Copy)]
@@ -59,15 +160,42 @@ impl BlockingPool for Inline {
     }
 }
 
-/// Runs each job on a thread of its own and wakes the caller when it ends: the parse of each
-/// file, so the service's `parallelism` files parse at once (composition's runtime binds the
-/// port to its bounded blocking pool; this bench has no runtime).
-#[derive(Debug, Clone, Copy)]
-struct Threads;
+type Job = Box<dyn FnOnce() + Send>;
+
+/// A fixed pool of threads taking jobs from one queue: what composition's bounded blocking pool
+/// does for every port (this bench has no runtime). Each job wakes its caller when it ends.
+#[derive(Debug, Clone)]
+struct Pool(mpsc::SyncSender<Job>);
+
+/// The pool's queue bound: far above what the service keeps in flight
+/// (`ServiceConfig::parallelism` files, each one step at a time), so a send never waits.
+const QUEUE: usize = 1024;
 
 type Slot<T> = Arc<Mutex<(Option<T>, Option<Waker>)>>;
 
-impl BlockingPool for Threads {
+impl Pool {
+    fn new(threads: usize) -> Result<Self, String> {
+        let (tx, rx) = mpsc::sync_channel::<Job>(QUEUE);
+        let rx = Arc::new(Mutex::new(rx));
+        for _ in 0..threads {
+            let rx = Arc::clone(&rx);
+            thread::Builder::new()
+                .spawn(move || {
+                    loop {
+                        let job = rx.lock().unwrap_or_else(PoisonError::into_inner).recv();
+                        match job {
+                            Ok(job) => job(),
+                            Err(_) => return,
+                        }
+                    }
+                })
+                .map_err(|e| e.to_string())?;
+        }
+        Ok(Self(tx))
+    }
+}
+
+impl BlockingPool for Pool {
     fn run<T, F>(&self, job: F) -> impl Future<Output = Result<T, Interrupted>> + Send
     where
         T: Send + 'static,
@@ -75,15 +203,15 @@ impl BlockingPool for Threads {
     {
         let slot: Slot<T> = Arc::new(Mutex::new((None, None)));
         let done = Arc::clone(&slot);
-        let spawned = thread::Builder::new().spawn(move || {
+        let sent = self.0.send(Box::new(move || {
             let out = job();
             let mut guard = done.lock().unwrap_or_else(PoisonError::into_inner);
             guard.0 = Some(out);
             if let Some(waker) = guard.1.take() {
                 waker.wake();
             }
-        });
-        let failed = spawned.is_err();
+        }));
+        let failed = sent.is_err();
         std::future::poll_fn(move |cx| {
             if failed {
                 return Poll::Ready(Err(Interrupted));
@@ -149,29 +277,33 @@ fn block_on<F: Future>(future: F) -> F::Output {
 }
 
 type Service = ViewService<
-    FsSourceTree<Inline>,
-    GitRepoProbe<Inline>,
-    JavaIndexer<Threads>,
-    DiskSummaryStore<Inline>,
+    FsSourceTree<Pool>,
+    GitRepoProbe<Pool>,
+    JavaIndexer<Pool>,
+    DiskSummaryStore<Pool>,
     SystemClock,
     Blake3,
 >;
 
-fn service(store: &Path) -> Result<Service, String> {
+fn service(store: &Path, pool: &Pool, config: ServiceConfig) -> Result<Service, String> {
     let grammar = Grammar::new(&GrammarSpec::orchard()).map_err(|e| e.to_string())?;
-    let (store, _) =
-        DiskSummaryStore::open(store, u64::MAX, Arc::new(CountingClock::default()), Inline)
-            .map_err(|e| e.to_string())?;
+    let (store, _) = DiskSummaryStore::open(
+        store,
+        u64::MAX,
+        Arc::new(CountingClock::default()),
+        pool.clone(),
+    )
+    .map_err(|e| e.to_string())?;
     Ok(ViewService::new(
         (
-            FsSourceTree::new(Inline, FsConfig::default()),
-            GitRepoProbe::new(Inline, GitConfig::default()),
-            JavaIndexer::new(grammar, Threads),
+            FsSourceTree::new(pool.clone(), FsConfig::default()),
+            GitRepoProbe::new(pool.clone(), GitConfig::default()),
+            JavaIndexer::new(grammar, pool.clone()),
             store,
         ),
         SystemClock,
         Blake3::default(),
-        ServiceConfig::new(&format!("bench{}", std::process::id())),
+        config,
     ))
 }
 
@@ -186,6 +318,162 @@ fn percentile(mut samples: Vec<Duration>, pct: usize) -> Duration {
 
 fn ms(d: Duration) -> f64 {
     d.as_secs_f64() * 1000.0
+}
+
+/// Runs `work(i)` for every `i` below `n` on `threads` threads, each taking the next index:
+/// the wall time.
+fn on_threads(threads: usize, n: usize, work: impl Fn(usize) + Sync) -> Duration {
+    let next = AtomicUsize::new(0);
+    let started = Instant::now();
+    thread::scope(|scope| {
+        for _ in 0..threads {
+            scope.spawn(|| {
+                loop {
+                    let at = next.fetch_add(1, Ordering::Relaxed);
+                    if at >= n {
+                        break;
+                    }
+                    work(at);
+                }
+            });
+        }
+    });
+    started.elapsed()
+}
+
+/// A key no file of the corpus has: the store stages write under these.
+fn synthetic_key(n: usize) -> SyntaxKey {
+    SyntaxKey::derive(
+        &SyntaxInputs {
+            file: Blake3::digest(&n.to_le_bytes()),
+            grammar: "bench",
+            grammar_version: "0",
+            summariser_version: 0,
+        },
+        Blake3::new(),
+    )
+}
+
+/// Each stage of a cold open alone, over the real adapters' blocking calls, on 1 and
+/// [`POOL_THREADS`] threads: where the open's time goes. The store stages write the corpus's
+/// summaries under synthetic keys into a fresh store, in the files' order and in key order (the
+/// order [`ViewService::write_back`] writes in), and look up keys it does not hold.
+fn stages(root: &FileUri, files: &[RelPath], scratch: &Path) -> Result<(), String> {
+    let tree = FsSourceTree::new(Inline, FsConfig::default());
+    let grammar = Grammar::new(&GrammarSpec::orchard()).map_err(|e| e.to_string())?;
+    let indexer = JavaIndexer::new(grammar, Inline);
+    let started = Instant::now();
+    let listing = tree
+        .list_blocking(root, ListMode::PathsAndStat)
+        .map_err(|e| e.to_string())?;
+    println!(
+        "  stages: the listing with stats {:.0} ms ({} files)",
+        ms(started.elapsed()),
+        listing.files.len()
+    );
+    let n = files.len();
+    let bytes: Vec<Mutex<Vec<u8>>> = files.iter().map(|_| Mutex::default()).collect();
+    let summaries: Vec<Mutex<Option<Arc<FileSummary>>>> =
+        files.iter().map(|_| Mutex::default()).collect();
+    let summary = |i: usize| {
+        summaries
+            .get(i)
+            .and_then(|s| s.lock().unwrap_or_else(PoisonError::into_inner).clone())
+    };
+    for threads in [1, POOL_THREADS] {
+        let stat = on_threads(threads, n, |i| {
+            if let Some(f) = files.get(i) {
+                let _ = tree.stat_blocking(root, f);
+            }
+        });
+        let read = on_threads(threads, n, |i| {
+            if let (Some(f), Some(slot)) = (files.get(i), bytes.get(i))
+                && let Ok(read) = tree.read_blocking(root, f, MAX_SOURCE_BYTES)
+            {
+                *slot.lock().unwrap_or_else(PoisonError::into_inner) = read.bytes;
+            }
+        });
+        let hash = on_threads(threads, n, |i| {
+            if let Some(slot) = bytes.get(i) {
+                let b = slot.lock().unwrap_or_else(PoisonError::into_inner);
+                std::hint::black_box(Blake3::digest(&b));
+            }
+        });
+        let parse = on_threads(threads, n, |i| {
+            if let (Some(slot), Some(out)) = (bytes.get(i), summaries.get(i)) {
+                let b = slot.lock().unwrap_or_else(PoisonError::into_inner).clone();
+                if let Ok(indexed) = indexer.index_blocking(&b) {
+                    *out.lock().unwrap_or_else(PoisonError::into_inner) =
+                        Some(Arc::new(indexed.summary));
+                }
+            }
+        });
+        let encode = on_threads(threads, n, |i| {
+            if let Some(s) = summary(i) {
+                std::hint::black_box(codec::encode(&synthetic_key(i), &s).ok());
+            }
+        });
+        let dir = scratch.join(format!("stages-{threads}"));
+        let _ = std::fs::remove_dir_all(&dir);
+        let (store, _) =
+            DiskSummaryStore::open(&dir, u64::MAX, Arc::new(CountingClock::default()), Inline)
+                .map_err(|e| e.to_string())?;
+        let write = on_threads(threads, n, |i| {
+            if let Some(s) = summary(i) {
+                let _ = store.put_blocking(synthetic_key(i), &s);
+            }
+        });
+        let mut sorted: Vec<(SyntaxKey, usize)> = (0..n)
+            .map(|i| (synthetic_key(i.saturating_add(n)), i))
+            .collect();
+        sorted.sort_unstable();
+        let write_sorted = on_threads(threads, n, |at| {
+            if let Some(&(key, i)) = sorted.get(at)
+                && let Some(s) = summary(i)
+            {
+                let _ = store.put_blocking(key, &s);
+            }
+        });
+        let miss = on_threads(threads, n, |i| {
+            std::hint::black_box(
+                store.get_blocking(&synthetic_key(i.saturating_add(n.saturating_mul(2)))),
+            );
+        });
+        drop(store);
+        let _ = std::fs::remove_dir_all(&dir);
+        println!(
+            "  stages, {threads} thread(s): stat {:.0} ms, read {:.0} ms, hash {:.0} ms, parse {:.0} ms, encode {:.0} ms, encode and write {:.0} ms (in key order {:.0} ms), store miss {:.0} ms",
+            ms(stat),
+            ms(read),
+            ms(hash),
+            ms(parse),
+            ms(encode),
+            ms(write),
+            ms(write_sorted),
+            ms(miss)
+        );
+    }
+    let pool = Pool::new(POOL_THREADS)?;
+    let dir = scratch.join("stages-pool");
+    let _ = std::fs::remove_dir_all(&dir);
+    let (store, _) =
+        DiskSummaryStore::open(&dir, u64::MAX, Arc::new(CountingClock::default()), pool)
+            .map_err(|e| e.to_string())?;
+    let first = summary(0).ok_or("no summary")?;
+    let key = synthetic_key(0);
+    let _ = block_on(store.put(key, Arc::clone(&first)));
+    let rounds: u32 = 1000;
+    let started = Instant::now();
+    for _ in 0..rounds {
+        let _ = block_on(store.put(key, Arc::clone(&first)));
+    }
+    println!(
+        "  stages: one hand-off to the pool and back (a store write of a held key): {:.0} us",
+        started.elapsed().as_secs_f64() * 1e6 / f64::from(rounds)
+    );
+    drop(store);
+    let _ = std::fs::remove_dir_all(&dir);
+    Ok(())
 }
 
 fn main() -> Result<(), String> {
@@ -212,35 +500,55 @@ fn main() -> Result<(), String> {
         .join(format!("bench-view-service-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&store);
     println!("bench-views (view service): {checkout}");
+    let cold = std::env::args().any(|a| a == "cold");
+    if !cold {
+        stages(&root, &files, &store)?;
+    }
 
-    let started = Instant::now();
-    let mut cold = service(&store)?;
-    let answer = block_on(cold.request(&first)).map_err(|e| e.to_string())?;
-    let open_cold = started.elapsed();
+    let threads = arg_after("--pool").unwrap_or(POOL_THREADS);
+    let pool = Pool::new(threads)?;
+    let mut config = ServiceConfig::new(&format!("bench{}", std::process::id()));
+    if let Some(width) = arg_after("--parallelism") {
+        config.parallelism = width;
+    }
+    if let Some(whole) = arg_after("--open-whole") {
+        config.open_whole = whole;
+    }
     println!(
-        "  view open, cold store: {:.0} ms ({} files; filesystem {:?}; first answer complete: {})",
-        ms(open_cold),
-        answer.generation.index.len(),
-        cold.filesystem(&answer.view),
-        answer.completeness.is_complete()
+        "  {threads} pool threads, {} files in flight, views of up to {} files opened whole",
+        config.parallelism, config.open_whole
     );
-    cold.finish(answer.id).map_err(|e| e.to_string())?;
-    drop(cold);
 
+    if cold {
+        for _ in 0..COLD_RUNS {
+            let _ = std::fs::remove_dir_all(&store);
+            if !drop_caches() {
+                return Err("dropping the page cache needs root on Linux".to_owned());
+            }
+            let opened = open(&store, &pool, &config, &first)?;
+            println!(
+                "  view open, empty store, page cache dropped: {}",
+                opened.line()
+            );
+        }
+        let _ = std::fs::remove_dir_all(&store);
+        return Ok(());
+    }
+    let opened = open(&store, &pool, &config, &first)?;
+    println!(
+        "  view open, empty store, warm page cache: {}",
+        opened.line()
+    );
     let mut warm_runs = Vec::new();
     let mut warm = None;
     for _ in 0..3 {
-        let started = Instant::now();
-        let mut service = service(&store)?;
-        let answer = block_on(service.request(&first)).map_err(|e| e.to_string())?;
-        warm_runs.push(started.elapsed());
-        service.finish(answer.id).map_err(|e| e.to_string())?;
-        warm = Some(service);
+        let opened = open(&store, &pool, &config, &first)?;
+        warm_runs.push(opened.line());
+        warm = Some(opened.service);
     }
-    println!(
-        "  view open, warm store: median {:.0} ms",
-        ms(percentile(warm_runs, 50))
-    );
+    for line in warm_runs {
+        println!("  view open, warm store: {line}");
+    }
     let mut service = warm.ok_or("no service")?;
 
     let mut round_trips = Vec::new();

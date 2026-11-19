@@ -1839,6 +1839,49 @@ but follow in lane CLI (M2). Starts after the go decision.
   snapshot). `just bench-views` measures the shell on the corpus (`doc/bench/README.md`): cookie
   round trip p50 0.026 ms, p95 0.050 ms on medium; a cold open 5.7 s with four parses at once
   (12.8 s one at a time).
+- **As built (IDX-09, slice 3, 2026-11-19: the cold open's speed, plan §1.7):** profiled first
+  (`just bench-views` now prints each stage of a cold open alone on 1 and 4 threads). On medium the
+  parse is the floor (1.92 s on four threads); a store write cost 1.5–3 s on the way to the publish
+  and did not scale across threads; the reads, hashes and store calls ran on one thread. Three
+  changes: **the store is written after the publish** (`ViewService::write_back(budget)`, four
+  writes in flight; a summary the indexer made is looked up in memory before the store until then,
+  and an empty store is not asked), which changes no model transition, since a generation holds its
+  own summaries (slice 2) and the model's `store` is them; **every port runs on the blocking pool
+  with 16 files in flight** (`ServiceConfig::parallelism`: each step is a hand-off, 66 µs on this
+  VM, so the pool needs more files in flight than threads); and **the open answers before the whole
+  view is read**: a view of more than `ServiceConfig::open_whole` (256) files reads only the
+  request's directory and publishes every other file as `Summary::Pending`, a gap under a racy
+  entry, so the answer is `ModulePartlyIndexed` and no stat proves such a file fresh;
+  `ViewService::settle` reads the rest as one build of shell-made file events. A request on a
+  pending file reads just that file. The source bytes held by the files in flight are capped
+  (`ServiceConfig::read_budget`, 32 MiB; a larger file is read alone), and so are the summaries
+  waiting for the store (`ServiceConfig::unwritten_cap`, 65,536; past it a summary is not kept for
+  the store). The open is the model's `init`. A pending entry is the model's entry at the listed
+  version with a racy summary, plus a coverage gap the model does not contain; the guard is the
+  shell's coverage rule (`count` and `indexed < files`), and atomic publish holds only when a
+  declared gap counts as stored (`doc/formal-models.md`, "The open in two steps"). No transition
+  is added, and `views.qnt` is unchanged (the review agreed). Tests: `tests/view_service.rs`
+  (`should_answer_partly_indexed_and_then_complete_when_the_open_defers_the_rest`,
+  `should_read_only_the_requested_file_when_a_request_finds_it_pending`,
+  `should_settle_from_the_disk_when_a_pending_file_changes_before_settle`,
+  `should_read_every_pending_file_when_sync_runs_before_settle`,
+  `should_store_the_summaries_only_when_written_back`,
+  `should_index_the_same_content_once_when_a_second_view_opens_before_the_write_back`,
+  `should_drop_a_pending_file_from_the_count_when_it_is_deleted_before_settle`,
+  `should_keep_at_most_the_cap_for_the_store_when_more_summaries_wait`); counting a pending file
+  as indexed, or letting a stat prove it fresh, fails two of them each. `bounded`'s limit and the
+  read budget have unit tests (removing the limit fails the first). Measured
+  (`doc/bench/README.md`, medium, the other lane idle, median of three), against 5.7 s for the
+  whole open before:
+  - after a page-cache drop (`just bench-views medium cold`, plan §1.7's meaning of cold): first
+    answer 385 ms, under the 2 s row; whole view published 2,742 ms, **over the 2.5 s row**;
+  - with a warm page cache and an empty store: 194 ms and 2,207 ms;
+  - small, after a drop: 133 ms and 524 ms.
+  Under a neighbour's build (load 3 to 4) the parse alone takes 2.5 s. **Reuse considered:** `rayon` (in the graph through
+  `jfl-bench` only) for the parse; not taken, because the ports already run their blocking work on
+  the injected `BlockingPool` (fnd §4.4), so the parallelism belongs to that pool, and
+  `jfl-application` holds no spawn grant; the shell bounds what it keeps in flight with its own
+  small `bounded` combinator, std only (`futures`' `buffer_unordered` is not in the graph).
 - **Decided (orchestrator, 2026-11-18):** not `proptest-state-machine`, whose `proptest` default
   features bring 16 crates the workspace keeps out; the reference machine is written over plain
   `proptest`, std only.
@@ -1847,12 +1890,31 @@ but follow in lane CLI (M2). Starts after the go decision.
   for a pin whose cookie deadline passes (today a deadline is `cookie_lost`, which the model's
   `dropEvent` of a cookie covers; `doc/formal-models.md`, "Not modelled yet"), model first;
   `FSEventStreamFlushSync` on macOS, which `notify` does not expose (a cookie there waits for the
-  stream's latency, bounded by the deadline); **the cold open against plan §1.7 (decided by the
-  orchestrator, 2026-11-19: before IDX-12 wires the service into `jfl lsp`, and in any case before
-  M1):** the rows "full syntax index, cold, 4 cores (medium) ≤ 2.5 s" (5.7 s today, four parses at
-  once with only the parse on the pool) and "time to first useful answer on a fresh worktree
-  (medium) < 2 s": a first request must not wait for the whole open, but answer from what is
-  indexed, incomplete, within plan §2.7's deadline while the open proceeds; an abort transition
+  stream's latency, bounded by the deadline); **the full syntax index after a page-cache drop is
+  over plan §1.7's 2.5 s on medium** (2,742 ms against 2,207 ms warm). About 170 ms of the
+  difference is before the first answer (the cold walk, the watch, `git`); about 300 ms is
+  `settle`'s reads, which a larger pool (6 or 8 threads) did not hide. The rest of the gap is the
+  parse (1.9 s on four threads, against E1's 1.04 s warm for its lighter extract): a faster
+  summary, or prefetching reads behind the parse, before M1 (orchestrator's decision of
+  2026-11-19 stands); after slice 3, **the daemon's part of the cold open (IDX-12, LSP-02 wiring):**
+  - call `settle` as soon as the request that opened a view has its answer;
+  - call `write_back` in slices between requests (each write holds the service; a medium cold
+    open's writes take 1.5–4.3 s on this VM, after the publish);
+  - bind the open's, `settle`'s and the rescan's bulk work to one bounded blocking pool;
+  - **keep a request's own stats inline by default** (decided by the orchestrator, 2026-11-19). A
+    stat costs a few µs and the pool's hand-off 66 µs: on the pool a request takes 0.3 ms p50
+    against 0.06 ms inline. A move onto the pool must show it does not regress the M1-gated
+    request rows;
+  - **never cancel `settle`, a reconcile or a request mid-flight.** A dropped future between
+    `reconcile_start` and `publish` leaves the build set, and every later reconcile fails with
+    `BuildActive`; `settle` holds that window for about 2 s on medium. Otherwise the build must
+    be aborted (with the abort transition below, model first);
+  - wire `ServiceConfig::read_budget` and `unwritten_cap` to the tier's memory budget.
+
+  Also left: a cheaper store write (one file per entry, renamed under the store's lock, costs
+  30–250 µs an entry here depending on order and what the disk did before) for IDX-08's store or
+  DEC-03's large tier; the 2.5 s row under a neighbour's load (the parse alone is 1.9 s quiet,
+  2.5 s at load 3 to 4) and on CI hardware (EVAL-05); an abort transition
   for a request that fails after `request_start` (it stays `Waiting`, holding no pin; model
   first); the reference machine never draws a racy stat; the large tier's summaries on disk
   rather than in each

@@ -9,11 +9,25 @@
 //!   `tests/view_service.rs::should_bind_a_nested_worktree_file_to_its_own_view_when_the_parent_is_open`).
 //! - **Watch, then scan, then publish.** A view is opened by checking its filesystem
 //!   ([`SourceTree::filesystem`]: only a local one is watched), watching, sweeping stale cookies
-//!   ([`SourceTree::sweep_cookies`]), reading the clock and `HEAD`'s stat set, listing, reading
-//!   and summarising every file ([`ServiceConfig::parallelism`] at once), and publishing
+//!   ([`SourceTree::sweep_cookies`]), reading `HEAD`'s stat set and the clock, listing, reading
+//!   and summarising files ([`ServiceConfig::parallelism`] at once), and publishing
 //!   generation 1 (pinned by
 //!   `tests/view_service.rs::should_hear_of_a_file_written_during_the_open_scan_when_the_watch_came_first`).
 //!   A lost watch is re-established before the rescan that may certify the view again.
+//! - **The first answer does not wait for the whole view** (plan §1.7, §2.7). A view of more
+//!   than [`ServiceConfig::open_whole`] files reads only the request's own directory at its open
+//!   and publishes every other listed file as [`Summary::Pending`]: the model's entry at the
+//!   listed version with a racy summary, which no stat proves fresh, plus a coverage gap the model
+//!   does not contain. The guard is this shell's coverage rule: `count` counts a pending file
+//!   among the files and never among the indexed, and the request's `indexed < files` rule makes
+//!   every answer from such a generation `ModulePartlyIndexed` (pinned by
+//!   `should_answer_partly_indexed_and_then_complete_when_the_open_defers_the_rest` and
+//!   `should_read_only_the_requested_file_when_a_request_finds_it_pending`). A pending file
+//!   leaves the view only by being read or removed: a request's stat finds it changed (dirty, then
+//!   a build that reads just it), a hint, a rescan, or [`ViewService::settle`], whose file events
+//!   are made by this shell (not raised by a watcher) and then reconciled and published. The
+//!   open is the model's `init`; `doc/formal-models.md` ("The open in two steps") records the
+//!   mapping, and why atomic publish holds only when a declared gap counts as stored.
 //! - **A parent never holds a nested view's file** (plan §4.2). Each view keeps the nested roots
 //!   its last scan skipped (worktrees, repositories, agent worktrees, links) and the views opened
 //!   inside it since; a hint under one is dropped. A hint for a file the view does not hold asks
@@ -49,6 +63,12 @@
 //!   summary store is the cache a view is reopened from. So the store's cap evicting an entry
 //!   between a summary and its publish never leaves the build waiting for it (IDX-08's review),
 //!   and the registry's atomic-publish guard (plan §7.1) holds by construction here (`Held`).
+//!   The store is written after the publish, by [`ViewService::write_back`], never on the way to
+//!   one: a cold open's writes cost as much as its parse (`doc/bench/README.md`). Until then a
+//!   summary the indexer made is looked up in memory before the store, so a second view of the
+//!   same content does not index it again
+//!   (`should_index_the_same_content_once_when_a_second_view_opens_before_the_write_back`), and
+//!   an empty store is not asked at all.
 //!
 //! A rescan re-stats every indexed path and lists the view; it does not narrow the work with
 //! [`RepoProbe::changed_since`], which costs more than the stats it would save (39 ms on medium
@@ -61,9 +81,10 @@
 use core::future::Future;
 use core::pin::pin;
 use core::task::Poll;
+use core::task::Waker;
 use core::time::Duration;
 use std::collections::{BTreeMap, BTreeSet};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use jfl_domain::{
     Completeness, FileSummary, FileUri, Generation, IncompleteReason, KeyHasher, ModuleName,
@@ -100,13 +121,23 @@ pub enum Summary {
     /// The file exists and has no summary: it could not be read whole, or the indexer refused
     /// it. A gap, never an empty summary (ADR 0014).
     Gap,
+    /// The file was listed when its view opened and has not been read yet: a gap like [`Gap`]
+    /// (the answer is `ModulePartlyIndexed`), whose entry is racy, so no stat proves it fresh and
+    /// it leaves the view only by being read: a request's stat, a hint, a rescan or
+    /// [`ViewService::settle`] (pinned by
+    /// `tests/view_service.rs::should_answer_partly_indexed_and_then_complete_when_the_open_defers_the_rest`).
+    ///
+    /// [`Gap`]: Summary::Gap
+    Pending,
 }
 
 impl PartialEq for Summary {
     /// By key: a key names one content (plan §5.4).
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
-            (Self::Absent, Self::Absent) | (Self::Gap, Self::Gap) => true,
+            (Self::Absent, Self::Absent)
+            | (Self::Gap, Self::Gap)
+            | (Self::Pending, Self::Pending) => true,
             (Self::Indexed { key: a, .. }, Self::Indexed { key: b, .. }) => a == b,
             _ => false,
         }
@@ -203,14 +234,33 @@ pub struct ServiceConfig {
     /// How old a cookie file must be for a view's open to sweep it as stale, far past any
     /// deadline: a live daemon's cookie lives for microseconds.
     pub cookie_sweep_age: Duration,
-    /// How many files a view's open or a reconcile reads and summarises at once, each on the
-    /// ports' blocking pool.
+    /// How many files a view's open or a reconcile stats, reads and summarises at once, each
+    /// step on the ports' blocking pool: more than the pool's threads, so a thread finishing one
+    /// step finds the next file's waiting rather than idling for the hand-off.
     pub parallelism: usize,
+    /// The most files a view opens whole. A larger view's open reads only the request's own
+    /// directory (its package) and publishes every other file as [`Summary::Pending`], so the
+    /// first answer does not wait for the whole view (plan §1.7's first useful answer, plan
+    /// §2.7); [`ViewService::settle`] reads the rest.
+    pub open_whole: usize,
+    /// The most bytes of source files read and held at once by the files in flight (each from
+    /// its read to the end of its parse); a file larger than this is read alone. The count
+    /// ([`ServiceConfig::parallelism`]) alone would let 16 files of [`MAX_SOURCE_BYTES`] be held
+    /// at once.
+    pub read_budget: usize,
+    /// The most summaries [`ViewService::write_back`] keeps waiting; past it, a new one is not
+    /// kept for the store (the store is a cache: the next open re-indexes that content), so a
+    /// daemon that never writes back holds no more than this beyond its generations.
+    pub unwritten_cap: usize,
 }
 
 impl ServiceConfig {
     /// Linux's coarse tick (10 ms), a 200 ms cookie deadline (twice plan §1.7's 100 ms
-    /// freshness target), cookies swept after a minute, four files summarised at once.
+    /// freshness target), cookies swept after a minute, sixteen files in flight (four pool
+    /// threads' worth, measured by `just bench-views`), views of up to 256 files opened whole
+    /// (about 50 ms of parsing on four cores), 32 MiB of source read at once (two of the
+    /// largest files indexed; the medium corpus's mean file is 6 KB), and 65,536 summaries
+    /// waiting to be written (about twice the large corpus's files).
     #[must_use]
     pub fn new(owner: &str) -> Self {
         Self {
@@ -218,7 +268,10 @@ impl ServiceConfig {
             cookie_deadline: Duration::from_millis(200),
             owner: owner.to_owned(),
             cookie_sweep_age: Duration::from_secs(60),
-            parallelism: 4,
+            parallelism: 16,
+            open_whole: 256,
+            read_budget: READ_BUDGET,
+            unwritten_cap: 65_536,
         }
     }
 }
@@ -287,8 +340,138 @@ struct Scan {
     nested: Vec<RelPath>,
 }
 
-/// One summarised file: its path, what the stat saw before the read, and the summary.
-type Summarised = (RelPath, FileSeen, Summary);
+/// One summarised file: its path, what the stat saw before the read, the summary, and whether
+/// the indexer made it (so the store does not hold it yet: [`ViewService::write_back`]).
+struct Summarised {
+    path: RelPath,
+    seen: FileSeen,
+    summary: Summary,
+    fresh: bool,
+}
+
+/// Summaries indexed but not yet written to the store, by key.
+type Unwritten = BTreeMap<SyntaxKey, Arc<FileSummary>>;
+
+/// Runs `job` over every item, at most `width` at once, and returns the outputs in completion
+/// order. Each job awaits the ports, whose blocking work runs on their pool; this future only
+/// polls them, so `width` jobs in flight keep that many pool threads busy.
+///
+/// Pinned by:
+/// `view_service::tests::should_keep_at_most_width_jobs_in_flight_and_return_each_output_once_when_jobs_stay_pending`.
+async fn bounded<'a, I, T, F, Fut>(width: usize, items: I, job: F) -> Vec<T>
+where
+    I: IntoIterator,
+    F: Fn(I::Item) -> Fut,
+    Fut: Future<Output = T> + Send + 'a,
+{
+    type Job<'a, T> = core::pin::Pin<Box<dyn Future<Output = T> + Send + 'a>>;
+    let width = width.max(1);
+    let mut queue = items.into_iter();
+    let mut running: Vec<Job<'a, T>> = Vec::with_capacity(width);
+    let mut done = Vec::new();
+    loop {
+        while running.len() < width {
+            let Some(item) = queue.next() else {
+                break;
+            };
+            running.push(Box::pin(job(item)));
+        }
+        if running.is_empty() {
+            return done;
+        }
+        let finished = core::future::poll_fn(|cx| {
+            let mut out = Vec::new();
+            running.retain_mut(|job| match job.as_mut().poll(cx) {
+                Poll::Ready(value) => {
+                    out.push(value);
+                    false
+                }
+                Poll::Pending => true,
+            });
+            if out.is_empty() {
+                Poll::Pending
+            } else {
+                Poll::Ready(out)
+            }
+        })
+        .await;
+        done.extend(finished);
+    }
+}
+
+/// [`ServiceConfig::read_budget`]'s default: 32 MiB.
+const READ_BUDGET: usize = 2 * MAX_SOURCE_BYTES;
+
+/// Bytes of source read and not yet parsed, bounded: a permit is granted while the total stays
+/// within the limit, or when nothing else is held (so a file larger than the limit is read
+/// alone), and every release wakes the waiting tasks.
+///
+/// Pinned by: `view_service::tests::should_hold_at_most_the_budget_when_reads_ask_for_more`.
+struct ReadBudget {
+    limit: usize,
+    state: Mutex<(usize, Vec<Waker>)>,
+}
+
+/// Bytes held of a [`ReadBudget`], returned when dropped.
+struct Permit<'a> {
+    budget: &'a ReadBudget,
+    bytes: usize,
+}
+
+impl ReadBudget {
+    fn new(limit: usize) -> Self {
+        Self {
+            limit,
+            state: Mutex::new((0, Vec::new())),
+        }
+    }
+
+    fn lock(&self) -> MutexGuard<'_, (usize, Vec<Waker>)> {
+        self.state.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    fn try_acquire(&self, bytes: usize, waker: Option<&Waker>) -> Option<Permit<'_>> {
+        let mut state = self.lock();
+        let held = state.0;
+        if held == 0 || held.saturating_add(bytes) <= self.limit {
+            state.0 = held.saturating_add(bytes);
+            return Some(Permit {
+                budget: self,
+                bytes,
+            });
+        }
+        if let Some(waker) = waker {
+            state.1.push(waker.clone());
+        }
+        None
+    }
+
+    async fn acquire(&self, bytes: usize) -> Permit<'_> {
+        core::future::poll_fn(|cx| match self.try_acquire(bytes, Some(cx.waker())) {
+            Some(permit) => Poll::Ready(permit),
+            None => Poll::Pending,
+        })
+        .await
+    }
+}
+
+impl Drop for Permit<'_> {
+    fn drop(&mut self) {
+        let waiting = {
+            let mut state = self.budget.lock();
+            state.0 = state.0.saturating_sub(self.bytes);
+            core::mem::take(&mut state.1)
+        };
+        for waker in waiting {
+            waker.wake();
+        }
+    }
+}
+
+/// How many store writes [`ViewService::write_back`] keeps in flight. One at a time, each write
+/// waits for a hand-off to a pool thread and back (66 µs on the bench VM), more than a write in
+/// key order costs; four threads also write faster than one (`just bench-views`' stages).
+const WRITERS: usize = 4;
 
 /// How many names a cookie tries before it is lost ([`cookie_name`]'s attempts).
 const COOKIE_ATTEMPTS: u32 = 3;
@@ -314,6 +497,10 @@ pub struct ViewService<T: SourceTree, P, X, S, C, H> {
     views: BTreeMap<FileUri, Opened<T::Watch>>,
     /// Each cookie waited for: (root, stamp) to its request.
     cookies: BTreeMap<(FileUri, u64), RequestId>,
+    /// Summaries the indexer made that the store does not hold yet, by key: written after
+    /// the publish, by [`ViewService::write_back`], since a generation holds its own summaries
+    /// and the store is only the cache a view reopens from.
+    unwritten: Unwritten,
     next_request: u64,
     stamp: u64,
 }
@@ -350,7 +537,7 @@ fn under(path: &RelPath, dir: &RelPath) -> bool {
 /// how many of them have a summary: fewer is `ModulePartlyIndexed`.
 fn count(published: &Published<FileSeen, GitObserved, Summary>, scan_gaps: u64) -> (u32, u32) {
     let to_u32 = |n: usize| u32::try_from(n).unwrap_or(u32::MAX);
-    let gap = |s: &Option<Summary>| matches!(s, Some(Summary::Gap) | None);
+    let gap = |s: &Option<Summary>| matches!(s, Some(Summary::Gap | Summary::Pending) | None);
     let entries = published
         .index
         .values()
@@ -371,6 +558,14 @@ const UNKNOWN: FileSeen = FileSeen {
     racy: true,
 };
 
+/// The stat a deferred file the listing did not stat (a tracked file the walk skipped) records:
+/// present, racy, so the file is read before anything is claimed of it.
+const UNLISTED: FileStat = FileStat {
+    size: 0,
+    mtime: MTime { secs: 0, nanos: 0 },
+    inode: 0,
+};
+
 /// The ports a file's read needs, borrowed: what the concurrent reads of
 /// [`ViewService::summarise_all`] share (the open watches, which are `Send` but not `Sync`,
 /// stay behind).
@@ -381,6 +576,15 @@ struct Reader<'a, T, X, S, C, H> {
     clock: &'a C,
     hasher: &'a H,
     granularity: Duration,
+    /// Summaries made since the last write-back: read before the store, so a view opened before
+    /// they are written does not index the same content again.
+    unwritten: &'a Unwritten,
+    /// The bytes of source the files in flight may hold.
+    budget: &'a ReadBudget,
+    /// The store held nothing when the reads began, so a lookup can only miss: a cold open skips
+    /// a pool round trip per file. Only this service writes the store, and only in
+    /// [`ViewService::write_back`], which no read overlaps.
+    store_empty: bool,
 }
 
 /// The stat of `root/path`: `None` when nothing is there, `Err` when it could not be read.
@@ -404,18 +608,34 @@ where
     C: WallClock,
     H: KeyHasher + Clone + Send + Sync,
 {
-    /// Reads and summarises `path`, through the store: what the stat saw before the read, and
-    /// the summary.
-    async fn summarise(&self, root: &FileUri, path: &RelPath) -> (FileSeen, Summary) {
-        let at = self.clock.now();
-        let stat = match stat_of(self.tree, root, path).await {
-            Ok(stat) => stat,
-            Err(()) => return (UNKNOWN, Summary::Gap),
+    /// Reads and summarises `path`, through the store: what the stat saw before the read, the
+    /// summary, and whether the indexer made it. `known` is a stat already taken before this
+    /// read (a listing's or a rescan's, the clock read before it): the read follows it, so it is
+    /// what the entry records; without one the file is stat'ed first.
+    async fn summarise(
+        &self,
+        root: &FileUri,
+        path: &RelPath,
+        known: Option<FileSeen>,
+    ) -> (FileSeen, Summary, bool) {
+        let seen = match known {
+            Some(seen) => seen,
+            None => {
+                let at = self.clock.now();
+                match stat_of(self.tree, root, path).await {
+                    Ok(stat) => FileSeen::new(stat, at, self.granularity),
+                    Err(()) => return (UNKNOWN, Summary::Gap, false),
+                }
+            }
         };
-        let seen = FileSeen::new(stat, at, self.granularity);
-        if stat.is_none() {
-            return (seen, Summary::Absent);
-        }
+        let Some(stat) = seen.stat else {
+            return (seen, Summary::Absent, false);
+        };
+        // Held from the read to the end of the parse, which owns the bytes.
+        let want = usize::try_from(stat.size)
+            .unwrap_or(usize::MAX)
+            .min(MAX_SOURCE_BYTES.saturating_add(4));
+        let _permit = self.budget.acquire(want).await;
         let read = match self
             .tree
             .read(root, path, MAX_SOURCE_BYTES.saturating_add(4))
@@ -423,12 +643,12 @@ where
         {
             Ok(read) => read,
             Err(SourceTreeError::NotFound | SourceTreeError::NotAFile) => {
-                return (UNKNOWN, Summary::Absent);
+                return (UNKNOWN, Summary::Absent, false);
             }
-            Err(_) => return (seen, Summary::Gap),
+            Err(_) => return (seen, Summary::Gap, false),
         };
         if read.truncated {
-            return (seen, Summary::Gap);
+            return (seen, Summary::Gap, false);
         }
         let mut digest = self.hasher.clone();
         digest.update(strip_bom(&read.bytes));
@@ -442,23 +662,38 @@ where
             },
             self.hasher.clone(),
         );
-        if let Ok(Some(summary)) = self.store.get(key).await {
+        if let Some(summary) = self.unwritten.get(&key) {
+            return (
+                seen,
+                Summary::Indexed {
+                    key,
+                    summary: Arc::clone(summary),
+                },
+                false,
+            );
+        }
+        if !self.store_empty
+            && let Ok(Some(summary)) = self.store.get(key).await
+        {
             return (
                 seen,
                 Summary::Indexed {
                     key,
                     summary: Arc::new(summary),
                 },
+                false,
             );
         }
         match self.indexer.index(read.bytes).await {
-            Ok(indexed) => {
-                let summary = Arc::new(indexed.summary);
-                // A failed write leaves the store without it: the next open re-indexes the file.
-                let _ = self.store.put(key, Arc::clone(&summary)).await;
-                (seen, Summary::Indexed { key, summary })
-            }
-            Err(_) => (seen, Summary::Gap),
+            Ok(indexed) => (
+                seen,
+                Summary::Indexed {
+                    key,
+                    summary: Arc::new(indexed.summary),
+                },
+                true,
+            ),
+            Err(_) => (seen, Summary::Gap, false),
         }
     }
 }
@@ -486,6 +721,7 @@ where
             registry: Registry::new(),
             views: BTreeMap::new(),
             cookies: BTreeMap::new(),
+            unwritten: BTreeMap::new(),
             next_request: 1,
             stamp: 0,
         }
@@ -529,14 +765,17 @@ where
         stat_of(&self.tree, root, path).await
     }
 
-    fn reader(&self) -> Reader<'_, T, X, S, C, H> {
+    fn reader<'a>(&'a self, budget: &'a ReadBudget) -> Reader<'a, T, X, S, C, H> {
         Reader {
+            budget,
             tree: &self.tree,
             indexer: &self.indexer,
             store: &self.store,
             clock: &self.clock,
             hasher: &self.hasher,
             granularity: self.config.granularity,
+            unwritten: &self.unwritten,
+            store_empty: self.store.stats().entries == 0,
         }
     }
 
@@ -583,46 +822,59 @@ where
         })
     }
 
-    /// Summarises `paths`, at most [`ServiceConfig::parallelism`] at a time: each read, hash and
-    /// parse runs on the ports' blocking pool, so a cold open uses every core it is given.
-    async fn summarise_all(&self, root: &FileUri, paths: Vec<RelPath>) -> Vec<Summarised> {
-        type Job<'a> = core::pin::Pin<Box<dyn Future<Output = Summarised> + Send + 'a>>;
-        let width = self.config.parallelism.max(1);
-        let reader = &self.reader();
-        let mut queue = paths.into_iter();
-        let mut running: Vec<Job<'_>> = Vec::with_capacity(width);
-        let mut done = Vec::new();
-        loop {
-            while running.len() < width {
-                let Some(path) = queue.next() else {
-                    break;
-                };
-                running.push(Box::pin(async move {
-                    let (seen, summary) = reader.summarise(root, &path).await;
-                    (path, seen, summary)
-                }));
-            }
-            if running.is_empty() {
-                return done;
-            }
-            let finished = core::future::poll_fn(|cx| {
-                let mut out = Vec::new();
-                running.retain_mut(|job| match job.as_mut().poll(cx) {
-                    Poll::Ready(value) => {
-                        out.push(value);
-                        false
-                    }
-                    Poll::Pending => true,
-                });
-                if out.is_empty() {
-                    Poll::Pending
-                } else {
-                    Poll::Ready(out)
+    /// Summarises `files` (each with a stat taken before, when there is one),
+    /// [`ServiceConfig::parallelism`] at a time: each stat, read, store lookup and parse runs on
+    /// the ports' blocking pool, so a cold open uses every core the pool has. The summaries the
+    /// indexer made wait in [`ViewService::write_back`]'s queue.
+    async fn summarise_all(
+        &mut self,
+        root: &FileUri,
+        files: Vec<(RelPath, Option<FileSeen>)>,
+    ) -> Vec<Summarised> {
+        let budget = ReadBudget::new(self.config.read_budget);
+        let done = {
+            let reader = &self.reader(&budget);
+            bounded(self.config.parallelism, files, |(path, known)| async move {
+                let (seen, summary, fresh) = reader.summarise(root, &path, known).await;
+                Summarised {
+                    path,
+                    seen,
+                    summary,
+                    fresh,
                 }
             })
-            .await;
-            done.extend(finished);
+            .await
+        };
+        for file in &done {
+            if let (true, Summary::Indexed { key, summary }) = (file.fresh, &file.summary)
+                && self.unwritten.len() < self.config.unwritten_cap
+            {
+                self.unwritten.insert(*key, Arc::clone(summary));
+            }
         }
+        done
+    }
+
+    /// The stat of every one of `paths`, [`ServiceConfig::parallelism`] at a time, the clock
+    /// read first (`at`): what a rescan compares with the published entries.
+    async fn stat_all(
+        &self,
+        root: &FileUri,
+        paths: Vec<RelPath>,
+        at: MTime,
+    ) -> BTreeMap<RelPath, FileSeen> {
+        let tree = &self.tree;
+        let granularity = self.config.granularity;
+        bounded(self.config.parallelism, paths, |path| async move {
+            let seen = match stat_of(tree, root, &path).await {
+                Ok(stat) => FileSeen::new(stat, at, granularity),
+                Err(()) => UNKNOWN,
+            };
+            (path, seen)
+        })
+        .await
+        .into_iter()
+        .collect()
     }
 
     /// Recounts the published generation of `root` ([`count`]).
@@ -641,7 +893,14 @@ where
     /// An open view whose watch was lost and could not be re-established is watched again here.
     /// A view opened inside another open view is a nested root of that view from now on, which
     /// rescans: whatever of it the parent indexed before it was a worktree leaves the parent.
-    async fn open(&mut self, worktree: Worktree) -> Result<(), ServiceError> {
+    ///
+    /// A view of more than [`ServiceConfig::open_whole`] files reads only the directory of
+    /// `first` (the request's file) and publishes every other listed file as
+    /// [`Summary::Pending`], racy, so the request answers without waiting for the whole view
+    /// (partly indexed) and [`ViewService::settle`] reads the rest. Each file read here was
+    /// stat'ed by the listing, after the clock: that stat comes before the read, so it is the
+    /// entry's.
+    async fn open(&mut self, worktree: Worktree, first: &RelPath) -> Result<(), ServiceError> {
         let root = worktree.root.clone();
         if let Some(opened) = self.views.get(&root) {
             if opened.watch.is_none()
@@ -671,15 +930,42 @@ where
         // here, so the sweep's error is not the open's.
         let _ = self.tree.sweep_cookies(&root, before).await;
         let git = self.git(&worktree).await;
+        let at = self.clock.now();
         let scan = self
             .scan(&worktree)
             .await
             .ok_or(ServiceError::Tree(SourceTreeError::RootNotFound))?;
-        let files: Vec<Summarised> = self
-            .summarise_all(&root, scan.paths.into_iter().collect())
+        let whole = scan.paths.len() <= self.config.open_whole;
+        let package = first.as_str().rsplit_once('/').map_or("", |(dir, _)| dir);
+        let in_package = |path: &RelPath| {
+            path.as_str()
+                .rsplit_once('/')
+                .map_or("", |(dir, _)| dir)
+                .eq(package)
+        };
+        let mut now = Vec::new();
+        let mut later = Vec::new();
+        for path in scan.paths {
+            let stat = scan.stats.get(&path).copied();
+            if whole || in_package(&path) {
+                now.push((path, stat.map(|s| self.seen(Some(s), at))));
+            } else {
+                // Listed, not read: racy, so no stat proves it fresh and a stat-less listing
+                // entry (a tracked file the walk skipped) still counts as present.
+                let seen = FileSeen {
+                    stat: Some(stat.unwrap_or(UNLISTED)),
+                    racy: true,
+                };
+                later.push((path, seen, Summary::Pending));
+            }
+        }
+        let files: Vec<(RelPath, FileSeen, Summary)> = self
+            .summarise_all(&root, now)
             .await
             .into_iter()
-            .filter(|(_, _, summary)| !matches!(summary, Summary::Absent))
+            .filter(|f| !matches!(f.summary, Summary::Absent))
+            .map(|f| (f.path, f.seen, f.summary))
+            .chain(later)
             .collect();
         let watched = watch.is_some();
         self.registry.open(root.clone(), watched, git, files)?;
@@ -911,8 +1197,11 @@ where
         let at = self.clock.now();
         let mut stats: BTreeMap<RelPath, FileSeen> = BTreeMap::new();
         let mut listed = None;
-        let mut wanted = dirty;
+        // Without a rescan only the dirty paths are read, and each read stats its file first; the
+        // build's entry for a path waiting to be read is replaced by that stat before any
+        // publish, so it needs none here.
         if rescan {
+            let mut wanted = dirty;
             if let Some(scan) = self.scan(&worktree).await {
                 for (path, stat) in scan.stats {
                     stats.insert(path, self.seen(Some(stat), at));
@@ -925,16 +1214,11 @@ where
                 }
             }
             wanted.extend(indexed);
-        }
-        for path in wanted {
-            if stats.contains_key(&path) {
-                continue;
-            }
-            let seen = match self.stat(root, &path).await {
-                Ok(stat) => self.seen(stat, at),
-                Err(()) => UNKNOWN,
-            };
-            stats.insert(path, seen);
+            wanted.retain(|path| !stats.contains_key(path));
+            wanted.sort_unstable();
+            wanted.dedup();
+            let more = self.stat_all(root, wanted, at).await;
+            stats.extend(more);
         }
         let mut todo = self.registry.reconcile_start(
             root,
@@ -947,10 +1231,17 @@ where
             self.registry.exclude(root, path)?;
             todo.remove(path);
         }
-        for (path, seen, summary) in self.summarise_all(root, todo.into_iter().collect()).await {
+        let files = todo
+            .into_iter()
+            .map(|path| {
+                let known = stats.get(&path).copied();
+                (path, known)
+            })
+            .collect();
+        for file in self.summarise_all(root, files).await {
             let stamp = self.tick();
             self.registry
-                .summarised(root, &path, seen, summary, stamp)?;
+                .summarised(root, &file.path, file.seen, file.summary, stamp)?;
         }
         self.registry.publish(root, &Held)?;
         self.recount(root);
@@ -1006,7 +1297,7 @@ where
             .ok_or(ServiceError::NotInWorktree)?;
         let root = worktree.root.clone();
         let path = file.relative_to(&root).ok_or(ServiceError::NotInWorktree)?;
-        self.open(worktree.clone()).await?;
+        self.open(worktree.clone(), &path).await?;
         if self.registry.bind(file).map(|(r, _)| r) != Some(&root) {
             // A deeper view is open for a worktree `resolve` no longer names (removed since).
             return Err(ServiceError::NotInWorktree);
@@ -1106,7 +1397,8 @@ where
             .await?
             .ok_or(ServiceError::NotInWorktree)?;
         let root = worktree.root.clone();
-        self.open(worktree).await?;
+        let path = file.relative_to(&root).ok_or(ServiceError::NotInWorktree)?;
+        self.open(worktree, &path).await?;
         self.drain().await?;
         self.registry.sync_start(&root)?;
         for _ in 0..MAX_ROUNDS {
@@ -1122,6 +1414,66 @@ where
             self.drain().await?;
         }
         Err(ServiceError::NoProgress)
+    }
+
+    /// Reads every file an open left [`Summary::Pending`] in each open view, as one build of
+    /// file events (the model's `deliver`, `reconcileStart`, `summarise` and `publish`), and
+    /// publishes it. Whether any view had one. The daemon calls it as soon as the request that
+    /// opened a view has its answer; until then that view answers partly indexed.
+    ///
+    /// Pinned by: `tests/view_service.rs::should_answer_partly_indexed_and_then_complete_when_the_open_defers_the_rest`.
+    pub async fn settle(&mut self) -> Result<bool, ServiceError> {
+        self.drain().await?;
+        let mut any = false;
+        let roots: Vec<FileUri> = self.views.keys().cloned().collect();
+        for root in roots {
+            let pending: Vec<RelPath> = self.registry.view(&root).map_or_else(Vec::new, |v| {
+                v.published
+                    .index
+                    .iter()
+                    .filter(|(_, e)| matches!(e.summary, Some(Summary::Pending)))
+                    .map(|(path, _)| path.clone())
+                    .collect()
+            });
+            if pending.is_empty() {
+                continue;
+            }
+            any = true;
+            for path in pending {
+                self.registry.deliver(Event::File {
+                    view: root.clone(),
+                    path,
+                })?;
+            }
+            self.reconcile(&root).await?;
+        }
+        Ok(any)
+    }
+
+    /// Writes at most `budget` of the summaries the indexer made to the store, [`WRITERS`] at a
+    /// time; how many wait still (at most [`ServiceConfig::unwritten_cap`] wait: past it a new
+    /// summary is not kept for the store, and the next open re-indexes its content). A generation holds its own summaries, so nothing waits
+    /// for these writes but the next open of the same content: they run after the publish (a
+    /// cold open's writes cost as much as its parse on four threads, and do not scale across
+    /// threads: `doc/bench/README.md`). A failed write leaves the store without the summary,
+    /// which the next open re-indexes.
+    ///
+    /// Pinned by: `tests/view_service.rs::should_store_the_summaries_only_when_written_back`.
+    pub async fn write_back(&mut self, budget: usize) -> usize {
+        let mut batch = Vec::new();
+        while batch.len() < budget {
+            let Some(entry) = self.unwritten.pop_first() else {
+                break;
+            };
+            batch.push(entry);
+        }
+        let store = &self.store;
+        bounded(WRITERS, batch, |(key, summary)| async move {
+            // A failed write leaves the store without it: the next open re-indexes the file.
+            let _ = store.put(key, summary).await;
+        })
+        .await;
+        self.unwritten.len()
     }
 }
 
@@ -1157,6 +1509,100 @@ mod tests {
                 entry(GitFile::Index, 1),
             ],
         })
+    }
+
+    /// Polls `future` with a no-op waker until it is ready, at most `polls` times.
+    fn run<F: Future>(future: F, polls: usize) -> Option<F::Output> {
+        let mut future = pin!(future);
+        let mut cx = core::task::Context::from_waker(Waker::noop());
+        (0..polls).find_map(|_| match future.as_mut().poll(&mut cx) {
+            Poll::Ready(out) => Some(out),
+            Poll::Pending => None,
+        })
+    }
+
+    #[test]
+    fn should_keep_at_most_width_jobs_in_flight_and_return_each_output_once_when_jobs_stay_pending()
+    {
+        // given
+        let active = core::sync::atomic::AtomicUsize::new(0);
+        let peak = core::sync::atomic::AtomicUsize::new(0);
+        let job = |i: usize| {
+            let (active, peak) = (&active, &peak);
+            let mut started = false;
+            core::future::poll_fn(move |cx| {
+                if started {
+                    active.fetch_sub(1, core::sync::atomic::Ordering::Relaxed);
+                    return Poll::Ready(i);
+                }
+                started = true;
+                let now = active.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
+                peak.fetch_max(now.saturating_add(1), core::sync::atomic::Ordering::Relaxed);
+                cx.waker().wake_by_ref();
+                Poll::Pending
+            })
+        };
+
+        // when
+        let mut out = run(bounded(3, 0..10, job), 100).unwrap();
+
+        // then
+        out.sort_unstable();
+        assert_eq!(out, (0..10).collect::<Vec<_>>());
+        assert_eq!(peak.load(core::sync::atomic::Ordering::Relaxed), 3);
+    }
+
+    #[test]
+    fn should_hold_at_most_the_budget_when_reads_ask_for_more() {
+        // given
+        let budget = ReadBudget::new(10);
+        let first = budget.try_acquire(6, None).unwrap();
+
+        // when
+        let refused = budget.try_acquire(6, None).is_none();
+        let fits = budget.try_acquire(4, None).unwrap();
+        drop(first);
+        let after = budget.try_acquire(6, None);
+        drop((fits, after));
+        let alone = budget.try_acquire(25, None);
+
+        // then
+        assert!(refused);
+        assert!(
+            alone.is_some(),
+            "a file larger than the budget is read alone"
+        );
+        drop(alone);
+        assert_eq!(budget.lock().0, 0);
+    }
+
+    #[test]
+    fn should_wake_a_waiting_read_when_a_permit_is_released() {
+        // given
+        let budget = ReadBudget::new(10);
+        let held = budget.try_acquire(8, None).unwrap();
+        let woken = Arc::new(Flag::default());
+        let waker = Waker::from(Arc::clone(&woken));
+        let mut cx = core::task::Context::from_waker(&waker);
+        let mut waiting = pin!(budget.acquire(5));
+
+        // when
+        let before = waiting.as_mut().poll(&mut cx).is_pending();
+        drop(held);
+
+        // then
+        assert!(before);
+        assert!(woken.0.load(core::sync::atomic::Ordering::Relaxed));
+        assert!(waiting.as_mut().poll(&mut cx).is_ready());
+    }
+
+    #[derive(Default)]
+    struct Flag(core::sync::atomic::AtomicBool);
+
+    impl std::task::Wake for Flag {
+        fn wake(self: Arc<Self>) {
+            self.0.store(true, core::sync::atomic::Ordering::Relaxed);
+        }
     }
 
     #[test]
