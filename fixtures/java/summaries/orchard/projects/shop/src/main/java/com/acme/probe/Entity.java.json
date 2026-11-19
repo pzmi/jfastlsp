@@ -1,0 +1,15 @@
+{
+  "package": "com.acme.probe",
+  "imports": [],
+  "declarations": [
+    {"annotations":[],"at":"4:1-7:2","id":0,"javadoc":"3:1-3:73","kind":"class","modifiers":[],"name":"Entity","name_at":"4:7-4:13","params":[],"parent":null,"permits":[],"signature":"class Entity","supertypes":[],"symbol":"com.acme.probe.Entity"},
+    {"annotations":["Column"],"at":"5:5-6:17","id":1,"javadoc":null,"kind":"field","modifiers":[],"name":"name","name_at":"6:12-6:16","params":[],"parent":0,"permits":[],"signature":"@Column(name = \"n\") String name","supertypes":[],"symbol":"com.acme.probe.Entity#name"}
+  ],
+  "references": [
+    {"at":"5:6-5:12","name":"Column","shape":"annotation"},
+    {"at":"5:13-5:17","name":"name","shape":"name"},
+    {"at":"6:5-6:11","name":"String","shape":"type"}
+  ],
+  "diagnostics": [],
+  "diagnostics_dropped": 0
+}

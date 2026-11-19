@@ -238,6 +238,7 @@ pub const fn reason_code(reason: Reason) -> &'static str {
         Reason::GeneratedMember => "generated_member",
         Reason::NoClasspath => "no_classpath",
         Reason::SyntaxError => "syntax_error",
+        Reason::SupertypeNotIndexed => "supertype_not_indexed",
     }
 }
 
@@ -470,6 +471,7 @@ mod tests {
             Reason::GeneratedMember,
             Reason::NoClasspath,
             Reason::SyntaxError,
+            Reason::SupertypeNotIndexed,
         ];
 
         // when

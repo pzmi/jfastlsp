@@ -1,0 +1,41 @@
+{
+  "schema_version": {
+    "major": 1,
+    "minor": 0
+  },
+  "position_encoding": "utf-16",
+  "query": {
+    "op": "def",
+    "uri": "file:///w/m/src/main/java/com/acme/probe/Calc.java",
+    "line": 16,
+    "col": 23
+  },
+  "view": {
+    "worktree": "file:///w/m",
+    "head": null,
+    "generation": 1
+  },
+  "target": null,
+  "exact": [],
+  "possible": [
+    {
+      "uri": "file:///w/m/src/main/java/com/acme/probe/Calc.java",
+      "range": [
+        4,
+        15,
+        4,
+        21
+      ],
+      "reason": "supertype_not_indexed",
+      "why": "a supertype outside the index may declare it"
+    }
+  ],
+  "complete": false,
+  "incomplete_because": [
+    "target not resolved from syntax"
+  ],
+  "freshness": {
+    "synced_at": 1800000000000,
+    "pending_events": 0
+  }
+}

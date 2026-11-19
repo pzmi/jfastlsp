@@ -1,0 +1,18 @@
+{
+  "package": "com.acme.shop",
+  "imports": [
+    {"at":"3:1-3:33","module":false,"name":"com.acme.billing.Billing","on_demand":false,"static":false}
+  ],
+  "declarations": [
+    {"annotations":[],"at":"6:1-10:2","id":0,"javadoc":"5:1-5:112","kind":"class","modifiers":[],"name":"Discount","name_at":"6:7-6:15","params":[],"parent":null,"permits":[],"signature":"class Discount extends Billing","supertypes":["Billing"],"symbol":"com.acme.shop.Discount"},
+    {"annotations":[],"at":"7:5-9:6","id":1,"javadoc":null,"kind":"method","modifiers":[],"name":"again","name_at":"7:13-7:18","params":[],"parent":0,"permits":[],"signature":"Billing again()","supertypes":[],"symbol":"com.acme.shop.Discount#again()"}
+  ],
+  "references": [
+    {"at":"3:25-3:32","name":"Billing","shape":"qualified_name"},
+    {"at":"6:24-6:31","name":"Billing","shape":"type"},
+    {"at":"7:5-7:12","name":"Billing","shape":"type"},
+    {"arity":0,"at":"8:16-8:24","name":"standard","shape":"call"}
+  ],
+  "diagnostics": [],
+  "diagnostics_dropped": 0
+}

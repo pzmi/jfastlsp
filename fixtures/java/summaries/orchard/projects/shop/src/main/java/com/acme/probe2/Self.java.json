@@ -1,0 +1,14 @@
+{
+  "package": "com.acme.probe2",
+  "imports": [],
+  "declarations": [
+    {"annotations":[],"at":"4:1-6:2","id":0,"javadoc":"3:1-3:90","kind":"class","modifiers":[],"name":"Self","name_at":"4:7-4:11","params":[],"parent":null,"permits":[],"signature":"class Self extends SelfBase","supertypes":["SelfBase"],"symbol":"com.acme.probe2.Self"},
+    {"annotations":[],"at":"5:5-5:16","id":1,"javadoc":null,"kind":"field","modifiers":[],"name":"other","name_at":"5:10-5:15","params":[],"parent":0,"permits":[],"signature":"Self other","supertypes":[],"symbol":"com.acme.probe2.Self#other"}
+  ],
+  "references": [
+    {"at":"4:20-4:28","name":"SelfBase","shape":"type"},
+    {"at":"5:5-5:9","name":"Self","shape":"type"}
+  ],
+  "diagnostics": [],
+  "diagnostics_dropped": 0
+}

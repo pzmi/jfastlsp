@@ -15,10 +15,13 @@
 //!   completeness and `sync`, the transitions of `formal/views.qnt`.
 //! - [`view_service`] (IDX-09): the async shell that drives the registry over the ports.
 //! - [`clock`] (IDX-09): the `WallClock` port, the time before each stat and the cookie deadline.
+//! - [`queries`] (IDX-10): definition, hover, document and workspace symbols over a pinned
+//!   generation, each answer with its completeness (plan §2.1, §2.2, §2.7).
 
 pub mod blocking;
 pub mod clock;
 pub mod hints;
+pub mod queries;
 pub mod repo_probe;
 pub mod source_tree;
 pub mod summary_store;
@@ -29,6 +32,11 @@ pub mod views;
 pub use blocking::{BlockingPool, Interrupted};
 pub use clock::WallClock;
 pub use hints::{DEFAULT_HINT_CAPACITY, HintQueue, HintSink, hint_queue};
+pub use queries::{
+    ClockDeadline, Deadline, DocumentSymbol, DocumentSymbols, FileText, Hover, HoverDeclaration,
+    Pinned, QueryCache, QueryConfig, QueryError, Sources, SymbolFilter, SymbolQuery, Symbols,
+    WorkspaceSymbol,
+};
 pub use repo_probe::{
     ChangedFiles, GitFile, GitSnapshot, GitStat, GitStep, HeadState, ObjectId, RepoId, RepoProbe,
     RepoProbeError, StatRecord, TrackedFiles, Worktree, WorktreeKind,
@@ -45,7 +53,9 @@ pub use summary_store::{
 pub use syntax_indexer::{
     GrammarId, Indexed, SyntaxDiagnostic, SyntaxIndexError, SyntaxIndexer, SyntaxProblem,
 };
-pub use view_service::{Answer, GitObserved, ServiceConfig, ServiceError, Summary, ViewService};
+pub use view_service::{
+    Answer, GitObserved, ServiceConfig, ServiceError, ServiceSources, Summary, ViewService,
+};
 pub use views::{
     Build, Cookie, Entry, Event, FileObserved, FileSeen, GitSeen, Observed, Pin, Published,
     Request, RequestId, RequestPhase, Stamp, Started, Stored, SyncPhase, SyncState, ViewError,

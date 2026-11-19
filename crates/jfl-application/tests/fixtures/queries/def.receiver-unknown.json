@@ -1,0 +1,63 @@
+{
+  "schema_version": {
+    "major": 1,
+    "minor": 0
+  },
+  "position_encoding": "utf-16",
+  "query": {
+    "op": "def",
+    "uri": "file:///w/m/src/main/java/com/acme/shop/Shop.java",
+    "line": 16,
+    "col": 35
+  },
+  "view": {
+    "worktree": "file:///w/m",
+    "head": null,
+    "generation": 1
+  },
+  "target": null,
+  "exact": [],
+  "possible": [
+    {
+      "uri": "file:///w/m/src/main/java/com/acme/billing/Billing.java",
+      "range": [
+        11,
+        19,
+        11,
+        25
+      ],
+      "reason": "receiver_type_unknown",
+      "why": "receiver type unknown"
+    },
+    {
+      "uri": "file:///w/m/src/main/java/com/acme/billing/Billing.java",
+      "range": [
+        23,
+        19,
+        23,
+        25
+      ],
+      "reason": "receiver_type_unknown",
+      "why": "receiver type unknown"
+    },
+    {
+      "uri": "file:///w/m/src/main/java/com/acme/shop/Cart.java",
+      "range": [
+        14,
+        17,
+        14,
+        23
+      ],
+      "reason": "receiver_type_unknown",
+      "why": "receiver type unknown"
+    }
+  ],
+  "complete": false,
+  "incomplete_because": [
+    "target not resolved from syntax"
+  ],
+  "freshness": {
+    "synced_at": 1800000000000,
+    "pending_events": 0
+  }
+}

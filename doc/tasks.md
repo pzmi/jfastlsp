@@ -1963,12 +1963,168 @@ but follow in lane CLI (M2). Starts after the go decision.
   Javadoc, declaring type and module, status line, and for declarations the reference summary once
   IDX-11 lands), each returning the envelope, each with its internal deadline returning a partial
   answer with `complete=false`.
+- **Reuse considered:** `fst` (ADR 0025) for `workspace/symbol`, measured and not taken (Decided
+  below); a resolver crate is SEM-01's question (DEC-04), so the syntax-only rules here are this
+  crate's own, kept small and conservative; `salsa`'s memoised queries were not weighed again
+  (IDX-09 deferred it): the one cache that pays is a generation's name tables.
+- **Defined (IDX-10, 2026-11-19, after two reviews): the allowlist of `exact`.** The principle:
+  the queries do not model Java; when syntax cannot prove a binding the answer is `possible` with
+  a reason (or nothing, with the reason it is unresolved), never `exact`, since a false `exact` is
+  the worst answer they can give. `jfl_application::queries` answers over the request's pinned
+  generation only, and a file's text (positions in the carrier's encoding, Javadoc) is read only
+  while its bytes are the ones the generation's key names; a file that moved on is left out with
+  `ModuleStale`, and a target is named only with its location. **`exact` is admitted from one
+  place, `queries::admit`, and only for constructs on its allowlist: today, the cursor on a
+  declaration's own name** (no name resolution). Every name the scope rules below bind is
+  answered `possible`, its candidate kept (`name_and_arity`, "bound by scope rules read from
+  syntax, not proved"; a proved owner's overloads `overload_not_proved`, no target) and
+  incomplete (`TargetUnresolved`). Two adversarial reviews with javac as the oracle found the
+  rules, which re-derive Java's structure from summary ranges and a text scanner, binding wrong
+  declarations with `complete=true` (the first: element keys, pattern variables, `case` labels,
+  `Outer.this`, private and interface-static inheritance, overrides by parameter types as written,
+  enum constant bodies, default-package qualified names, same-package and on-demand types, fixed;
+  the second: anonymous classes behind a nested `new`, a `[` or a lambda block in their arguments,
+  comments before element keys and `case` labels, class headers and `super(...)` resolved in the
+  body's scope, a type's own name taken before an inherited member type of that name (JLS 6.4.1),
+  annotations before a type-parameter clause). The rules now rank candidates; a construct joins
+  the allowlist only with the syntax-tree resolver (Left, first item) and a javac differential
+  test of it. The scope rules (what they offer as the one candidate):
+  - the cursor on a declaration's own name is that declaration;
+  - a type name bound by the enclosing types and their member types (a declared member type hides
+    inherited ones), the file's own top-level types, or a single-type import (one view type of
+    that qualified name; none is `TargetNotIndexed`);
+  - a qualified type name by its first segment through that same scope, then member types; a
+    first segment that is no type in scope may be a package, and a view type of the whole name is
+    then only `possible`; a default-package type is never visible from a named package;
+  - a field or method name: the innermost enclosing type with a member of that name is the owner,
+    then single static imports. Members are walked through supertypes that resolve as above (16
+    deep; cycles, a step budget and the deadline end the walk as "outside"), leaving out what Java
+    does not inherit: private members, an interface's static methods, and a package-private member
+    unless every type from the owner down to it is in its package. A supertype's method counts as
+    overridden only when its parameter types are proved the same (equal as written, and each a
+    primitive, the same view type from both files, the same import, or one package's name under
+    the same on-demand imports); otherwise both are overloads. `Object`'s, `Enum`'s and an
+    annotation's implicit methods count as outside members of those names;
+  - **bounded ambiguity:** with the owner proved, the method overloads of that name among the
+    owner's members are listed as `possible` (`overload_not_proved`), target `ambiguous (n
+    overloads)`; one applicable by arity (equal, or varargs with at least all but the last) in a
+    closed hierarchy is `exact`. Never a same-name member of another type. When a type outside the
+    index may add overloads, the answer says `TargetUnresolved`;
+  - constructors are not inherited: `new T(…)`, `this(…)`, `super(…)` and `T::new` resolve `T`,
+    then its constructors by arity; a type with none declared is its own constructor's target;
+  - a receiver: `this` is the enclosing type and `Outer.this` the enclosing type it names; a bare
+    name the extractor kept that no field in scope can be (Java reads a variable before a type,
+    JLS 6.4.2), that no local of the member may declare, and that binds to one type is that type.
+  What the rules never offer as their one candidate (always `possible`, the reason given):
+  - **the file's package and its on-demand imports** (`possible`, `name_and_arity` "same package"
+    or `import_unresolved` "on-demand import"): the package may hold a type the snapshot lacks (a
+    `Pending` file, a gap, a generated-source root) that is the one meant, and the view does not
+    tell source sets apart, so a test-only type would be offered to main code. **PROJ** (the
+    project model: source sets and their visibility, generated roots) lets these steps answer
+    `exact` again when the pin has no `Pending` file or gap, the file's source set sees exactly
+    one candidate, and no generated root of that set is missing;
+  - a site inside an anonymous class, a local class or an enum constant's body (their members are
+    not in the summary), found by scanning the member's text;
+  - a bare name that is an annotation's element key or a `case` label (unresolved: the element or
+    the selector's constant is not given), or that a local of its member may declare: a pattern
+    variable, a lambda, catch, for or resource variable, written after a type or before `->`
+    (`possible`, the field as candidate);
+  - any other receiver (`possible`: every member of that name, and arity, in the view,
+    `receiver_type_unknown`, `method_reference` for `::`, capped at 64 with `ResultsCapped`);
+  - an answer with no hit is never complete (`TargetUnresolved` when nothing else says why), and
+    a workspace-symbol query over 256 bytes says `TargetUnresolved`.
+  Three reasons were added to `IncompleteReason` (`TargetUnresolved`, `TargetNotIndexed`,
+  `ResultsCapped`) and one to `Reason` (`SupertypeNotIndexed`, wire code `supertype_not_indexed`;
+  additive, plan §6.6).
+- **As built (IDX-10, 2026-11-19):** `queries::{definition, hover, document_symbols,
+  workspace_symbols}` over an `Answer` (`Pinned`: the answer, `HEAD`, freshness), reading text
+  through `Sources` (`ViewService::sources`, 16 reads in flight), with a `Deadline` on the
+  `WallClock` (`ClockDeadline`: plan §2.7's 300 ms and 2 s, `QueryConfig`) read between files and
+  reads and inside the resolution (at its first lookup and every 64 after; each lookup is a few
+  binary searches); at the deadline the answer holds what was found and says `deadline`. A
+  generation's name tables (every declaration by simple name, the types apart, each type's members
+  by parent, the distinct names in one text for the symbol scan) are built once per generation and
+  kept in `QueryCache`, which the daemon holds beside the view service. Hover is the definition's
+  envelope plus the declarations it binds to (signature, Javadoc's words), the module (`:` before
+  M3) and `status_line()`. Workspace symbols match equal, prefix, case-insensitive prefix, then
+  camel humps (`NPE`, `NuPoEx`), best first, 100 by default (`ResultsCapped` past it);
+  constructors are left out (their type is listed). Tests: `crates/jfl-application/tests/queries.rs`
+  over `fixtures/java/projects/shop` (javac 21 compiles it; summaries in
+  `fixtures/java/summaries/orchard/projects/`), with the review's probes as fixtures
+  (`com.acme.probe`, a default-package `Map`, `shop/Discount.java`, `shop/Retry.java`): each probe
+  records where javac binds the site (read with `javap -c` from the compiled fixture) and its
+  answer must be `exact` on that declaration or not `exact` at all
+  (`should_match_javac_or_stay_possible_when_the_review_s_probes_are_asked`, 26 probes of both
+  reviews), and every declaration name and reference site of the project is asked once: only a
+  declaration's own name is `exact`
+  (`should_answer_exact_only_on_a_declaration_s_own_name_when_any_name_is_asked`). Goldens in
+  `crates/jfl-application/tests/fixtures/queries/` (36 definitions and 2 symbol answers, rendered
+  through `jfl-protocol`'s wire types by `jfl_testkit::query_golden`); unit tests of the scanner,
+  the matcher and the resolver (a supertype cycle, a spent budget, a 3,000-class hostile file cut
+  at the deadline, qualified names). Mutation checks, each made by hand and reverted, each failing
+  a test: a supertype outside the index ignored for overloads, the anonymous-class scope, a member
+  type's shadow, the field-before-type receiver rule, the cap, a silent "outside", the deadline of
+  reads and of the resolution, an unknown receiver's reason, a long symbol query, private,
+  interface-static and package-private inheritance, the textual override, an enum constant's body,
+  element keys, `case` labels, local binders, the same-package and on-demand steps made exact
+  again, default-package visibility and the first segment of a qualified name; and the gate
+  (`admit` removed, or overloads let through).
+  `just bench-queries SIZE` measures it (`doc/bench/README.md`): on medium a definition takes
+  0.21 ms p50 and 2.3 ms p95 alone, 0.55 and 2.7 ms with its request; a symbol query 9.0 ms p50
+  and 12.1 ms p95 (prefix, 100 symbols); the first query of a generation builds the tables in
+  74–82 ms. Of 200 sampled definitions at reference sites on medium none is exact (by design),
+  123 are possible only, 33 outside the index, 44 unresolved; the scope rules had called 46 exact
+  after the first review (66 in the first version).
+- **Decided (IDX-10, 2026-11-19; a narrowed mechanism, not a changed decision, per the
+  orchestrator and ADR 0038):** `workspace/symbol` scans the generation's name table rather than
+  an `fst` set: on spring-framework's 96k distinct names an `fst` build took 91–122 ms (plus
+  the sort), against a scan of 4.5 ms; the names are rebuilt with each generation, and camel humps
+  are a scan either way (plan §5.5). `fst` stays ADR 0025's choice for name sets built once and
+  kept (a library JAR's, PROJ-04).
+- **Left after IDX-10:**
+  - **the syntax-tree resolver (next; the orchestrator's design, 2026-11-19):** replace the text
+    scanner (`queries/scan.rs`) with the tree-sitter parse IDX-07 already has. Scopes, anonymous,
+    local and enum-constant bodies, lambdas, annotations, comments, `case` labels, element-value
+    pairs, class headers and type parameters are nodes there. Choose with measurements (query-time
+    parse cost on medium: p50 and p95 per file, the largest file, against the 300 ms deadline)
+    between parsing the request's file at query time and walking outward from the position, or
+    adding the scope facts to the summary at index time (a store format version and summary
+    goldens bumped, no unrelated golden rewritten). Then grow `admit`'s allowlist one construct at
+    a time (for example a bare name or `this.` receiver in a method body of a top-level or member
+    class with a known scope chain and no unrecognised enclosing node), named in one place, with a
+    test that fails when the grammar's scoping node kinds change without a decision. Resolve a
+    class header, its annotations and type parameters in the enclosing scope, `super(...)` in the
+    superclass's context, inherited member types before a type's own name (JLS 6.4.1), and
+    downgrade anything unclear. Add a javac differential test at the lowest level CI has javac (the
+    java-fixtures stage, EVAL-07): for every probe file, javac's binding (javap or the compile)
+    equals the `exact` target or the answer is not `exact`; and a small generator of nested
+    constructs (anonymous in lambda in array initialiser, comments in odd places, annotations with
+    strings). Today's probes (`com.acme.probe`, `com.acme.probe2`) are its first cases;
+  - the daemon's part (IDX-12, LSP-02): keep one `QueryCache`; resolve `HEAD` for the view;
+    fill `Freshness`; map hover to `HoverResult` (the status line, the first declaration, the
+    reference summary once IDX-11 lands); pin a request for `workspace/symbol`, which names no
+    file (the registry's requests are per file: a request on any file of the view, or a model
+    change for a view-level pin, model first);
+  - **the name tables' build after each publish (named item, due before the M1 freshness and
+    definition rows of plan §1.7 are gated; orchestrator, 2026-11-19):** the first query after a
+    publish builds the generation's tables, 74–82 ms on medium (about 290 ms projected on large),
+    more than the `jfl def` row's 50 ms p95 alone, and uninterruptible. Build them from the
+    previous generation's for the files that did not change (or keep them per file and merge), and
+    measure the first query after an edit in `just bench-queries`;
+  - source sets and generated roots (PROJ): the same-package and on-demand steps answer `exact`
+    again once the view knows them (Defined, above);
+  - the large tier (DEC-03): the snapshot assumes every summary of the generation is in memory;
+  - LSP-06 completes the 50 golden cases (38 here) and their LSP mapping; the multi-module
+    fixtures are PROJ's; BENCH-05's real-corpus cases do not exist yet;
+  - a receiver whose type a field's or parameter's declared type would give, `super.` receivers,
+    and qualified receivers (`a.B.m()`) stay unknown until the resolver (SEM-*).
 - **Accept:**
-  - [ ] component tests over the fixture projects for each operation, including bounded ambiguity never returning another type's member
-  - [ ] a deadline hit returns `complete=false` with `deadline` in `incomplete_because` (fake clock)
-  - [ ] envelope goldens for the cases chosen for M1's 50-case gate (started here, completed in LSP-06)
-  - [ ] runs on the bench corpus (small at least, `just bench`) and reports the metrics it affects; its correctness tests also run against the real-corpus cases that apply (BENCH-05)
-- **Impact:** none (internal).
+  - [x] component tests over the fixture projects for each operation, including bounded ambiguity never returning another type's member (`tests/queries.rs`: `should_list_every_overload_of_the_owner_and_no_other_type_s_when_the_overload_is_not_proved`, `should_list_inherited_overloads_and_never_another_type_s_when_a_subclass_calls_one`, and one test or more per operation)
+  - [x] a deadline hit returns `complete=false` with `deadline` in `incomplete_because` (fake clock): `should_answer_incomplete_with_deadline_when_the_clock_passes_it` (`FakeWallClock::stepping`)
+  - [x] envelope goldens for the cases chosen for M1's 50-case gate (started here, completed in LSP-06): 38 in `crates/jfl-application/tests/fixtures/queries/`, 26 of them the reviews' probes with javac's binding as the oracle
+  - [x] runs on the bench corpus (small at least, `just bench`) and reports the metrics it affects; its correctness tests also run against the real-corpus cases that apply (BENCH-05): `just bench-queries small` and `medium` (`doc/bench/README.md`); BENCH-05 has no cases yet
+- **Impact:** protocol (additive: the `supertype_not_indexed` reason code and three new
+  `incomplete_because` wordings); fixtures (the `projects/shop` corpus and its summaries).
 
 #### IDX-11: Queries: `refs`, the `possible` superset, completeness
 - **Depends on:** IDX-10. **Model:** deep. **Size:** L. **Parallel with:** IDX-12.

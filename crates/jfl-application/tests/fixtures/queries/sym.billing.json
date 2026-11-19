@@ -1,0 +1,68 @@
+{
+  "schema_version": {
+    "major": 1,
+    "minor": 0
+  },
+  "position_encoding": "utf-16",
+  "view": {
+    "worktree": "file:///w/m",
+    "head": null,
+    "generation": 1
+  },
+  "symbols": [
+    {
+      "symbol": "com.acme.billing.Billing",
+      "kind": "class",
+      "location": {
+        "uri": "file:///w/m/src/main/java/com/acme/billing/Billing.java",
+        "range": [
+          5,
+          13,
+          5,
+          20
+        ]
+      }
+    },
+    {
+      "symbol": "com.acme.shop.Obscure#Billing",
+      "kind": "field",
+      "location": {
+        "uri": "file:///w/m/src/main/java/com/acme/shop/Obscure.java",
+        "range": [
+          8,
+          26,
+          8,
+          33
+        ]
+      }
+    },
+    {
+      "symbol": "com.acme.shop.Shop#billing",
+      "kind": "field",
+      "location": {
+        "uri": "file:///w/m/src/main/java/com/acme/shop/Shop.java",
+        "range": [
+          10,
+          26,
+          10,
+          33
+        ]
+      }
+    },
+    {
+      "symbol": "com.acme.billing.PremiumBilling",
+      "kind": "class",
+      "location": {
+        "uri": "file:///w/m/src/main/java/com/acme/billing/PremiumBilling.java",
+        "range": [
+          5,
+          13,
+          5,
+          27
+        ]
+      }
+    }
+  ],
+  "complete": true,
+  "incomplete_because": []
+}

@@ -320,6 +320,19 @@ bench-views corpus="small" cold="warm": _preflight
     { printf '%s\n' "$root"; git -C "$root" ls-files -z -- '*.java'; } \
       | {{cargo}} bench --locked -p jfl-composition --bench view_service -- {{quote(cold)}}
 
+# The queries in process (IDX-10): the view service over the real adapters opens and settles the
+# pinned corpus's view, then definition and hover at reference sites picked by a fixed seed (the
+# query alone, and the request plus the query) and workspace symbols by prefix, exact name, hump
+# initials and one letter; p50 and p95, and what the definitions answered. Reports, never gates.
+# `just bench-queries medium`.
+bench-queries corpus="small": _preflight
+    #!/usr/bin/env bash
+    set -euo pipefail
+    bash scripts/bench-corpus.sh fetch {{quote(corpus)}}
+    root="$(bash scripts/bench-corpus.sh path {{quote(corpus)}})"
+    { printf '%s\n' "$root"; git -C "$root" ls-files -z -- '*.java'; } \
+      | {{cargo}} bench --locked -p jfl-composition --bench queries
+
 # Rewrite fixtures.lock from the tree after reviewing the changed goldens (ver §4,
 # ARCH-fixtures-lock): the SHA-256 of every file under fixtures/ and each crate's tests/fixtures/.
 fixtures-lock:

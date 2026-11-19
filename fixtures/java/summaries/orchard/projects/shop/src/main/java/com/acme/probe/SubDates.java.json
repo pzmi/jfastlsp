@@ -1,0 +1,22 @@
+{
+  "package": "com.acme.probe",
+  "imports": [
+    {"at":"3:1-3:22","module":false,"name":"java.sql.Date","on_demand":false,"static":false}
+  ],
+  "declarations": [
+    {"annotations":[],"at":"6:1-12:2","id":0,"javadoc":"5:1-5:97","kind":"class","modifiers":[],"name":"SubDates","name_at":"6:7-6:15","params":[],"parent":null,"permits":[],"signature":"class SubDates extends SuperDates","supertypes":["SuperDates"],"symbol":"com.acme.probe.SubDates"},
+    {"annotations":[],"at":"7:5-7:23","id":1,"javadoc":null,"kind":"method","modifiers":[],"name":"at","name_at":"7:10-7:12","params":["Date"],"parent":0,"permits":[],"signature":"void at(Date d)","supertypes":[],"symbol":"com.acme.probe.SubDates#at(Date)"},
+    {"annotations":[],"at":"9:5-11:6","id":2,"javadoc":null,"kind":"method","modifiers":[],"name":"call","name_at":"9:10-9:14","params":["java.util.Date"],"parent":0,"permits":[],"signature":"void call(java.util.Date u)","supertypes":[],"symbol":"com.acme.probe.SubDates#call(java.util.Date)"}
+  ],
+  "references": [
+    {"at":"3:17-3:21","name":"Date","shape":"qualified_name"},
+    {"at":"6:24-6:34","name":"SuperDates","shape":"type"},
+    {"at":"7:13-7:17","name":"Date","shape":"type"},
+    {"at":"9:15-9:19","name":"java","shape":"type"},
+    {"at":"9:20-9:24","name":"util","shape":"type"},
+    {"at":"9:25-9:29","name":"Date","shape":"type"},
+    {"arity":1,"at":"10:9-10:11","name":"at","shape":"call"}
+  ],
+  "diagnostics": [],
+  "diagnostics_dropped": 0
+}

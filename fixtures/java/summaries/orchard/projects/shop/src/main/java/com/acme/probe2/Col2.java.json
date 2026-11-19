@@ -1,0 +1,14 @@
+{
+  "package": "com.acme.probe2",
+  "imports": [],
+  "declarations": [
+    {"annotations":[],"at":"4:1-8:2","id":0,"javadoc":"3:1-3:40","kind":"annotation","modifiers":[],"name":"Col2","name_at":"4:12-4:16","params":[],"parent":null,"permits":[],"signature":"@interface Col2","supertypes":[],"symbol":"com.acme.probe2.Col2"},
+    {"annotations":[],"at":"5:5-5:16","id":1,"javadoc":null,"kind":"annotation_element","modifiers":[],"name":"size","name_at":"5:9-5:13","params":[],"parent":0,"permits":[],"signature":"int size()","supertypes":[],"symbol":"com.acme.probe2.Col2#size()"},
+    {"annotations":[],"at":"7:5-7:19","id":2,"javadoc":null,"kind":"annotation_element","modifiers":[],"name":"name","name_at":"7:12-7:16","params":[],"parent":0,"permits":[],"signature":"String name()","supertypes":[],"symbol":"com.acme.probe2.Col2#name()"}
+  ],
+  "references": [
+    {"at":"7:5-7:11","name":"String","shape":"type"}
+  ],
+  "diagnostics": [],
+  "diagnostics_dropped": 0
+}

@@ -1,0 +1,43 @@
+{
+  "package": "com.acme.billing",
+  "imports": [
+    {"at":"3:1-3:29","module":false,"name":"com.acme.money.Money","on_demand":false,"static":false}
+  ],
+  "declarations": [
+    {"annotations":[],"at":"6:1-44:2","id":0,"javadoc":"5:1-5:25","kind":"class","modifiers":["public"],"name":"Billing","name_at":"6:14-6:21","params":[],"parent":null,"permits":[],"signature":"public class Billing","supertypes":[],"symbol":"com.acme.billing.Billing"},
+    {"annotations":[],"at":"7:5-7:34","id":1,"javadoc":null,"kind":"field","modifiers":["static","final"],"name":"RETRIES","name_at":"7:22-7:29","params":[],"parent":0,"permits":[],"signature":"static final int RETRIES","supertypes":[],"symbol":"com.acme.billing.Billing#RETRIES"},
+    {"annotations":[],"at":"9:5-9:25","id":2,"javadoc":null,"kind":"field","modifiers":["private"],"name":"charged","name_at":"9:17-9:24","params":[],"parent":0,"permits":[],"signature":"private int charged","supertypes":[],"symbol":"com.acme.billing.Billing#charged"},
+    {"annotations":[],"at":"12:5-16:6","id":3,"javadoc":"11:5-11:40","kind":"method","modifiers":["public"],"name":"charge","name_at":"12:20-12:26","params":["Money"],"parent":0,"permits":[],"signature":"public Receipt charge(Money amount)","supertypes":[],"symbol":"com.acme.billing.Billing#charge(Money)"},
+    {"annotations":[],"at":"19:5-21:6","id":4,"javadoc":"18:5-18:47","kind":"method","modifiers":["public"],"name":"charge","name_at":"19:20-19:26","params":["Money","String"],"parent":0,"permits":[],"signature":"public Receipt charge(Money amount, String note)","supertypes":[],"symbol":"com.acme.billing.Billing#charge(Money,String)"},
+    {"annotations":[],"at":"24:5-30:6","id":5,"javadoc":"23:5-23:33","kind":"method","modifiers":["public","varargs"],"name":"charge","name_at":"24:20-24:26","params":["Money[]"],"parent":0,"permits":[],"signature":"public Receipt charge(Money... amounts)","supertypes":[],"symbol":"com.acme.billing.Billing#charge(Money[])"},
+    {"annotations":[],"at":"33:5-35:6","id":6,"javadoc":"32:5-32:47","kind":"method","modifiers":["public","static"],"name":"standard","name_at":"33:27-33:35","params":[],"parent":0,"permits":[],"signature":"public static Billing standard()","supertypes":[],"symbol":"com.acme.billing.Billing#standard()"},
+    {"annotations":[],"at":"37:5-39:6","id":7,"javadoc":null,"kind":"method","modifiers":[],"name":"retries","name_at":"37:9-37:16","params":[],"parent":0,"permits":[],"signature":"int retries()","supertypes":[],"symbol":"com.acme.billing.Billing#retries()"},
+    {"annotations":[],"at":"41:5-43:6","id":8,"javadoc":null,"kind":"method","modifiers":["private"],"name":"log","name_at":"41:18-41:21","params":["Money"],"parent":0,"permits":[],"signature":"private void log(Money amount)","supertypes":[],"symbol":"com.acme.billing.Billing#log(Money)"}
+  ],
+  "references": [
+    {"at":"3:23-3:28","name":"Money","shape":"qualified_name"},
+    {"at":"12:12-12:19","name":"Receipt","shape":"type"},
+    {"at":"12:27-12:32","name":"Money","shape":"type"},
+    {"at":"13:9-13:16","name":"charged","shape":"name"},
+    {"arity":1,"at":"14:9-14:12","name":"log","shape":"call"},
+    {"arity":1,"at":"15:20-15:27","name":"Receipt","shape":"new"},
+    {"at":"19:12-19:19","name":"Receipt","shape":"type"},
+    {"at":"19:27-19:32","name":"Money","shape":"type"},
+    {"at":"19:41-19:47","name":"String","shape":"type"},
+    {"arity":1,"at":"20:16-20:22","name":"charge","shape":"call"},
+    {"at":"24:12-24:19","name":"Receipt","shape":"type"},
+    {"at":"24:27-24:32","name":"Money","shape":"type"},
+    {"at":"25:9-25:14","name":"Money","shape":"type"},
+    {"arity":1,"at":"25:27-25:32","name":"Money","shape":"new"},
+    {"at":"26:14-26:19","name":"Money","shape":"type"},
+    {"arity":1,"at":"27:27-27:31","name":"plus","shape":"qualified_call"},
+    {"arity":2,"at":"29:16-29:22","name":"charge","shape":"call"},
+    {"at":"33:19-33:26","name":"Billing","shape":"type"},
+    {"arity":0,"at":"34:20-34:27","name":"Billing","shape":"new"},
+    {"at":"38:16-38:23","name":"RETRIES","shape":"name"},
+    {"at":"41:22-41:27","name":"Money","shape":"type"},
+    {"at":"42:9-42:16","name":"charged","shape":"name"}
+  ],
+  "diagnostics": [],
+  "diagnostics_dropped": 0
+}

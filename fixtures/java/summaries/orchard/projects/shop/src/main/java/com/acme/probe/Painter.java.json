@@ -1,0 +1,15 @@
+{
+  "package": "com.acme.probe",
+  "imports": [],
+  "declarations": [
+    {"annotations":[],"at":"4:1-15:2","id":0,"javadoc":"3:1-3:95","kind":"class","modifiers":[],"name":"Painter","name_at":"4:7-4:14","params":[],"parent":null,"permits":[],"signature":"class Painter","supertypes":[],"symbol":"com.acme.probe.Painter"},
+    {"annotations":[],"at":"5:5-5:30","id":1,"javadoc":null,"kind":"field","modifiers":["static","final"],"name":"RED","name_at":"5:22-5:25","params":[],"parent":0,"permits":[],"signature":"static final int RED","supertypes":[],"symbol":"com.acme.probe.Painter#RED"},
+    {"annotations":[],"at":"7:5-14:6","id":2,"javadoc":null,"kind":"method","modifiers":[],"name":"paint","name_at":"7:9-7:14","params":["Color"],"parent":0,"permits":[],"signature":"int paint(Color c)","supertypes":[],"symbol":"com.acme.probe.Painter#paint(Color)"}
+  ],
+  "references": [
+    {"at":"7:15-7:20","name":"Color","shape":"type"},
+    {"at":"9:18-9:21","name":"RED","shape":"name"}
+  ],
+  "diagnostics": [],
+  "diagnostics_dropped": 0
+}

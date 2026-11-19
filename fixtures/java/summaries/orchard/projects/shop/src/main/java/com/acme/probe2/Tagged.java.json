@@ -1,0 +1,13 @@
+{
+  "package": "com.acme.probe2",
+  "imports": [],
+  "declarations": [
+    {"annotations":["Marker"],"at":"4:1-7:2","id":0,"javadoc":"3:1-3:71","kind":"class","modifiers":[],"name":"Tagged","name_at":"5:7-5:13","params":[],"parent":null,"permits":[],"signature":"@Marker class Tagged","supertypes":[],"symbol":"com.acme.probe2.Tagged"},
+    {"annotations":[],"at":"6:5-6:25","id":1,"javadoc":null,"kind":"annotation","modifiers":[],"name":"Marker","name_at":"6:16-6:22","params":[],"parent":0,"permits":[],"signature":"@interface Marker","supertypes":[],"symbol":"com.acme.probe2.Tagged$Marker"}
+  ],
+  "references": [
+    {"at":"4:2-4:8","name":"Marker","shape":"annotation"}
+  ],
+  "diagnostics": [],
+  "diagnostics_dropped": 0
+}

@@ -1,0 +1,32 @@
+{
+  "package": "com.acme.shop",
+  "imports": [
+    {"at":"3:1-3:29","module":false,"name":"com.acme.money.Money","on_demand":false,"static":false}
+  ],
+  "declarations": [
+    {"annotations":[],"at":"6:1-27:2","id":0,"javadoc":"5:1-5:44","kind":"class","modifiers":["public"],"name":"Cart","name_at":"6:14-6:18","params":[],"parent":null,"permits":[],"signature":"public class Cart","supertypes":[],"symbol":"com.acme.shop.Cart"},
+    {"annotations":[],"at":"7:5-7:40","id":1,"javadoc":null,"kind":"field","modifiers":["private"],"name":"total","name_at":"7:19-7:24","params":[],"parent":0,"permits":[],"signature":"private Money total","supertypes":[],"symbol":"com.acme.shop.Cart#total"},
+    {"annotations":[],"at":"10:5-12:6","id":2,"javadoc":"9:5-9:44","kind":"method","modifiers":["public"],"name":"add","name_at":"10:17-10:20","params":["Money"],"parent":0,"permits":[],"signature":"public void add(Money price)","supertypes":[],"symbol":"com.acme.shop.Cart#add(Money)"},
+    {"annotations":[],"at":"15:5-17:6","id":3,"javadoc":"14:5-14:75","kind":"method","modifiers":["public"],"name":"charge","name_at":"15:18-15:24","params":["Money"],"parent":0,"permits":[],"signature":"public Money charge(Money amount)","supertypes":[],"symbol":"com.acme.shop.Cart#charge(Money)"},
+    {"annotations":[],"at":"20:5-22:6","id":4,"javadoc":"19:5-19:29","kind":"method","modifiers":["public"],"name":"total","name_at":"20:18-20:23","params":[],"parent":0,"permits":[],"signature":"public Money total()","supertypes":[],"symbol":"com.acme.shop.Cart#total()"},
+    {"annotations":[],"at":"24:5-26:6","id":5,"javadoc":null,"kind":"method","modifiers":[],"name":"pick","name_at":"24:11-24:15","params":["Object","Object"],"parent":0,"permits":[],"signature":"<T> T pick(T first, T second)","supertypes":[],"symbol":"com.acme.shop.Cart#pick(Object,Object)"}
+  ],
+  "references": [
+    {"at":"3:23-3:28","name":"Money","shape":"qualified_name"},
+    {"at":"7:13-7:18","name":"Money","shape":"type"},
+    {"arity":1,"at":"7:31-7:36","name":"Money","shape":"new"},
+    {"at":"10:21-10:26","name":"Money","shape":"type"},
+    {"at":"11:9-11:14","name":"total","shape":"name"},
+    {"at":"11:17-11:22","name":"total","shape":"name"},
+    {"arity":1,"at":"11:23-11:27","name":"plus","shape":"qualified_call"},
+    {"at":"15:12-15:17","name":"Money","shape":"type"},
+    {"at":"15:25-15:30","name":"Money","shape":"type"},
+    {"at":"20:12-20:17","name":"Money","shape":"type"},
+    {"at":"21:16-21:21","name":"total","shape":"name"},
+    {"at":"24:9-24:10","name":"T","shape":"type"},
+    {"at":"24:16-24:17","name":"T","shape":"type"},
+    {"at":"24:25-24:26","name":"T","shape":"type"}
+  ],
+  "diagnostics": [],
+  "diagnostics_dropped": 0
+}

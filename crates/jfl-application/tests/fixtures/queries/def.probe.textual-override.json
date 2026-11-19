@@ -1,0 +1,52 @@
+{
+  "schema_version": {
+    "major": 1,
+    "minor": 0
+  },
+  "position_encoding": "utf-16",
+  "query": {
+    "op": "def",
+    "uri": "file:///w/m/src/main/java/com/acme/probe/SubDates.java",
+    "line": 9,
+    "col": 8
+  },
+  "view": {
+    "worktree": "file:///w/m",
+    "head": null,
+    "generation": 1
+  },
+  "target": null,
+  "exact": [],
+  "possible": [
+    {
+      "uri": "file:///w/m/src/main/java/com/acme/probe/SubDates.java",
+      "range": [
+        6,
+        9,
+        6,
+        11
+      ],
+      "reason": "overload_not_proved",
+      "why": "overload not proved (owner bound by scope rules read from syntax, not proved)"
+    },
+    {
+      "uri": "file:///w/m/src/main/java/com/acme/probe/SuperDates.java",
+      "range": [
+        6,
+        9,
+        6,
+        11
+      ],
+      "reason": "overload_not_proved",
+      "why": "overload not proved (owner bound by scope rules read from syntax, not proved)"
+    }
+  ],
+  "complete": false,
+  "incomplete_because": [
+    "target not resolved from syntax"
+  ],
+  "freshness": {
+    "synced_at": 1800000000000,
+    "pending_events": 0
+  }
+}

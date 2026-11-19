@@ -1,0 +1,24 @@
+{
+  "package": "com.acme.shop",
+  "imports": [
+    {"at":"3:1-3:49","module":false,"name":"com.acme.billing.Billing.standard","on_demand":false,"static":true},
+    {"at":"5:1-5:33","module":false,"name":"com.acme.billing.Receipt","on_demand":false,"static":false},
+    {"at":"6:1-6:29","module":false,"name":"com.acme.money.Money","on_demand":false,"static":false}
+  ],
+  "declarations": [
+    {"annotations":[],"at":"8:1-14:2","id":0,"javadoc":null,"kind":"class","modifiers":["final"],"name":"Checkout","name_at":"8:13-8:21","params":[],"parent":null,"permits":[],"signature":"final class Checkout","supertypes":[],"symbol":"com.acme.shop.Checkout"},
+    {"annotations":[],"at":"9:5-9:26","id":1,"javadoc":null,"kind":"constructor","modifiers":["private"],"name":"Checkout","name_at":"9:13-9:21","params":[],"parent":0,"permits":[],"signature":"private Checkout()","supertypes":[],"symbol":"com.acme.shop.Checkout#<init>()"},
+    {"annotations":[],"at":"11:5-13:6","id":2,"javadoc":null,"kind":"method","modifiers":["static"],"name":"pay","name_at":"11:20-11:23","params":["Money"],"parent":0,"permits":[],"signature":"static Receipt pay(Money amount)","supertypes":[],"symbol":"com.acme.shop.Checkout#pay(Money)"}
+  ],
+  "references": [
+    {"at":"3:40-3:48","name":"standard","shape":"qualified_name"},
+    {"at":"5:25-5:32","name":"Receipt","shape":"qualified_name"},
+    {"at":"6:23-6:28","name":"Money","shape":"qualified_name"},
+    {"at":"11:12-11:19","name":"Receipt","shape":"type"},
+    {"at":"11:24-11:29","name":"Money","shape":"type"},
+    {"arity":0,"at":"12:16-12:24","name":"standard","shape":"call"},
+    {"arity":1,"at":"12:27-12:33","name":"charge","shape":"qualified_call"}
+  ],
+  "diagnostics": [],
+  "diagnostics_dropped": 0
+}

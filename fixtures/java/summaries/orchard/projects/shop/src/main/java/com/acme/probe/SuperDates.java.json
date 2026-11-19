@@ -1,0 +1,16 @@
+{
+  "package": "com.acme.probe",
+  "imports": [
+    {"at":"3:1-3:23","module":false,"name":"java.util.Date","on_demand":false,"static":false}
+  ],
+  "declarations": [
+    {"annotations":[],"at":"6:1-8:2","id":0,"javadoc":"5:1-5:42","kind":"class","modifiers":[],"name":"SuperDates","name_at":"6:7-6:17","params":[],"parent":null,"permits":[],"signature":"class SuperDates","supertypes":[],"symbol":"com.acme.probe.SuperDates"},
+    {"annotations":[],"at":"7:5-7:23","id":1,"javadoc":null,"kind":"method","modifiers":[],"name":"at","name_at":"7:10-7:12","params":["Date"],"parent":0,"permits":[],"signature":"void at(Date d)","supertypes":[],"symbol":"com.acme.probe.SuperDates#at(Date)"}
+  ],
+  "references": [
+    {"at":"3:18-3:22","name":"Date","shape":"qualified_name"},
+    {"at":"7:13-7:17","name":"Date","shape":"type"}
+  ],
+  "diagnostics": [],
+  "diagnostics_dropped": 0
+}

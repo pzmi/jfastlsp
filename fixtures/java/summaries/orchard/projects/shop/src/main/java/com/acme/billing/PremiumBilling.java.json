@@ -1,0 +1,21 @@
+{
+  "package": "com.acme.billing",
+  "imports": [
+    {"at":"3:1-3:29","module":false,"name":"com.acme.money.Money","on_demand":false,"static":false}
+  ],
+  "declarations": [
+    {"annotations":[],"at":"6:1-15:2","id":0,"javadoc":"5:1-5:32","kind":"class","modifiers":["public"],"name":"PremiumBilling","name_at":"6:14-6:28","params":[],"parent":null,"permits":[],"signature":"public class PremiumBilling extends Billing","supertypes":["Billing"],"symbol":"com.acme.billing.PremiumBilling"},
+    {"annotations":[],"at":"8:5-10:6","id":1,"javadoc":"7:5-7:56","kind":"method","modifiers":["public"],"name":"charge","name_at":"8:20-8:26","params":["Money","int"],"parent":0,"permits":[],"signature":"public Receipt charge(Money amount, int percent)","supertypes":[],"symbol":"com.acme.billing.PremiumBilling#charge(Money,int)"},
+    {"annotations":[],"at":"12:5-14:6","id":2,"javadoc":null,"kind":"method","modifiers":[],"name":"twice","name_at":"12:9-12:14","params":[],"parent":0,"permits":[],"signature":"int twice()","supertypes":[],"symbol":"com.acme.billing.PremiumBilling#twice()"}
+  ],
+  "references": [
+    {"at":"3:23-3:28","name":"Money","shape":"qualified_name"},
+    {"at":"6:37-6:44","name":"Billing","shape":"type"},
+    {"at":"8:12-8:19","name":"Receipt","shape":"type"},
+    {"at":"8:27-8:32","name":"Money","shape":"type"},
+    {"arity":1,"at":"9:16-9:22","name":"charge","shape":"call"},
+    {"arity":0,"at":"13:16-13:23","name":"retries","shape":"call"}
+  ],
+  "diagnostics": [],
+  "diagnostics_dropped": 0
+}

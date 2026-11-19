@@ -48,3 +48,8 @@ harness = false
 [[bench]]
 name = "view_service"
 harness = false
+
+# The queries on the bench corpus (`just bench-queries SIZE`, IDX-10); reports, never gates.
+[[bench]]
+name = "queries"
+harness = false

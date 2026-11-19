@@ -20,6 +20,7 @@ just bench-domain small            # jfl-domain's position conversions in proces
 just bench-domain-envelope         # jfl-domain's envelope assembly, completeness, summary build and API digests (divan, synthetic)
 just bench-protocol                # jfl-protocol's encode, frame decode and envelope decode of a 1k- and 10k-location response (divan, synthetic)
 just bench-fs small [cold]         # jfl-adapter-fs's walk (paths, paths and stat; 1 and 4 threads; warm, and cold only when asked: it drops the page cache) and a watch's start (divan), after checking the listing is git ls-files' set
+just bench-queries medium          # jfl-application's definition, hover and workspace symbols over the view service on the corpus (IDX-10)
 just bench-lsp                     # jfl-adapter-lsp's round trip of one request through a session in memory, and a 1k- and 10k-location answer on the typed path and through a JSON value (divan, synthetic)
 ```
 
@@ -423,6 +424,27 @@ Before slice 3 (2026-11-19, slice 2 after its review, another lane building at l
 
 - **The cookie** costs well under 0.1 ms through inotify, more than a thousand times inside plan §1.7's 100 ms freshness target; a request that needs a second cookie pays it twice. The 200 ms deadline (`ServiceConfig::new`) is never near.
 - **The rescan** is the listing (the walk, `just bench-fs`) plus `git ls-files` plus the stats of every indexed file, 16 at a time on the pool: 96–120 ms on medium. The shell does not narrow a rescan with `git diff` and `status` (`changed_since`), which alone cost more (`just bench-git`: 39 ms for `status` on medium) than every stat does.
+
+### The queries (IDX-10, `just bench-queries`)
+
+`crates/jfl-composition/benches/queries.rs` opens and settles the corpus's view through the view service over the real adapters (as `view_service.rs` does: four pool threads, a scratch store), then measures each query over the published generation:
+- **The first query of a generation** builds its name tables (`QueryCache`: every declaration by simple name, the types apart, each type's members by parent, the distinct names laid out for the symbol scan): what the first query after each publish pays.
+- **Definition and hover** at 200 reference sites picked by a fixed seed from the view's summaries: the query alone (the request already pinned), and the request plus the query (stat, cookie through inotify, pin, query; plan §1.7's `jfl def` row adds the carrier's framing and IPC to this). The tally says what the definitions answered.
+- **Workspace symbols** for 50 type names picked by the same seed: their first three letters, the whole names, their humps' initials, one letter; and the prefixes with a limit of one, which leaves the scan and a single file read (the rest of a default answer, 100 symbols, is the reads of their files' text, checked against the generation's keys).
+
+Measured 2026-11-19 (IDX-10, as committed: resolved names gated to `possible`) on the 4 vCPU Xeon @ 2.10 GHz VM, the other lane idle, load 0.3 to 0.6; three runs of each corpus, the median run's numbers (the others within 0.3 ms on definition and 1.5 ms on symbols); the other symbol kinds were not rerun after the gate, which does not touch them (last run: limit 1 4.6, 6.5 / exact 3.7, 8.4 / humps 4.8, 11.0 / one letter 9.9, 13.3 ms on medium):
+
+| corpus | name tables built | definition alone (p50, p95) | request and definition (p50, p95) | hover alone (p50, p95) | symbols, prefix (p50, p95) |
+|:--|--:|--:|--:|--:|--:|
+| small junit-framework (1,813 files) | 10.9 ms | 0.17, 0.60 ms | 0.51, 1.09 ms | 0.16, 0.64 ms | 3.9, 5.1 ms |
+| medium spring-framework (9,294 files) | 79.2 ms (74–82) | 0.21, 2.30 ms | 0.55, 2.67 ms | 0.18, 2.23 ms | 9.0, 12.1 ms |
+
+What the 200 definitions at reference sites answered (the same picks every run): small 0 exact, 125 possible only, 32 outside the index, 43 unresolved; medium 0, 123, 33, 44. No reference site is on the allowlist of `exact` (only a declaration's own name is), so none is `exact` by design until the syntax-tree resolver; the scope rules' candidate is among the `possible` hits. Before the gate the rules called 46 of the medium sites (66 of small) exact, and the first version 66 (80); two reviews with javac as the oracle showed the rules wrong on constructs they misread.
+
+Against plan §1.7 (the rows measured end to end through a carrier from M1; these are the in-process floor):
+- **`jfl def` / `jfl hover`, warm (medium), p50 < 20 ms, p95 < 50 ms:** the request and the query take 0.55 ms p50 and 2.7 ms p95. The first query after a publish adds the tables' build, 74–82 ms on medium, which alone is over the p95: an incremental build from the previous generation is a named item on the card, due before the M1 freshness and definition rows are gated.
+- **`jfl sym` prefix query, warm (large), p95 < 50 ms:** 12.1 ms p95 on medium for a default answer of 100 symbols, about half of it the reads of the listed symbols' files; the scan grows with the distinct names (96k identifiers on medium), so large (3.6 times the files) projects to about 25–35 ms. Not measured on large here (the corpus is not cached in this sandbox).
+- **`fst` was weighed for the symbol scan** (ADR 0025) in a one-off measurement outside the repository on the medium corpus's 96,046 distinct identifiers: a set built in 91–122 ms (plus 7–16 ms to sort the names first), against prefix queries of 0.13 ms where a linear prefix-and-subsequence scan takes 3.6 ms. The names are rebuilt with every generation, so the build would land on the first query after each publish, and the camel-hump search the card asks for is not a prefix or a Levenshtein automaton: not taken (the card's `Decided`).
 
 ## Adding a suite
 

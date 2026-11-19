@@ -1,0 +1,31 @@
+{
+  "schema_version": {
+    "major": 1,
+    "minor": 0
+  },
+  "position_encoding": "utf-16",
+  "view": {
+    "worktree": "file:///w/m",
+    "head": null,
+    "generation": 1
+  },
+  "symbols": [
+    {
+      "symbol": "com.acme.billing.Billing",
+      "kind": "class",
+      "location": {
+        "uri": "file:///w/m/src/main/java/com/acme/billing/Billing.java",
+        "range": [
+          5,
+          13,
+          5,
+          20
+        ]
+      }
+    }
+  ],
+  "complete": false,
+  "incomplete_because": [
+    "results capped at 1"
+  ]
+}

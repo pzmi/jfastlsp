@@ -1,0 +1,16 @@
+{
+  "package": "com.acme.probe2",
+  "imports": [],
+  "declarations": [
+    {"annotations":[],"at":"4:1-15:2","id":0,"javadoc":"3:1-3:39","kind":"class","modifiers":[],"name":"Painter2","name_at":"4:7-4:15","params":[],"parent":null,"permits":[],"signature":"class Painter2","supertypes":[],"symbol":"com.acme.probe2.Painter2"},
+    {"annotations":[],"at":"5:5-5:32","id":1,"javadoc":null,"kind":"field","modifiers":["static","final"],"name":"GREEN","name_at":"5:22-5:27","params":[],"parent":0,"permits":[],"signature":"static final int GREEN","supertypes":[],"symbol":"com.acme.probe2.Painter2#GREEN"},
+    {"annotations":[],"at":"7:5-14:6","id":2,"javadoc":null,"kind":"method","modifiers":[],"name":"paint","name_at":"7:9-7:14","params":["Hue"],"parent":0,"permits":[],"signature":"int paint(Hue h)","supertypes":[],"symbol":"com.acme.probe2.Painter2#paint(Hue)"}
+  ],
+  "references": [
+    {"at":"7:15-7:18","name":"Hue","shape":"type"},
+    {"at":"9:18-9:21","name":"RED","shape":"name"},
+    {"at":"9:43-9:48","name":"GREEN","shape":"name"}
+  ],
+  "diagnostics": [],
+  "diagnostics_dropped": 0
+}

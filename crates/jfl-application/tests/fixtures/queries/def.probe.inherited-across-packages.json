@@ -1,0 +1,41 @@
+{
+  "schema_version": {
+    "major": 1,
+    "minor": 0
+  },
+  "position_encoding": "utf-16",
+  "query": {
+    "op": "def",
+    "uri": "file:///w/m/src/main/java/com/acme/shop/Discount.java",
+    "line": 7,
+    "col": 15
+  },
+  "view": {
+    "worktree": "file:///w/m",
+    "head": null,
+    "generation": 1
+  },
+  "target": null,
+  "exact": [],
+  "possible": [
+    {
+      "uri": "file:///w/m/src/main/java/com/acme/billing/Billing.java",
+      "range": [
+        32,
+        26,
+        32,
+        34
+      ],
+      "reason": "name_and_arity",
+      "why": "matched by name and arity (bound by scope rules read from syntax, not proved)"
+    }
+  ],
+  "complete": false,
+  "incomplete_because": [
+    "target not resolved from syntax"
+  ],
+  "freshness": {
+    "synced_at": 1800000000000,
+    "pending_events": 0
+  }
+}

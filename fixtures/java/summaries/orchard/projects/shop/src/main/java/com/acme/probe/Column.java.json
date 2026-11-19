@@ -1,0 +1,13 @@
+{
+  "package": "com.acme.probe",
+  "imports": [],
+  "declarations": [
+    {"annotations":[],"at":"4:1-6:2","id":0,"javadoc":"3:1-3:79","kind":"annotation","modifiers":[],"name":"Column","name_at":"4:12-4:18","params":[],"parent":null,"permits":[],"signature":"@interface Column","supertypes":[],"symbol":"com.acme.probe.Column"},
+    {"annotations":[],"at":"5:5-5:19","id":1,"javadoc":null,"kind":"annotation_element","modifiers":[],"name":"name","name_at":"5:12-5:16","params":[],"parent":0,"permits":[],"signature":"String name()","supertypes":[],"symbol":"com.acme.probe.Column#name()"}
+  ],
+  "references": [
+    {"at":"5:5-5:11","name":"String","shape":"type"}
+  ],
+  "diagnostics": [],
+  "diagnostics_dropped": 0
+}

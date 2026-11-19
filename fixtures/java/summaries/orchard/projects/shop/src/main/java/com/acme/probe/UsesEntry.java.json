@@ -1,0 +1,19 @@
+{
+  "package": "com.acme.probe",
+  "imports": [
+    {"at":"3:1-3:22","module":false,"name":"java.util.Map","on_demand":false,"static":false}
+  ],
+  "declarations": [
+    {"annotations":[],"at":"6:1-8:2","id":0,"javadoc":"5:1-5:88","kind":"class","modifiers":[],"name":"UsesEntry","name_at":"6:7-6:16","params":[],"parent":null,"permits":[],"signature":"class UsesEntry","supertypes":[],"symbol":"com.acme.probe.UsesEntry"},
+    {"annotations":[],"at":"7:5-7:33","id":1,"javadoc":null,"kind":"field","modifiers":[],"name":"e","name_at":"7:31-7:32","params":[],"parent":0,"permits":[],"signature":"Map.Entry<String, String> e","supertypes":[],"symbol":"com.acme.probe.UsesEntry#e"}
+  ],
+  "references": [
+    {"at":"3:18-3:21","name":"Map","shape":"qualified_name"},
+    {"at":"7:5-7:8","name":"Map","shape":"type"},
+    {"at":"7:9-7:14","name":"Entry","shape":"type"},
+    {"at":"7:15-7:21","name":"String","shape":"type"},
+    {"at":"7:23-7:29","name":"String","shape":"type"}
+  ],
+  "diagnostics": [],
+  "diagnostics_dropped": 0
+}

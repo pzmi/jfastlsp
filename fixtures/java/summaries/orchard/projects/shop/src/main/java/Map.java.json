@@ -1,0 +1,11 @@
+{
+  "package": null,
+  "imports": [],
+  "declarations": [
+    {"annotations":[],"at":"2:1-5:2","id":0,"javadoc":"1:1-1:67","kind":"class","modifiers":["public"],"name":"Map","name_at":"2:14-2:17","params":[],"parent":null,"permits":[],"signature":"public class Map","supertypes":[],"symbol":"Map"},
+    {"annotations":[],"at":"4:5-4:33","id":1,"javadoc":"3:5-3:53","kind":"class","modifiers":["public","static"],"name":"Entry","name_at":"4:25-4:30","params":[],"parent":0,"permits":[],"signature":"public static class Entry","supertypes":[],"symbol":"Map$Entry"}
+  ],
+  "references": [],
+  "diagnostics": [],
+  "diagnostics_dropped": 0
+}

@@ -1,0 +1,26 @@
+{
+  "package": "com.acme.shop",
+  "imports": [
+    {"at":"3:1-3:33","module":false,"name":"com.acme.billing.Billing","on_demand":false,"static":false},
+    {"at":"4:1-4:33","module":false,"name":"com.acme.billing.Receipt","on_demand":false,"static":false},
+    {"at":"5:1-5:29","module":false,"name":"com.acme.money.Money","on_demand":false,"static":false}
+  ],
+  "declarations": [
+    {"annotations":[],"at":"8:1-14:2","id":0,"javadoc":"7:1-7:98","kind":"class","modifiers":["final"],"name":"Obscure","name_at":"8:13-8:20","params":[],"parent":null,"permits":[],"signature":"final class Obscure","supertypes":[],"symbol":"com.acme.shop.Obscure"},
+    {"annotations":[],"at":"9:5-9:51","id":1,"javadoc":null,"kind":"field","modifiers":["private","final"],"name":"Billing","name_at":"9:27-9:34","params":[],"parent":0,"permits":[],"signature":"private final Billing Billing","supertypes":[],"symbol":"com.acme.shop.Obscure#Billing"},
+    {"annotations":[],"at":"11:5-13:6","id":2,"javadoc":null,"kind":"method","modifiers":[],"name":"pay","name_at":"11:13-11:16","params":["Money"],"parent":0,"permits":[],"signature":"Receipt pay(Money amount)","supertypes":[],"symbol":"com.acme.shop.Obscure#pay(Money)"}
+  ],
+  "references": [
+    {"at":"3:25-3:32","name":"Billing","shape":"qualified_name"},
+    {"at":"4:25-4:32","name":"Receipt","shape":"qualified_name"},
+    {"at":"5:23-5:28","name":"Money","shape":"qualified_name"},
+    {"at":"9:19-9:26","name":"Billing","shape":"type"},
+    {"arity":0,"at":"9:41-9:48","name":"Billing","shape":"new"},
+    {"at":"11:5-11:12","name":"Receipt","shape":"type"},
+    {"at":"11:17-11:22","name":"Money","shape":"type"},
+    {"at":"12:16-12:23","name":"Billing","shape":"name"},
+    {"arity":1,"at":"12:24-12:30","name":"charge","shape":"qualified_call"}
+  ],
+  "diagnostics": [],
+  "diagnostics_dropped": 0
+}

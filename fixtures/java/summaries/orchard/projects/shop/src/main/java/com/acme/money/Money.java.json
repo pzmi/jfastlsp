@@ -1,0 +1,24 @@
+{
+  "package": "com.acme.money",
+  "imports": [],
+  "declarations": [
+    {"annotations":[],"at":"4:1-26:2","id":0,"javadoc":"3:1-3:42","kind":"class","modifiers":["public","final"],"name":"Money","name_at":"4:20-4:25","params":[],"parent":null,"permits":[],"signature":"public final class Money","supertypes":[],"symbol":"com.acme.money.Money"},
+    {"annotations":[],"at":"5:5-5:30","id":1,"javadoc":null,"kind":"field","modifiers":["private","final"],"name":"cents","name_at":"5:24-5:29","params":[],"parent":0,"permits":[],"signature":"private final long cents","supertypes":[],"symbol":"com.acme.money.Money#cents"},
+    {"annotations":[],"at":"8:5-10:6","id":2,"javadoc":"7:5-7:47","kind":"constructor","modifiers":["public"],"name":"Money","name_at":"8:12-8:17","params":["long"],"parent":0,"permits":[],"signature":"public Money(long cents)","supertypes":[],"symbol":"com.acme.money.Money#<init>(long)"},
+    {"annotations":[],"at":"13:5-15:6","id":3,"javadoc":"12:5-12:49","kind":"constructor","modifiers":["public"],"name":"Money","name_at":"13:12-13:17","params":["int","int"],"parent":0,"permits":[],"signature":"public Money(int units, int cents)","supertypes":[],"symbol":"com.acme.money.Money#<init>(int,int)"},
+    {"annotations":[],"at":"18:5-20:6","id":4,"javadoc":"17:5-17:38","kind":"method","modifiers":["public"],"name":"cents","name_at":"18:17-18:22","params":[],"parent":0,"permits":[],"signature":"public long cents()","supertypes":[],"symbol":"com.acme.money.Money#cents()"},
+    {"annotations":[],"at":"23:5-25:6","id":5,"javadoc":"22:5-22:51","kind":"method","modifiers":["public"],"name":"plus","name_at":"23:18-23:22","params":["Money"],"parent":0,"permits":[],"signature":"public Money plus(Money other)","supertypes":[],"symbol":"com.acme.money.Money#plus(Money)"}
+  ],
+  "references": [
+    {"at":"9:14-9:19","name":"cents","shape":"qualified_name"},
+    {"arity":1,"at":"14:9-14:13","name":"Money","shape":"new"},
+    {"at":"19:16-19:21","name":"cents","shape":"name"},
+    {"at":"23:12-23:17","name":"Money","shape":"type"},
+    {"at":"23:23-23:28","name":"Money","shape":"type"},
+    {"arity":1,"at":"24:20-24:25","name":"Money","shape":"new"},
+    {"at":"24:26-24:31","name":"cents","shape":"name"},
+    {"at":"24:40-24:45","name":"cents","shape":"qualified_name"}
+  ],
+  "diagnostics": [],
+  "diagnostics_dropped": 0
+}

@@ -92,6 +92,7 @@ use jfl_domain::{
 };
 
 use crate::clock::{WallClock, elapsed};
+use crate::queries::{FileText, Sources};
 use crate::repo_probe::{
     GitFile, GitSnapshot, GitStat, HeadState, RepoProbe, RepoProbeError, Worktree,
 };
@@ -358,7 +359,7 @@ type Unwritten = BTreeMap<SyntaxKey, Arc<FileSummary>>;
 ///
 /// Pinned by:
 /// `view_service::tests::should_keep_at_most_width_jobs_in_flight_and_return_each_output_once_when_jobs_stay_pending`.
-async fn bounded<'a, I, T, F, Fut>(width: usize, items: I, job: F) -> Vec<T>
+pub(crate) async fn bounded<'a, I, T, F, Fut>(width: usize, items: I, job: F) -> Vec<T>
 where
     I: IntoIterator,
     F: Fn(I::Item) -> Fut,
@@ -482,6 +483,61 @@ pub type Registry = ViewRegistry<FileSeen, GitObserved, Summary>;
 /// The most reconciles one request waits through before giving up ([`ServiceError::NoProgress`]):
 /// a request needs at most two publishes (plan §4.3), plus one for its first cookie's events.
 const MAX_ROUNDS: u32 = 8;
+
+/// A file's text for the queries, read through the service's ports: only while the file's bytes
+/// are the ones a generation's key names, so a position or a Javadoc never comes from a newer
+/// file than the summary it is read with (pinned by
+/// `tests/queries.rs::should_leave_out_a_file_and_say_so_when_it_changed_after_the_pin`).
+#[derive(Debug)]
+pub struct ServiceSources<'s, T, X, H> {
+    tree: &'s T,
+    indexer: &'s X,
+    hasher: &'s H,
+}
+
+impl<T, X, H> Sources for ServiceSources<'_, T, X, H>
+where
+    T: SourceTree,
+    X: SyntaxIndexer,
+    H: KeyHasher + Clone + Send + Sync,
+{
+    fn text(
+        &self,
+        root: &FileUri,
+        path: &RelPath,
+        key: &SyntaxKey,
+    ) -> impl Future<Output = Option<Arc<FileText>>> + Send {
+        let key = *key;
+        async move {
+            let read = self
+                .tree
+                .read(root, path, MAX_SOURCE_BYTES.saturating_add(4))
+                .await
+                .ok()?;
+            if read.truncated {
+                return None;
+            }
+            let bytes = strip_bom(&read.bytes);
+            let mut digest = self.hasher.clone();
+            digest.update(bytes);
+            let grammar = self.indexer.grammar();
+            let found = SyntaxKey::derive(
+                &SyntaxInputs {
+                    file: digest.finish(),
+                    grammar: grammar.name,
+                    grammar_version: grammar.version,
+                    summariser_version: self.indexer.summariser_version(),
+                },
+                self.hasher.clone(),
+            );
+            if found != key {
+                return None;
+            }
+            let text = core::str::from_utf8(bytes).ok()?.to_owned();
+            FileText::new(text).map(Arc::new)
+        }
+    }
+}
 
 /// The view service over the ports: `T` the source tree, `P` the repository probe, `X` the syntax
 /// indexer, `S` the summary store, `C` the wall clock, `H` the key hasher.
@@ -737,6 +793,17 @@ where
     #[must_use]
     pub fn ports(&self) -> (&T, &P, &S) {
         (&self.tree, &self.probe, &self.store)
+    }
+
+    /// What the queries read a file's text through ([`crate::queries`]): the source tree, the
+    /// text checked against a generation's key with this service's indexer and hasher.
+    #[must_use]
+    pub fn sources(&self) -> ServiceSources<'_, T, X, H> {
+        ServiceSources {
+            tree: &self.tree,
+            indexer: &self.indexer,
+            hasher: &self.hasher,
+        }
     }
 
     /// The filesystem kind the view of `root` was opened on.

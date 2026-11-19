@@ -532,8 +532,8 @@ hardware and the target.
 DEC-03 (owner, 2026-11-18) took this default: the first row for small and medium repositories and
 persisted per-file summaries for large ones. Whatever the tier, the store uses the
 same crates (ADR 0025): `blake3` content keys, `postcard` summary blobs in a content-addressed
-directory of our own, `fst` for name lookup (`workspace/symbol`; the reference-name postings are a sorted
-table, below) and, from the second row, `rusqlite` (WAL) for
+directory of our own, `fst` for name sets built once and kept (the reference-name postings and
+`workspace/symbol`'s names are per-generation tables, below) and, from the second row, `rusqlite` (WAL) for
 manifests and postings. The store is a cache: deleting the state directory loses time, never
 correctness (§5.10).
 
@@ -553,8 +553,15 @@ are rebuilt at every view open, so their build counts against the warm reopen. T
 name arena with flat offset and file arrays, looked up by binary search. In a one-off measurement
 on spring-framework (4 vCPU VM, 44.4k names), an `fst` map of the names built in about 50 ms more
 (postings 101–126 ms against 50–54 ms) for lookups no faster (about 200 ns either way).
-`fst` stays the choice for `workspace/symbol`'s prefix and fuzzy search (IDX-10). DEC-03's tier
-takes no `rusqlite`: it has no manifest, and the postings fit in memory.
+DEC-03's tier takes no `rusqlite`: it has no manifest, and the postings fit in memory.
+
+**`workspace/symbol` scans a name table, not `fst` (IDX-10, 2026-11-19).** The declaration names
+are a per-generation table built on the first query after a publish (72 ms on spring-framework)
+and scanned in order: 4.5 ms for a prefix query's scan, about 12 ms p95 with the default 100
+symbols' files read (`just bench-queries`). An `fst` set of the same names built in 91–122 ms for
+prefix lookups of 0.13 ms, and the camel-hump search IDX-10 asks for is a scan either way.
+`fst` stays ADR 0025's choice where a set is built once and kept: immutable segments, such as a
+library JAR's names (PROJ-04).
 
 ### 5.6 Resolver
 

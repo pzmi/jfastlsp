@@ -366,6 +366,18 @@ pub enum IncompleteReason {
     /// The watcher lost events (an overflow, a lost watch) and no full scan started with the watch
     /// up has published since (ADR 0037).
     WatcherLostEvents,
+    /// The syntax could not prove which declaration a name binds to (a receiver of unknown type,
+    /// a supertype outside the index, an on-demand import): the declaration may lie outside
+    /// `exact ∪ possible` (IDX-10, until the resolver of SEM-*).
+    TargetUnresolved,
+    /// Every place in the index the name could be declared was searched and none declares it: it
+    /// is declared outside the indexed sources (a library, the JDK), if the code compiles.
+    TargetNotIndexed,
+    /// More results matched than the answer lists.
+    ResultsCapped {
+        /// How many are listed.
+        limit: u32,
+    },
 }
 
 /// The plan's wording: `module :payments not indexed`, `deadline`.
@@ -405,6 +417,9 @@ impl fmt::Display for IncompleteReason {
             Self::Deadline => f.write_str("deadline"),
             Self::NotWatched => f.write_str("filesystem not watched"),
             Self::WatcherLostEvents => f.write_str("watcher lost events"),
+            Self::TargetUnresolved => f.write_str("target not resolved from syntax"),
+            Self::TargetNotIndexed => f.write_str("target declared outside the indexed sources"),
+            Self::ResultsCapped { limit } => write!(f, "results capped at {limit}"),
         }
     }
 }
@@ -559,6 +574,8 @@ pub enum Reason {
     NoClasspath,
     /// The file has a syntax error around the site.
     SyntaxError,
+    /// A supertype outside the index may declare a member of this name that would win.
+    SupertypeNotIndexed,
 }
 
 impl Reason {
@@ -574,6 +591,7 @@ impl Reason {
             Self::GeneratedMember => "member may be generated",
             Self::NoClasspath => "no classpath known",
             Self::SyntaxError => "syntax error nearby",
+            Self::SupertypeNotIndexed => "a supertype outside the index may declare it",
         }
     }
 }
@@ -824,7 +842,7 @@ impl Envelope {
 mod tests {
     use super::*;
     use crate::text::Position;
-    use alloc::string::ToString;
+    use alloc::string::{String, ToString};
     use alloc::vec;
 
     fn module(name: &str) -> ModuleName {
@@ -1205,6 +1223,31 @@ mod tests {
         // then
         assert_eq!(why.to_string(), "receiver type unknown (var in lambda)");
         assert_eq!(cut.detail().map(str::len), Some(MAX_WHY_DETAIL_LEN));
+    }
+
+    #[test]
+    fn should_word_each_query_reason_when_a_query_cannot_prove_its_answer() {
+        // given
+        let reasons = [
+            IncompleteReason::TargetUnresolved,
+            IncompleteReason::TargetNotIndexed,
+            IncompleteReason::ResultsCapped { limit: 100 },
+        ];
+        // when
+        let words: Vec<String> = reasons.iter().map(ToString::to_string).collect();
+        // then
+        assert_eq!(
+            words,
+            [
+                "target not resolved from syntax",
+                "target declared outside the indexed sources",
+                "results capped at 100",
+            ]
+        );
+        assert_eq!(
+            Why::new(Reason::SupertypeNotIndexed).to_string(),
+            "a supertype outside the index may declare it"
+        );
     }
 
     #[test]

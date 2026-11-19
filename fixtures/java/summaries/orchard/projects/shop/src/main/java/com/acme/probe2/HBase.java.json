@@ -1,0 +1,11 @@
+{
+  "package": "com.acme.probe2",
+  "imports": [],
+  "declarations": [
+    {"annotations":[],"at":"4:1-6:2","id":0,"javadoc":"3:1-3:53","kind":"class","modifiers":[],"name":"HBase","name_at":"4:7-4:12","params":[],"parent":null,"permits":[],"signature":"class HBase","supertypes":[],"symbol":"com.acme.probe2.HBase"},
+    {"annotations":[],"at":"5:5-5:20","id":1,"javadoc":null,"kind":"constructor","modifiers":[],"name":"HBase","name_at":"5:5-5:10","params":["int"],"parent":0,"permits":[],"signature":"HBase(int x)","supertypes":[],"symbol":"com.acme.probe2.HBase#<init>(int)"}
+  ],
+  "references": [],
+  "diagnostics": [],
+  "diagnostics_dropped": 0
+}

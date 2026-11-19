@@ -1,0 +1,11 @@
+{
+  "package": "com.acme.probe",
+  "imports": [],
+  "declarations": [
+    {"annotations":[],"at":"4:1-6:2","id":0,"javadoc":"3:1-3:77","kind":"interface","modifiers":[],"name":"Util","name_at":"4:11-4:15","params":[],"parent":null,"permits":[],"signature":"interface Util","supertypes":[],"symbol":"com.acme.probe.Util"},
+    {"annotations":[],"at":"5:5-5:26","id":1,"javadoc":null,"kind":"method","modifiers":["static"],"name":"tool","name_at":"5:17-5:21","params":[],"parent":0,"permits":[],"signature":"static void tool()","supertypes":[],"symbol":"com.acme.probe.Util#tool()"}
+  ],
+  "references": [],
+  "diagnostics": [],
+  "diagnostics_dropped": 0
+}
