@@ -3,14 +3,16 @@
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::task::Poll;
+use std::time::Duration;
 
 use jfl_application::source_tree::{
-    FileStat, FsKind, ListMode, Listing, ReadBytes, SourceTree, SourceTreeError,
+    FileStat, FsKind, ListMode, Listing, MTime, ReadBytes, SourceTree, SourceTreeError,
 };
 use jfl_application::syntax_indexer::{GrammarId, Indexed, SyntaxIndexError, SyntaxIndexer};
 use jfl_application::{
     Answer, CountingClock, RepoProbeError, ServiceConfig, ServiceError, Summary, SummaryStore,
-    ViewService,
+    ViewService, WallClock,
 };
 use jfl_domain::{FileUri, IncompleteReason, ModuleName, RelPath, SummaryBuilder};
 use jfl_testkit::exec::block_on;
@@ -142,6 +144,25 @@ mod given {
             self.service_with(tree, ServiceConfig::new("t1"))
         }
 
+        /// A service over `tree` whose clock is `clock`.
+        pub(crate) fn service_clocked<T: SourceTree, C: WallClock + Clone>(
+            &self,
+            tree: T,
+            clock: C,
+        ) -> ViewService<T, FakeRepoProbe, Indexer, MemorySummaryStore, C, FnvHasher> {
+            let store = MemorySummaryStore::open(
+                self.backing.clone(),
+                1 << 30,
+                Arc::new(CountingClock::starting_at(1)),
+            );
+            ViewService::new(
+                (tree, self.probe.clone(), self.indexer.clone(), store),
+                clock,
+                FnvHasher::default(),
+                ServiceConfig::new("t1"),
+            )
+        }
+
         pub(crate) fn service_with<T: SourceTree>(
             &self,
             tree: T,
@@ -233,8 +254,70 @@ mod given {
             self.0.write_cookie(root, name).await
         }
     }
+
+    /// The fake wall clock, counting the deadlines that were waited out: each resolves at its
+    /// first poll, as the fake's do, and counts it.
+    #[derive(Debug, Clone)]
+    pub(crate) struct DeadlinesCounted(pub(crate) FakeWallClock, pub(crate) Arc<AtomicUsize>);
+
+    impl WallClock for DeadlinesCounted {
+        fn now(&self) -> MTime {
+            self.0.now()
+        }
+
+        fn deadline(&self, after: Duration) -> impl Future<Output = ()> + Send {
+            let _ = after;
+            let expired = Arc::clone(&self.1);
+            std::future::poll_fn(move |_| {
+                expired.fetch_add(1, Ordering::Relaxed);
+                Poll::Ready(())
+            })
+        }
+    }
+
+    /// The fake tree, whose first cookie is written while a rescan waits on the watch (FSEvents'
+    /// event on the root): the cookie's events fold into that rescan and are never hinted alone.
+    pub(crate) struct RescanAtCookie(pub(crate) FakeSourceTree, pub(crate) AtomicBool);
+
+    impl SourceTree for RescanAtCookie {
+        type Watch = FakeWatch;
+
+        async fn list(&self, root: &FileUri, mode: ListMode) -> Result<Listing, SourceTreeError> {
+            self.0.list(root, mode).await
+        }
+        async fn read(
+            &self,
+            root: &FileUri,
+            path: &RelPath,
+            limit: usize,
+        ) -> Result<ReadBytes, SourceTreeError> {
+            self.0.read(root, path, limit).await
+        }
+        async fn stat(&self, root: &FileUri, path: &RelPath) -> Result<FileStat, SourceTreeError> {
+            self.0.stat(root, path).await
+        }
+        async fn watch(&self, root: &FileUri) -> Result<FakeWatch, SourceTreeError> {
+            self.0.watch(root).await
+        }
+        async fn filesystem(&self, root: &FileUri) -> Result<FsKind, SourceTreeError> {
+            self.0.filesystem(root).await
+        }
+        async fn write_cookie(
+            &self,
+            root: &FileUri,
+            name: &RelPath,
+        ) -> Result<(), SourceTreeError> {
+            if !self.1.swap(true, Ordering::Relaxed) {
+                self.0.event_on_root();
+            }
+            self.0.write_cookie(root, name).await
+        }
+    }
 }
-use given::{LateWriter, MAIN, NESTED, World, ask, indexed, paths, reasons, rel, summary_of, uri};
+use given::{
+    DeadlinesCounted, LateWriter, MAIN, NESTED, RescanAtCookie, World, ask, indexed, paths,
+    reasons, rel, summary_of, uri,
+};
 
 #[test]
 fn should_answer_complete_when_the_view_is_watched_and_nothing_changed() {
@@ -319,6 +402,38 @@ fn should_answer_incomplete_when_the_cookie_misses_its_deadline() {
         reasons(&answer)
     );
     assert!(answer.cookie_round_trips.is_empty());
+}
+
+#[test]
+fn should_answer_incomplete_when_a_rescan_comes_in_place_of_the_cookie() {
+    // given: the first cookie folds into a waiting Unnamed rescan, every time
+    let world = World::new(&[("A.java", b"class A {}")]);
+    let expired = Arc::new(AtomicUsize::new(0));
+    let mut service = world.service_clocked(
+        RescanAtCookie(world.tree.clone(), AtomicBool::new(false)),
+        DeadlinesCounted(FakeWallClock::at(1_800_000_000), Arc::clone(&expired)),
+    );
+
+    // when
+    let first = block_on(service.request(&uri("/w/m/A.java"))).unwrap();
+    let first_expired = expired.load(Ordering::Relaxed);
+    service.finish(first.id).unwrap();
+    let second = block_on(service.request(&uri("/w/m/A.java"))).unwrap();
+
+    // then: the rescan loses the cookie at once (no deadline waited out) and the answer is
+    // incomplete; the rescan certifies the view again, so the next request is complete
+    assert_eq!(first_expired, 0);
+    assert!(!first.completeness.is_complete());
+    assert!(
+        reasons(&first)
+            .iter()
+            .any(|r| matches!(r, IncompleteReason::PendingChanges { .. })),
+        "{:?}",
+        reasons(&first)
+    );
+    assert!(first.cookie_round_trips.is_empty());
+    assert!(second.completeness.is_complete(), "{:?}", reasons(&second));
+    assert_eq!(second.cookie_round_trips.len(), 1);
 }
 
 #[test]

@@ -348,6 +348,32 @@ mod tests {
     }
 
     #[test]
+    fn should_never_hand_out_a_cookie_when_it_folds_into_a_pending_rescan() {
+        // given: FSEvents' event on the root raised a rescan nobody has taken yet
+        let (sink, mut queue) = hint_queue(8);
+        sink.rescan(RescanReason::Unnamed);
+
+        // when: an earlier change, then a cookie's create and remove, before the rescan is taken
+        let cookie = crate::source_tree::cookie_name("t1", 7, 0).unwrap();
+        sink.changed(rel("w"));
+        sink.changed(rel("w/A.java"));
+        sink.changed(cookie.clone());
+        sink.changed(cookie);
+        let taken = queue.try_next();
+        let after = queue.try_next();
+
+        // then: the rescan stands in for the cookie, which never comes on its own
+        assert_eq!(
+            taken,
+            Some(Hint::Rescan(Rescan {
+                reasons: RescanReasons::of(RescanReason::Unnamed),
+                dropped: 4,
+            }))
+        );
+        assert_eq!(after, None);
+    }
+
+    #[test]
     fn should_keep_every_reason_when_any_reason_folds_into_a_pending_rescan() {
         let reasons = [
             RescanReason::QueueFull,

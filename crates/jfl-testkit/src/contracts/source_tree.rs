@@ -94,7 +94,7 @@ pub fn check<F: Factory>(factory: &F) -> Vec<Violation> {
 
 /// Runs every case, waiting at most `hint_deadline` for each awaited hint.
 pub fn check_with<F: Factory>(factory: &F, hint_deadline: Duration) -> Vec<Violation> {
-    let cases: [(&'static str, Case<F>); 22] = [
+    let cases: [(&'static str, Case<F>); 23] = [
         ("lists_java_files_once", lists_java_files_once),
         ("lists_with_stat", lists_with_stat),
         ("skips_nested_worktree", skips_nested_worktree),
@@ -137,6 +137,10 @@ pub fn check_with<F: Factory>(factory: &F, hint_deadline: Duration) -> Vec<Viola
         (
             "cookie_follows_earlier_changes",
             cookie_follows_earlier_changes,
+        ),
+        (
+            "cookie_follows_earlier_changes_when_settled",
+            cookie_follows_earlier_changes_when_settled,
         ),
     ];
     cases
@@ -487,25 +491,36 @@ fn hints_until(
     (seen, waited.is_ok())
 }
 
+/// A write and a removal are each hinted, or covered by a rescan taken after them; never neither.
+/// A rescan already waiting when the change is made (FSEvents' event on the root) folds the path
+/// into it, and the path is then never hinted on its own.
 fn watch_hints_a_write<F: Factory>(factory: &F, deadline: Duration) -> Result<(), String> {
     let fx = factory.fixture(ROOMY)?;
     fx.write("w/Old.java", b"class Old {}")?;
     let mut watch = block_on(fx.tree().watch(fx.root())).map_err(|e| format!("watch: {e}"))?;
     fx.write("w/A.java", b"class A {}")?;
-    let written = Hint::Changed(rel("w/A.java")?);
-    let (seen, ok) = hints_until(&mut watch, deadline, "a hint for w/A.java", |h| {
-        *h == written
-    });
+    let (seen, ok) = hints_until(
+        &mut watch,
+        deadline,
+        "a hint for w/A.java or a rescan",
+        |h| names_or_rescans(h, "w/A.java"),
+    );
     if !ok {
-        return Err(format!("no hint for a write to w/A.java; saw {seen:?}"));
+        return Err(format!(
+            "no hint for a write to w/A.java and no rescan; saw {seen:?}"
+        ));
     }
     fx.remove("w/Old.java")?;
-    let removed = Hint::Changed(rel("w/Old.java")?);
-    let (seen, ok) = hints_until(&mut watch, deadline, "a hint for w/Old.java", |h| {
-        *h == removed
-    });
+    let (seen, ok) = hints_until(
+        &mut watch,
+        deadline,
+        "a hint for w/Old.java or a rescan",
+        |h| names_or_rescans(h, "w/Old.java"),
+    );
     if !ok {
-        return Err(format!("no hint for removing w/Old.java; saw {seen:?}"));
+        return Err(format!(
+            "no hint for removing w/Old.java and no rescan; saw {seen:?}"
+        ));
     }
     Ok(())
 }
@@ -674,7 +689,17 @@ fn reports_a_local_filesystem<F: Factory>(factory: &F, _: Duration) -> Result<()
 }
 
 /// A cookie (ADR 0037): written into the root, its hint comes through the watch after the hint of
-/// every change made before it, and it leaves no file behind.
+/// every change made before it, or a rescan taken after it was written covers it; never neither,
+/// and it leaves no file behind.
+///
+/// The rescan is a legitimate outcome, not a tolerated flake: a rescan already waiting when the
+/// cookie is written (FSEvents' event on the root itself, an overflow, a watch error) folds the
+/// cookie's events into it, as it folds every path, and the cookie is then never hinted on its
+/// own. The view service takes such a rescan as a loss and the cookie as lost, so the answer is
+/// incomplete, never wrong (`jfl-application`'s `tests/view_service.rs`,
+/// `should_answer_incomplete_when_a_rescan_comes_in_place_of_the_cookie`). What stays forbidden
+/// is a silent miss: no cookie hint and no rescan (`tests::DropsCookies`); that cookies come back
+/// at all is [`cookie_follows_earlier_changes_when_settled`]'s.
 fn cookie_follows_earlier_changes<F: Factory>(
     factory: &F,
     deadline: Duration,
@@ -685,17 +710,78 @@ fn cookie_follows_earlier_changes<F: Factory>(
     let name = cookie_name("contract", 7, 0).ok_or("no cookie name")?;
     block_on(fx.tree().write_cookie(fx.root(), &name)).map_err(|e| format!("cookie: {e}"))?;
     let cookie = Hint::Changed(name.clone());
-    let (seen, ok) = hints_until(&mut watch, deadline, "the cookie's hint", |h| *h == cookie);
+    let (seen, ok) = hints_until(&mut watch, deadline, "the cookie's hint or a rescan", |h| {
+        *h == cookie || matches!(h, Hint::Rescan(_))
+    });
     if !ok {
-        return Err(format!("no hint for the cookie; saw {seen:?}"));
+        return Err(format!(
+            "no hint for the cookie and no rescan; saw {seen:?}"
+        ));
     }
     let before = seen.iter().take(seen.len().saturating_sub(1));
-    if !before
-        .clone()
-        .any(|h| names_or_rescans(h, "w/A.java") || names_or_rescans(h, "w"))
+    if seen.last() == Some(&cookie)
+        && !before
+            .clone()
+            .any(|h| names_or_rescans(h, "w/A.java") || names_or_rescans(h, "w"))
     {
         return Err(format!(
             "the cookie's hint came before w/A.java's; saw {seen:?}"
+        ));
+    }
+    match block_on(fx.tree().stat(fx.root(), &name)) {
+        Err(SourceTreeError::NotFound) => Ok(()),
+        other => Err(format!("the cookie file is left behind: {other:?}")),
+    }
+}
+
+/// The strict form of [`cookie_follows_earlier_changes`], the one case an always-rescan watch
+/// fails: once the watch has settled, a change and then a cookie are each hinted by name, the
+/// cookie after the change, and no rescan comes.
+///
+/// Settled means a sentinel written after the watch started has been hinted, or a rescan it
+/// folded into has been taken. A backend delivers in order (inotify within one instance, FSEvents
+/// within one stream by event id), so an event from before the sentinel, such as FSEvents' event
+/// on the root the fixture created just before the watch, has reached the queue by then and been
+/// taken with it. Nothing after it may rescan: a handful of paths cannot overflow a queue of
+/// [`ROOMY`] or a backend's own queue on a healthy machine, so no reason is excused; excusing one
+/// would let a watch that only ever reports that reason pass (`tests::RescansEverything`).
+fn cookie_follows_earlier_changes_when_settled<F: Factory>(
+    factory: &F,
+    deadline: Duration,
+) -> Result<(), String> {
+    let fx = factory.fixture(ROOMY)?;
+    let mut watch = block_on(fx.tree().watch(fx.root())).map_err(|e| format!("watch: {e}"))?;
+    fx.write("Settle.java", b"class Settle {}")?;
+    let (seen, ok) = hints_until(
+        &mut watch,
+        deadline,
+        "the sentinel's hint or a rescan",
+        |h| names_or_rescans(h, "Settle.java"),
+    );
+    if !ok {
+        return Err(format!(
+            "no hint for the sentinel Settle.java and no rescan; saw {seen:?}"
+        ));
+    }
+    fx.write("w/A.java", b"class A {}")?;
+    let name = cookie_name("contract", 8, 0).ok_or("no cookie name")?;
+    block_on(fx.tree().write_cookie(fx.root(), &name)).map_err(|e| format!("cookie: {e}"))?;
+    let cookie = Hint::Changed(name.clone());
+    let (seen, ok) = hints_until(&mut watch, deadline, "the cookie's hint or a rescan", |h| {
+        *h == cookie || matches!(h, Hint::Rescan(_))
+    });
+    if !ok || seen.last() != Some(&cookie) {
+        return Err(format!(
+            "after the watch settled, no hint for the cookie, or a rescan; saw {seen:?}"
+        ));
+    }
+    let named = |path: &str| {
+        seen.iter()
+            .any(|h| matches!(h, Hint::Changed(p) if p.as_str() == path))
+    };
+    if !named("w/A.java") && !named("w") {
+        return Err(format!(
+            "the cookie's hint came without w/A.java's before it; saw {seen:?}"
         ));
     }
     match block_on(fx.tree().stat(fx.root(), &name)) {
@@ -709,7 +795,7 @@ mod tests {
     use std::collections::HashMap;
     use std::sync::Mutex;
 
-    use jfl_application::source_tree::{FileStat, ReadBytes};
+    use jfl_application::source_tree::{FileStat, ReadBytes, Rescan, RescanReasons, is_cookie};
 
     use super::*;
     use crate::fakes::source_tree::{FakeSourceTree, FakeWatch};
@@ -1135,8 +1221,71 @@ mod tests {
         };
     }
 
+    /// Drops every cookie's hint and asks for no rescan in its place: a silent miss.
+    #[derive(Default)]
+    struct CookiesDropped;
+
+    impl Filter for CookiesDropped {
+        fn keep(&mut self, hint: &Hint) -> bool {
+            !matches!(hint, Hint::Changed(path) if is_cookie(path))
+        }
+    }
+
+    /// Turns every hint into a rescan for a full queue: honest, never complete, and hints nothing.
+    struct AllRescans(FakeWatch);
+
+    impl Hints for AllRescans {
+        fn try_next(&mut self) -> Option<Hint> {
+            self.0.try_next().map(|hint| match hint {
+                Hint::Changed(_) => Hint::Rescan(Rescan {
+                    reasons: RescanReasons::of(RescanReason::QueueFull),
+                    dropped: 1,
+                }),
+                rescan @ Hint::Rescan(_) => rescan,
+            })
+        }
+        fn next(&mut self) -> impl Future<Output = Option<Hint>> + Send {
+            self.0.next()
+        }
+    }
+
+    broken!(RescansEverything {
+        delegate!(list);
+        delegate!(read);
+        delegate!(stat);
+        type Watch = AllRescans;
+        async fn watch(&self, root: &FileUri) -> Result<AllRescans, SourceTreeError> {
+            Ok(AllRescans(self.0.watch(root).await?))
+        }
+    });
+
     filtered!(DropsDottedDirs, DottedDirsDropped);
     filtered!(HintsBeforeWatching, LateWatch);
+    filtered!(DropsCookies, CookiesDropped);
+
+    /// Not broken: the fake as FSEvents' recursive watch may behave, with an event on the root
+    /// itself in flight as the stream starts. Its `Unnamed` rescan waits from the first moment,
+    /// so every change made before it is taken, the cookie's included, folds into it.
+    struct RescanFirst(FakeSourceTree);
+
+    impl Wrap for RescanFirst {
+        fn wrap(fake: FakeSourceTree) -> Self {
+            Self(fake)
+        }
+    }
+
+    impl SourceTree for RescanFirst {
+        delegate!(cookie);
+        delegate!(list);
+        delegate!(read);
+        delegate!(stat);
+        type Watch = FakeWatch;
+        async fn watch(&self, root: &FileUri) -> Result<FakeWatch, SourceTreeError> {
+            let watch = self.0.watch(root).await?;
+            self.0.event_on_root();
+            Ok(watch)
+        }
+    }
 
     #[test]
     fn should_fail_the_dotted_directory_cases_when_dotted_names_are_dropped() {
@@ -1181,9 +1330,52 @@ mod tests {
             failed,
             [
                 "reports_a_local_filesystem",
-                "cookie_follows_earlier_changes"
+                "cookie_follows_earlier_changes",
+                "cookie_follows_earlier_changes_when_settled"
             ]
         );
+    }
+
+    #[test]
+    fn should_pass_the_source_tree_contract_when_a_rescan_waits_from_the_start_of_the_watch() {
+        // given: the macOS nightly's shape, every time: the cookie folds into an Unnamed rescan
+        let factory = Fakes::<RescanFirst>(core::marker::PhantomData);
+
+        // when
+        let violations = check_with(&factory, FAST);
+
+        // then
+        assert_eq!(violations, []);
+    }
+
+    #[test]
+    fn should_fail_the_cookie_cases_when_a_cookie_is_dropped_without_a_rescan() {
+        // given
+        let suite_on_broken = || run::<DropsCookies>();
+
+        // when
+        let failed = suite_on_broken();
+
+        // then
+        assert_eq!(
+            failed,
+            [
+                "cookie_follows_earlier_changes",
+                "cookie_follows_earlier_changes_when_settled"
+            ]
+        );
+    }
+
+    #[test]
+    fn should_fail_the_settled_cookie_case_when_every_hint_is_a_rescan() {
+        // given
+        let suite_on_broken = || run::<RescansEverything>();
+
+        // when
+        let failed = suite_on_broken();
+
+        // then
+        assert_eq!(failed, ["cookie_follows_earlier_changes_when_settled"]);
     }
 
     #[test]
@@ -1274,7 +1466,8 @@ mod tests {
                 "watch_hints_a_dotted_directory_move",
                 "watch_hints_a_new_dotted_directory",
                 "watch_watches_a_new_directory_before_its_hint",
-                "cookie_follows_earlier_changes"
+                "cookie_follows_earlier_changes",
+                "cookie_follows_earlier_changes_when_settled"
             ]
         );
     }

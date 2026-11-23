@@ -50,7 +50,8 @@
 //!   (`should_ignore_another_daemon_s_cookie_when_it_is_hinted`). A [`Rescan`] whose reasons
 //!   [degrade the watch](crate::source_tree::RescanReasons::degrade_the_watch) is a lost watch
 //!   (re-watched at once); any other is an overflow, for every view. Either loses the view's
-//!   queued cookies, whose events may have been dropped.
+//!   queued cookies, whose events may have been dropped or folded into it, at once rather than at
+//!   their deadline (`should_answer_incomplete_when_a_rescan_comes_in_place_of_the_cookie`).
 //! - **The cookie** ([`SourceTree::write_cookie`]) is written into the view's root, through its own
 //!   watch, and waited for with a deadline ([`WallClock::deadline`]); a missed deadline is
 //!   [`ViewRegistry::cookie_lost`]. A file already of the cookie's name is never removed: the next

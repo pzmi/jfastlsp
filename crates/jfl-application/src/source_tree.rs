@@ -587,7 +587,9 @@ pub trait SourceTree: Send + Sync {
     }
 
     /// Creates the file `root/name` and removes it again: a cookie (ADR 0037), whose events reach
-    /// a live watch of `root` through the same in-order stream as every change made before it.
+    /// a live watch of `root` through the same in-order stream as every change made before it, as
+    /// its hint or folded into a rescan that waits when they arrive, never neither (the
+    /// `source_tree` contract's `cookie_follows_earlier_changes`).
     /// `name` is a [`cookie_name`]. A file already of that name is left alone and the call fails
     /// with `Io(AlreadyExists)`; the caller tries the next attempt's name. The default refuses
     /// (`Io(Unsupported)`): the cookie is then lost and the answer incomplete, never wrong.

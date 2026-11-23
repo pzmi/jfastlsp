@@ -301,6 +301,16 @@ impl FakeSourceTree {
         }
     }
 
+    /// Reports a change at the root itself to every live watch, as FSEvents may for the root's
+    /// own creation when its event is still in flight as the stream starts: a path with no
+    /// `RelPath`, so an [`RescanReason::Unnamed`] rescan, into which every later path folds until
+    /// it is taken.
+    pub fn event_on_root(&self) {
+        for (_, sink) in &self.lock().sinks {
+            sink.rescan(RescanReason::Unnamed);
+        }
+    }
+
     /// Makes `dir` unreadable, as `chmod 000` does for a user other than root.
     pub fn unreadable(&self, dir: &str) -> Result<(), String> {
         let mut state = self.lock();

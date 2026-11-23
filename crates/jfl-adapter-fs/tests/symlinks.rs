@@ -70,12 +70,13 @@ fn should_not_hint_a_change_when_it_is_behind_a_link_out_of_the_root() {
     write(&outside, "New.java", b"class New {}").unwrap();
     write(&root, "a/B.java", b"class B {}").unwrap();
 
-    // then
+    // then: up to the marker's hint, or a rescan the marker folded into (FSEvents may raise one
+    // for an event on the root itself, as the source_tree contract's watch cases accept)
     let marker = Hint::Changed(RelPath::new("a/B.java").unwrap());
     let mut seen = Vec::new();
-    wait_until(GENEROUS, "the hint for a/B.java", || {
+    wait_until(GENEROUS, "the hint for a/B.java or a rescan", || {
         while let Some(hint) = watch.try_next() {
-            let done = hint == marker;
+            let done = hint == marker || matches!(hint, Hint::Rescan(_));
             seen.push(hint);
             if done {
                 return true;

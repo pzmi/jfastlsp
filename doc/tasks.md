@@ -42,6 +42,7 @@ CLI carrier), **SEM-07** (M4),
 | FND-12 | Delete the jdtls proxy; keep stock jdtls as a bench arm | FND-11, BENCH-03 | standard | M |  | EVAL lane |
 | FND-13 | Make CI green again on main | XT-02 | standard | M |  | FORMAL-05 |
 | FND-14 | Keep the queue-full reason when hints fold into a pending rescan | FND-13 | standard | S |  | — |
+| FND-15 | Accept a rescan in place of an awaited hint, never a silent miss | FND-14 | standard | M |  | — |
 | XT-01 | Scaffold `tools/xtask` and port the gate composition | FND-08, FND-09 | deep | M |  | FND-10, EVAL lane |
 | XT-02 | Tool pins: `tools/versions.toml`, `cargo xtask doctor`, `install-tools` | XT-01 | standard | M |  | EVAL lane |
 | XT-03 | Security and workflow stages into xtask | XT-02 | standard | M |  | EVAL lane |
@@ -547,6 +548,43 @@ foundation piece by piece (ADR 0035).
   - [ ] every reason survives a later one (`should_keep_every_reason_when_any_reason_folds_into_a_pending_rescan`)
   - [ ] `just check` green; the `macos` job green on the landed commit
 - **Impact:** `jfl-application` (the hint queue's reasons).
+
+#### FND-15: Accept a rescan in place of an awaited hint, never a silent miss
+- **Depends on:** FND-14. **Model:** standard. **Size:** M. **Parallel with:** none.
+- **Cites:** ADR 0037; plan §4.3; ver §5.
+- The `macos` nightly of 265bcb4 (green the three nights before): `cookie_follows_earlier_changes`
+  saw one rescan, `Unnamed`, 6 paths dropped, and no cookie hint until `HINT_DEADLINE` (20 s)
+  ran out. The race: FSEvents may deliver an event on the root itself as the stream starts (the
+  fixture made the root just before); the root has no `RelPath`, so the adapter raises an
+  `Unnamed` rescan, and every path pushed before the consumer takes it folds into it (IDX-06),
+  the cookie's create and remove included. The cookie is then never hinted on its own: the
+  outcome depends on whether the consumer takes the rescan before the cookie's events arrive.
+  Nothing in the adapter can prevent it (notify already starts the stream with latency 0 and
+  `NoDefer`; `FSEventStreamFlushSync` orders delivery but the fold happens behind it, and
+  dropping the root's events would hide a real change of the root), and any rescan waiting when
+  a cookie is written does the same on every platform. The rescan is a legitimate outcome: the
+  view service takes it as a loss and the queued cookie as lost, at once, so the answer is
+  incomplete, never wrong. The contract now accepts, after the cookie is written, its hint (after
+  the earlier change's) or a rescan, never neither; `watch_hints_a_write`, which waited for an
+  exact hint, accepts a rescan as every other watch case already did, and so does the adapter's
+  `should_not_hint_a_change_when_it_is_behind_a_link_out_of_the_root`, the one other wait for an
+  exact hint that runs on macOS. So that the suite still proves hints and cookies work, a new strict
+  case, `cookie_follows_earlier_changes_when_settled`, first settles the watch: a sentinel written
+  after the watch starts is hinted, or a rescan it folded into is taken. A backend delivers in
+  order (FSEvents by event id within one stream), so the root's start-up event is taken by then.
+  After that the case requires the change's and the cookie's hints by name, in order, with no
+  rescan at all: a few paths cannot overflow a roomy queue, and excusing any reason would let a
+  watch that only ever reports that reason pass.
+- **Reuse considered:** none needed: a fix.
+- **Accept:**
+  - [ ] the fake with an `Unnamed` rescan from the start of the watch (`event_on_root`, FSEvents' shape) fails the old contract in `cookie_follows_earlier_changes` and `watch_hints_a_write` and passes the new (`should_pass_the_source_tree_contract_when_a_rescan_waits_from_the_start_of_the_watch`)
+  - [ ] a watch that drops cookies without a rescan fails both cookie cases (`should_fail_the_cookie_cases_when_a_cookie_is_dropped_without_a_rescan`)
+  - [ ] a watch that turns every hint into a rescan fails exactly `cookie_follows_earlier_changes_when_settled` (`should_fail_the_settled_cookie_case_when_every_hint_is_a_rescan`); the fake with the root's start-up rescan passes it
+  - [ ] a cookie folded into a waiting rescan is never handed out after it (`hints::tests::should_never_hand_out_a_cookie_when_it_folds_into_a_pending_rescan`)
+  - [ ] a rescan in place of the cookie loses it at once, without waiting out a deadline, and the answer is incomplete; the next request is complete (`should_answer_incomplete_when_a_rescan_comes_in_place_of_the_cookie`)
+  - [ ] `just check` green; the `macos` nightly green on the landed commit
+- **Impact:** tests (the `source_tree` contract's two watch cases, one new strict case, the fake's
+  root event, one adapter watch test); docs of the cookie port.
 
 ### Lane XT: port mayfly's `xtask`, piece by piece
 

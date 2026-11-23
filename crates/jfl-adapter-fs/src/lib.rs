@@ -237,8 +237,9 @@ fn sweep_cookies(root: &Path, before: MTime) -> Result<u64, SourceTreeError> {
 
 /// Creates the cookie `root/name` (mode 0600, never over an existing file, which is left alone:
 /// `Io(AlreadyExists)`, and the caller takes the next name) and removes it: its events reach the
-/// root's watch in order with every earlier change (ADR 0037). Only a cookie name, directly in
-/// the root, is written.
+/// root's watch in order with every earlier change (ADR 0037), as the cookie's hint or folded
+/// into a rescan already waiting (FSEvents' event on the root, for one). Only a cookie name,
+/// directly in the root, is written.
 ///
 /// Pinned by: the `source_tree` contract's `cookie_follows_earlier_changes` (`tests/contract.rs`).
 fn write_cookie(root: &Path, name: &RelPath) -> Result<(), SourceTreeError> {
