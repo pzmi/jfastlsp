@@ -238,13 +238,19 @@ impl ChangedFiles {
 }
 
 /// The `.java` files the index tracks (`git ls-files`), wherever they are: under a `.gitignore`d
-/// or build-output directory too, which a listing of the tree skips (IDX-06's union, IDX-09).
+/// or build-output directory too, which a listing of the tree skips (IDX-06's union, IDX-09);
+/// and, for the same reason, the tracked files of other JVM languages and build scripts
+/// ([`crate::source_tree::is_other_source_name`], IDX-16).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct TrackedFiles {
     /// Sorted, each once.
     pub files: Vec<RelPath>,
     /// Tracked `.java` paths with no [`RelPath`], counted.
     pub unrepresentable: u64,
+    /// Tracked other-language sources and build scripts, sorted, each once.
+    pub other: Vec<RelPath>,
+    /// Tracked other-language paths with no [`RelPath`], counted.
+    pub other_unrepresentable: u64,
 }
 
 /// Which step of the reconcile path failed.

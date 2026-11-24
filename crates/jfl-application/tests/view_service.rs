@@ -1144,6 +1144,57 @@ fn should_rescan_when_a_hint_names_no_java_file() {
 }
 
 #[test]
+fn should_count_other_language_files_again_when_one_is_created_or_removed() {
+    // given
+    let world = World::new(&[("A.java", b"class A {}")]);
+    let mut service = world.service();
+    let first = ask(&mut service, "/w/m/A.java");
+    service.finish(first.id).unwrap();
+    let a = jfl_domain::RelPath::new("A.java").unwrap();
+
+    // when: a Kotlin file created, edited, then removed
+    world.tree.write("m/src/L.kt", b"fun f() {}").unwrap();
+    let created = ask(&mut service, "/w/m/A.java");
+    service.finish(created.id).unwrap();
+    world.tree.write("m/src/L.kt", b"fun g() {}").unwrap();
+    let edited = ask(&mut service, "/w/m/A.java");
+    service.finish(edited.id).unwrap();
+    world.tree.remove("m/src/L.kt").unwrap();
+    let removed = ask(&mut service, "/w/m/A.java");
+
+    // then: a create or remove rescans and counts again; an edit costs no rescan
+    assert_eq!(first.other_sources.seen_from(&a), 0);
+    assert!(created.generation.generation > first.generation.generation);
+    assert_eq!(created.other_sources.seen_from(&a), 1);
+    assert_eq!(edited.generation.generation, created.generation.generation);
+    assert_eq!(edited.other_sources.seen_from(&a), 1);
+    assert!(removed.generation.generation > edited.generation.generation);
+    assert_eq!(removed.other_sources.seen_from(&a), 0);
+}
+
+#[test]
+fn should_count_a_tracked_other_language_file_when_the_listing_cannot_see_it() {
+    // given: a Kotlin file the index tracks under a `.gitignore`d directory, and one under a
+    // build's output directory, which the listing skips
+    let world = World::new(&[
+        ("A.java", b"class A {}"),
+        (".gitignore", b"gen/\n"),
+        ("gen/L.kt", b"fun f() {}"),
+        ("build.gradle", b"plugins {}"),
+        ("build/K.kt", b"fun k() {}"),
+    ]);
+    let mut service = world.service();
+    let a = jfl_domain::RelPath::new("A.java").unwrap();
+
+    // when
+    let answer = ask(&mut service, "/w/m/A.java");
+
+    // then: both tracked files count; the build script counts for build logic only
+    assert_eq!(answer.other_sources.seen_from(&a), 2);
+    assert_eq!(answer.other_sources.total(), 3);
+}
+
+#[test]
 fn should_ignore_another_daemon_s_cookie_when_it_is_hinted() {
     // given
     let world = World::new(&[("A.java", b"class A {}")]);

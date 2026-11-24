@@ -5,6 +5,9 @@
 //! apply the same rules and the `source_tree` contract suite (`jfl_testkit::contracts`) checks
 //! that each does. What a listing could not see is reported ([`Listing::unlisted`]), never
 //! dropped: a view built from an incomplete listing cannot answer `complete=true` (ADR 0014).
+//! Nor is what it cannot index: other JVM languages' sources and Gradle build scripts are
+//! classified by name ([`source_kind`], one allowlist) and counted ([`Listing::other`]), so an
+//! answer they may contradict says so (IDX-16).
 
 use core::future::Future;
 
@@ -32,6 +35,285 @@ pub const TOOL_STATE_DIRS: [&str; 1] = [".gradle"];
 
 /// The most entries [`Listing::unlisted`] keeps; [`Listing::unlisted_count`] counts them all.
 pub const MAX_REPORTED_UNLISTED: usize = 1024;
+
+/// A JVM language other than Java whose sources can name Java declarations: not indexed in v1
+/// (plan §1.4), so a view holding one cannot prove an answer whole (IDX-16, ADR 0014).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum OtherLanguage {
+    /// Kotlin/JVM.
+    Kotlin,
+    /// Groovy.
+    Groovy,
+    /// Scala.
+    Scala,
+    /// Clojure on the JVM.
+    Clojure,
+    /// Xtend.
+    Xtend,
+    /// JavaServer Pages and JSP tag files.
+    Jsp,
+    /// AspectJ: the one language here whose files can change what a Java name is proved bound
+    /// to (inter-type declarations add members, `declare parents` supertypes).
+    AspectJ,
+    /// BeanShell.
+    BeanShell,
+    /// Groovy Server Pages (Grails).
+    Gsp,
+    /// jte templates (`.jte` compiles to Java, `.kte` to Kotlin).
+    Jte,
+}
+
+/// The allowlist of other JVM languages' file extensions, matched without regard to ASCII case
+/// (IDX-16). Each is here because files of that extension name Java declarations directly and
+/// are compiled or run on the same classpath as the view's Java:
+/// - `.kt`: Kotlin calls Java as its own code; Gradle's Kotlin plugin compiles a source set's
+///   Kotlin and Java together, so each sees the other's declarations.
+/// - `.kts`: Kotlin scripts other than Gradle's (those are [`BUILD_SCRIPT_SUFFIXES`]): a script's
+///   classpath may hold the project's classes.
+/// - `.groovy`, `.gvy`, `.gy`, `.gsh`: Groovy sources and scripts (`groovyc` and `groovysh` take
+///   all four): Spock specifications under `src/test/groovy`, Groovy beans and the scripts a
+///   framework loads at run time (spring-framework's test resources hold some).
+/// - `.scala`, `.sc`: Scala sources, and Scala scripts and worksheets (Ammonite, scala-cli, Mill's
+///   `build.sc`).
+/// - `.clj`, `.cljc`: Clojure on the JVM names Java classes and members by interop; `.cljc`
+///   files compile for the JVM too.
+/// - `.xtend`: Xtend compiles to Java and calls it.
+/// - `.jsp`, `.jspf`, `.jspx`: JSP pages and fragments compile to servlets; their imports and
+///   scriptlets are Java. `.tag`, `.tagx`: JSP tag files, compiled the same way.
+/// - `.aj`: AspectJ is compiled by `ajc` together with the Java it advises and calls it; its
+///   inter-type declarations and `declare parents` also add members and supertypes to Java
+///   classes, so even a proved binding can be wrong while one is in the view
+///   ([`OtherSources::aspects_seen_from`]; spring-framework's `spring-aspects` holds some).
+/// - `.bsh`: BeanShell scripts implement Java interfaces and call Java (spring-framework's
+///   scripting tests load some).
+/// - `.gsp`: Groovy Server Pages compile to Groovy classes whose imports and scriptlets call Java.
+/// - `.jte`, `.kte`: jte templates compile to Java or Kotlin classes; their `@import` and
+///   `@param` lines and expressions name Java declarations (junit-framework's build holds some).
+///
+/// Left out, each on purpose: `.cljs` (ClojureScript compiles to JavaScript); `.py`, `.rb`, `.js`
+/// (Jython, JRuby and the JVM's JavaScript engines can call Java, but such files are almost
+/// always CPython, Ruby or browser and Node code, and counting them would withdraw `complete`
+/// from every repository with a tool script); `.xml`, `.properties`, `META-INF/services` and
+/// other text that names a class in a string (a reflective use, which no language's syntax binds);
+/// `.class` and `.jar` (compiled libraries: PROJ-03); templates that reach Java only through
+/// reflective property paths (Thymeleaf and FreeMarker `.html`/`.ftl`, Velocity `.vm`,
+/// Mustache), the same case as a string.
+///
+/// Pinned by: `source_tree::tests::should_classify_a_file_by_its_extension_when_a_listing_meets_it`.
+pub const OTHER_JVM_EXTENSIONS: [(&str, OtherLanguage); 21] = [
+    (".kt", OtherLanguage::Kotlin),
+    (".kts", OtherLanguage::Kotlin),
+    (".groovy", OtherLanguage::Groovy),
+    (".gvy", OtherLanguage::Groovy),
+    (".gy", OtherLanguage::Groovy),
+    (".gsh", OtherLanguage::Groovy),
+    (".scala", OtherLanguage::Scala),
+    (".sc", OtherLanguage::Scala),
+    (".clj", OtherLanguage::Clojure),
+    (".cljc", OtherLanguage::Clojure),
+    (".xtend", OtherLanguage::Xtend),
+    (".jsp", OtherLanguage::Jsp),
+    (".jspf", OtherLanguage::Jsp),
+    (".jspx", OtherLanguage::Jsp),
+    (".tag", OtherLanguage::Jsp),
+    (".tagx", OtherLanguage::Jsp),
+    (".aj", OtherLanguage::AspectJ),
+    (".bsh", OtherLanguage::BeanShell),
+    (".gsp", OtherLanguage::Gsp),
+    (".jte", OtherLanguage::Jte),
+    (".kte", OtherLanguage::Jte),
+];
+
+/// Gradle build scripts, Groovy (`.gradle`) and Kotlin (`.gradle.kts`) DSL: `build.gradle`,
+/// `settings.gradle.kts`, a script plugin applied with `apply from:`, an init script.
+///
+/// A build script is compiled against the build's own classpath: Gradle's API, its plugins, its
+/// `buildscript` dependencies, and the classes of `buildSrc` and of included builds; as a rule not
+/// against the source sets of the build it configures, which that build compiles after its
+/// scripts ran. So a script counts only for a target in build logic
+/// ([`OtherSources::in_build_logic`]), by directory. **A known limitation until the project
+/// model (M3):** build logic can compile sources from elsewhere (`buildSrc` with
+/// `srcDir("../src/main/java")`, an included build whose source directories lie outside it,
+/// `buildscript { classpath files(...) }` naming a project's output), and an included build
+/// without a settings file of its own (which Gradle 8 refuses) is not recognised as one; a
+/// script's use of such a declaration is then not counted.
+pub const BUILD_SCRIPT_SUFFIXES: [&str; 2] = [".gradle", ".gradle.kts"];
+
+/// The directory Gradle builds, by this fixed name, before the build beside it: its classes are on
+/// that build's scripts' classpath and on no source set's.
+pub const BUILD_SRC_DIR: &str = "buildSrc";
+
+/// The files that make a directory a Gradle build's root; one below the view's root is an
+/// included or nested build, whose classes may be on another build's scripts' classpath.
+pub const SETTINGS_FILES: [&str; 2] = ["settings.gradle", "settings.gradle.kts"];
+
+/// The most paths [`Listing::other`] keeps; [`Listing::other_count`] counts them all.
+pub const MAX_LISTED_OTHER: usize = 1 << 16;
+
+/// What a file is to a listing, by its name alone (IDX-16): no read, no parse.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum SourceKind {
+    /// A `.java` file: listed and indexed.
+    Java,
+    /// A source file of another JVM language ([`OTHER_JVM_EXTENSIONS`]): counted.
+    Other(OtherLanguage),
+    /// A Gradle build script ([`BUILD_SCRIPT_SUFFIXES`]): counted for build logic only.
+    BuildScript,
+}
+
+/// What a file of this name is, `None` when no listing rule reads it. A name must hold more than
+/// its extension (`.kt` alone is no Kotlin file, as `.java` alone is no Java file).
+///
+/// Pinned by: `source_tree::tests::should_classify_a_file_by_its_extension_when_a_listing_meets_it`.
+#[must_use]
+pub fn source_kind(name: &str) -> Option<SourceKind> {
+    if is_java_file_name(name) {
+        return Some(SourceKind::Java);
+    }
+    let has = |suffix: &str| {
+        name.len()
+            .checked_sub(suffix.len())
+            .filter(|at| *at > 0)
+            .and_then(|at| name.get(at..))
+            .is_some_and(|end| end.eq_ignore_ascii_case(suffix))
+    };
+    if BUILD_SCRIPT_SUFFIXES.iter().any(|suffix| has(suffix)) {
+        return Some(SourceKind::BuildScript);
+    }
+    OTHER_JVM_EXTENSIONS
+        .iter()
+        .find(|(extension, _)| has(extension))
+        .map(|(_, language)| SourceKind::Other(*language))
+}
+
+/// Whether a listing counts a file of this name as another JVM language's source or a build
+/// script ([`source_kind`]).
+#[must_use]
+pub fn is_other_source_name(name: &str) -> bool {
+    matches!(
+        source_kind(name),
+        Some(SourceKind::Other(_) | SourceKind::BuildScript)
+    )
+}
+
+/// The other JVM languages' sources and the build scripts of a view (IDX-16), from its last
+/// listing: what may use a Java declaration, or declare what a Java name binds to, and is not
+/// indexed. Counted per view, which before M3 is the module (plan §2.1).
+///
+/// Pinned by: `source_tree::tests::should_count_build_logic_only_for_a_path_in_it_when_other_sources_are_summed`.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct OtherSources {
+    /// The listed paths, sorted: a hint naming one of them that still exists changes no count.
+    paths: Vec<RelPath>,
+    /// Sources outside `buildSrc`, and every file the listing counted without keeping its path:
+    /// any of them may see any declaration of the view.
+    sources: u32,
+    /// Build scripts, and sources under a `buildSrc` directory: they see only build logic.
+    build_logic: u32,
+    /// AspectJ files outside `buildSrc` (counted in `sources` too).
+    aspects: u32,
+    /// AspectJ files under `buildSrc` (counted in `build_logic` too).
+    build_logic_aspects: u32,
+    /// The directories strictly below the root that hold a [`SETTINGS_FILES`] file, sorted.
+    build_roots: Vec<RelPath>,
+}
+
+impl OtherSources {
+    /// From the paths a listing kept (and, in the view service, the tracked ones unioned in),
+    /// any of them repeated, and `unkept` more files counted without a path, which count as
+    /// sources.
+    #[must_use]
+    pub fn new(listed: &[RelPath], unkept: u64) -> Self {
+        let to_u32 = |n: u64| u32::try_from(n).unwrap_or(u32::MAX);
+        let mut paths = listed.to_vec();
+        paths.sort_unstable();
+        paths.dedup();
+        let mut sources = 0_u32;
+        let mut build_logic = 0_u32;
+        let mut aspects = 0_u32;
+        let mut build_logic_aspects = 0_u32;
+        let mut build_roots = Vec::new();
+        for path in &paths {
+            let name = path.file_name();
+            let kind = source_kind(name);
+            let aspect = u32::from(kind == Some(SourceKind::Other(OtherLanguage::AspectJ)));
+            if kind == Some(SourceKind::BuildScript)
+                || path.components().any(|c| c == BUILD_SRC_DIR)
+            {
+                build_logic = build_logic.saturating_add(1);
+                build_logic_aspects = build_logic_aspects.saturating_add(aspect);
+            } else {
+                sources = sources.saturating_add(1);
+                aspects = aspects.saturating_add(aspect);
+            }
+            if SETTINGS_FILES.contains(&name)
+                && let Some(dir) = path.parent()
+            {
+                build_roots.push(dir);
+            }
+        }
+        sources = sources.saturating_add(to_u32(unkept));
+        build_roots.sort_unstable();
+        build_roots.dedup();
+        Self {
+            paths,
+            sources,
+            build_logic,
+            aspects,
+            build_logic_aspects,
+            build_roots,
+        }
+    }
+
+    /// Every file counted, whatever it can see: what may declare a symbol a workspace symbol
+    /// search does not list.
+    #[must_use]
+    pub const fn total(&self) -> u32 {
+        self.sources.saturating_add(self.build_logic)
+    }
+
+    /// How many AspectJ files can weave `path`'s declarations (as [`Self::seen_from`]): an
+    /// inter-type declaration or `declare parents` can change even a proved binding there.
+    #[must_use]
+    pub fn aspects_seen_from(&self, path: &RelPath) -> u32 {
+        if self.in_build_logic(path) {
+            self.aspects.saturating_add(self.build_logic_aspects)
+        } else {
+            self.aspects
+        }
+    }
+
+    /// Whether the last listing held `path` (so a change to it, while it exists, changes no
+    /// count).
+    #[must_use]
+    pub fn holds(&self, path: &RelPath) -> bool {
+        self.paths.binary_search(path).is_ok()
+    }
+
+    /// Whether `path` lies in build logic: under a `buildSrc` directory, or in an included or
+    /// nested build (below a directory with a [`SETTINGS_FILES`] file other than the root).
+    #[must_use]
+    pub fn in_build_logic(&self, path: &RelPath) -> bool {
+        path.components().any(|c| c == BUILD_SRC_DIR)
+            || self.build_roots.iter().any(|root| {
+                path.as_str()
+                    .strip_prefix(root.as_str())
+                    .is_some_and(|rest| rest.starts_with('/'))
+            })
+    }
+
+    /// How many of these files can see a declaration in `path`, or declare what a name in
+    /// `path` binds to: every source, and for a path in build logic the build scripts and
+    /// `buildSrc`'s sources too.
+    #[must_use]
+    pub fn seen_from(&self, path: &RelPath) -> u32 {
+        if self.in_build_logic(path) {
+            self.sources.saturating_add(self.build_logic)
+        } else {
+            self.sources
+        }
+    }
+}
 
 /// What a listing returns for each file.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -137,6 +419,12 @@ pub struct Listing {
     pub unlisted: Vec<Unlisted>,
     /// How many gaps there were in all.
     pub unlisted_count: u64,
+    /// Other JVM languages' sources and Gradle build scripts ([`is_other_source_name`]), under
+    /// the same exclusion rules as `.java` files: never listed as files, sorted, at most
+    /// [`MAX_LISTED_OTHER`] (IDX-16).
+    pub other: Vec<RelPath>,
+    /// How many there were in all, a name that is not a [`RelPath`] included.
+    pub other_count: u64,
 }
 
 impl Listing {
@@ -154,11 +442,23 @@ impl Listing {
         }
     }
 
+    /// Counts a file [`is_other_source_name`] names, keeping its path while fewer than
+    /// [`MAX_LISTED_OTHER`] are kept (`None`: a name that is not a [`RelPath`], counted only).
+    pub fn record_other(&mut self, path: Option<RelPath>) {
+        self.other_count = self.other_count.saturating_add(1);
+        if let Some(path) = path
+            && self.other.len() < MAX_LISTED_OTHER
+        {
+            self.other.push(path);
+        }
+    }
+
     /// Sorts every part, so equal trees give equal listings.
     pub fn sort(&mut self) {
         self.files.sort_unstable_by(|a, b| a.path.cmp(&b.path));
         self.skipped.sort_unstable();
         self.unlisted.sort_unstable();
+        self.other.sort_unstable();
     }
 }
 
@@ -706,7 +1006,8 @@ pub fn is_java_file_name(name: &str) -> bool {
 /// Whether a change at `path` is left out of the hints: under a `.git` directory, under
 /// `.claude/worktrees/`, or, for a [`HintSubject::File`] only, a file whose name has an extension
 /// no listing or exclusion rule reads (a `.class` file a build writes, an editor's swap file).
-/// `.java` files, `.gitignore` and [`BUILD_FILES`] are always hinted, and so is every directory
+/// `.java` files, other JVM languages' sources and build scripts ([`source_kind`]: their count
+/// is the view's, IDX-16), `.gitignore` and [`BUILD_FILES`] are always hinted, and so is every directory
 /// and every change of unknown kind, whatever its name: `java.base` and `org.eclipse.core` are
 /// directories.
 ///
@@ -725,7 +1026,7 @@ pub fn hint_excluded(path: &RelPath, subject: HintSubject) -> bool {
         return false;
     }
     let name = path.file_name();
-    if is_java_file_name(name) || name == ".gitignore" || BUILD_FILES.contains(&name) {
+    if source_kind(name).is_some() || name == ".gitignore" || BUILD_FILES.contains(&name) {
         return false;
     }
     name.get(1..).is_some_and(|rest| rest.contains('.'))
@@ -737,6 +1038,102 @@ mod tests {
 
     fn rel(path: &str) -> RelPath {
         RelPath::new(path).unwrap()
+    }
+
+    #[test]
+    fn should_classify_a_file_by_its_extension_when_a_listing_meets_it() {
+        // given
+        let named = [
+            ("A.java", Some(SourceKind::Java)),
+            ("Ledger.kt", Some(SourceKind::Other(OtherLanguage::Kotlin))),
+            (
+                "tool.main.kts",
+                Some(SourceKind::Other(OtherLanguage::Kotlin)),
+            ),
+            (
+                "Spec.groovy",
+                Some(SourceKind::Other(OtherLanguage::Groovy)),
+            ),
+            ("run.gsh", Some(SourceKind::Other(OtherLanguage::Groovy))),
+            ("Main.scala", Some(SourceKind::Other(OtherLanguage::Scala))),
+            ("build.sc", Some(SourceKind::Other(OtherLanguage::Scala))),
+            ("core.cljc", Some(SourceKind::Other(OtherLanguage::Clojure))),
+            ("Gen.xtend", Some(SourceKind::Other(OtherLanguage::Xtend))),
+            ("index.jsp", Some(SourceKind::Other(OtherLanguage::Jsp))),
+            ("field.tagx", Some(SourceKind::Other(OtherLanguage::Jsp))),
+            ("Audit.aj", Some(SourceKind::Other(OtherLanguage::AspectJ))),
+            (
+                "Calc.bsh",
+                Some(SourceKind::Other(OtherLanguage::BeanShell)),
+            ),
+            ("list.gsp", Some(SourceKind::Other(OtherLanguage::Gsp))),
+            ("page.jte", Some(SourceKind::Other(OtherLanguage::Jte))),
+            ("page.kte", Some(SourceKind::Other(OtherLanguage::Jte))),
+            ("page.ftl", None),
+            ("page.vm", None),
+            ("Shout.KT", Some(SourceKind::Other(OtherLanguage::Kotlin))),
+            ("build.gradle", Some(SourceKind::BuildScript)),
+            ("settings.gradle.kts", Some(SourceKind::BuildScript)),
+            ("conventions.gradle", Some(SourceKind::BuildScript)),
+            (".kt", None),
+            (".gradle", None),
+            ("app.cljs", None),
+            ("tool.py", None),
+            ("beans.xml", None),
+            ("A.class", None),
+            ("A.javax", None),
+            ("Makefile", None),
+            ("é.kt", Some(SourceKind::Other(OtherLanguage::Kotlin))),
+        ];
+        // when
+        let kinds: Vec<Option<SourceKind>> = named.iter().map(|(n, _)| source_kind(n)).collect();
+        // then
+        let want: Vec<Option<SourceKind>> = named.iter().map(|(_, k)| *k).collect();
+        assert_eq!(kinds, want);
+        assert!(OTHER_JVM_EXTENSIONS.iter().all(|(e, _)| e.starts_with('.')));
+    }
+
+    #[test]
+    fn should_count_build_logic_only_for_a_path_in_it_when_other_sources_are_summed() {
+        // given: Kotlin beside the main sources, Groovy in buildSrc, build scripts, and an
+        // included build's settings file; one more file counted without a path
+        let listed = [
+            rel("app/src/main/kotlin/a/Ledger.kt"),
+            rel("app/src/main/kotlin/a/Ledger.kt"),
+            rel("buildSrc/src/main/groovy/Lock.groovy"),
+            rel("build.gradle"),
+            rel("settings.gradle"),
+            rel("build-logic/settings.gradle.kts"),
+            rel("build-logic/build.gradle.kts"),
+        ];
+        let others = OtherSources::new(&listed, 1);
+        let main = rel("app/src/main/java/a/Tally.java");
+        let build_src = rel("buildSrc/src/main/java/b/Plugin.java");
+        let included = rel("build-logic/src/main/java/c/Conventions.java");
+        let lookalike = rel("build-logic-docs/A.java");
+        // when
+        let counts = [
+            others.seen_from(&main),
+            others.seen_from(&build_src),
+            others.seen_from(&included),
+            others.seen_from(&lookalike),
+        ];
+        // then: the main path sees the Kotlin file and the one without a path; build logic sees all
+        assert_eq!(counts, [2, 7, 7, 2]);
+        assert!(others.holds(&rel("build.gradle")));
+        assert!(!others.holds(&rel("app/src/main/kotlin/a/Other.kt")));
+        assert_eq!(others.total(), 7);
+        assert_eq!(OtherSources::new(&[], 0).seen_from(&build_src), 0);
+        let aspects = OtherSources::new(
+            &[
+                rel("app/src/main/aspect/Audit.aj"),
+                rel("buildSrc/src/main/aspect/Weave.aj"),
+            ],
+            0,
+        );
+        assert_eq!(aspects.aspects_seen_from(&main), 1);
+        assert_eq!(aspects.aspects_seen_from(&build_src), 2);
+        assert_eq!(others.aspects_seen_from(&build_src), 0);
     }
 
     #[test]
@@ -933,6 +1330,9 @@ mod tests {
             ("src", HintSubject::Directory),
             (".gitignore", HintSubject::File),
             ("lib/build.gradle.kts", HintSubject::File),
+            ("lib/conventions.gradle", HintSubject::File),
+            ("src/main/kotlin/Ledger.kt", HintSubject::File),
+            ("src/test/groovy/Spec.groovy", HintSubject::File),
             ("Makefile", HintSubject::File),
             ("modules/java.base", HintSubject::Directory),
             ("org.eclipse.core", HintSubject::Unknown),

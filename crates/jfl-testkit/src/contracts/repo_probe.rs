@@ -91,7 +91,7 @@ type Case<F> = fn(&F) -> Result<(), String>;
 
 /// Runs every case; an empty list is a pass.
 pub fn check<F: Factory>(factory: &F) -> Vec<Violation> {
-    let cases: [(&'static str, Case<F::Fixture>); 20] = [
+    let cases: [(&'static str, Case<F::Fixture>); 21] = [
         ("resolves_the_main_worktree", resolves_the_main_worktree),
         (
             "resolves_a_nested_linked_worktree_to_itself",
@@ -132,6 +132,10 @@ pub fn check<F: Factory>(factory: &F) -> Vec<Violation> {
         (
             "tracked_lists_tracked_java_only",
             tracked_lists_tracked_java_only,
+        ),
+        (
+            "tracked_lists_other_jvm_sources",
+            tracked_lists_other_jvm_sources,
         ),
     ];
     cases
@@ -492,6 +496,35 @@ fn tracked_lists_tracked_java_only<X: Fixture>(fx: &X) -> Result<(), String> {
     )
 }
 
+/// Tracked other-language sources and build scripts, a `.gitignore`d one and one whose extension
+/// is upper case included, listed beside the `.java` files: the listing cannot see the ignored
+/// one (IDX-16).
+fn tracked_lists_other_jvm_sources<X: Fixture>(fx: &X) -> Result<(), String> {
+    fx.init(
+        "main",
+        &[
+            ("src/A.java", A),
+            (".gitignore", b"gen/\n"),
+            ("build.gradle", b"plugins {}\n"),
+            ("web/X.JSP", b"<% %>\n"),
+            ("README", b"r\n"),
+        ],
+    )?;
+    let main = worktree(fx, "main")?;
+    fx.write("main/gen/L.kt", b"fun f() {}\n")?;
+    fx.stage("main", "gen/L.kt")?;
+    fx.commit("main")?;
+    fx.write("main/src/U.kt", b"fun u() {}\n")?;
+    let tracked =
+        block_on(fx.probe().tracked_java(&main)).map_err(|e: RepoProbeError| e.to_string())?;
+    ensure(
+        tracked.files == rel(&["src/A.java"])
+            && tracked.other == rel(&["build.gradle", "gen/L.kt", "web/X.JSP"])
+            && tracked.other_unrepresentable == 0,
+        || format!("{tracked:?}"),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use std::marker::PhantomData;
@@ -519,6 +552,8 @@ mod tests {
         DropsUnrepresentable,
         /// Reports no committed change.
         NoCommitted,
+        /// Lists no tracked file of another JVM language.
+        NoTrackedOthers,
     }
 
     trait Kind {
@@ -596,6 +631,9 @@ mod tests {
             let mut tracked = self.fake.tracked_java(worktree).await?;
             if K::DEFECT == Defect::DropsUnrepresentable {
                 tracked.unrepresentable = 0;
+            }
+            if K::DEFECT == Defect::NoTrackedOthers {
+                tracked.other.clear();
             }
             Ok(tracked)
         }
@@ -700,6 +738,19 @@ mod tests {
     kind!(EmptyForUnknownBase, Defect::EmptyForUnknownBase);
     kind!(DropsUnrepresentable, Defect::DropsUnrepresentable);
     kind!(NoCommitted, Defect::NoCommitted);
+    kind!(NoTrackedOthers, Defect::NoTrackedOthers);
+
+    #[test]
+    fn should_fail_the_other_sources_case_when_tracked_other_languages_are_dropped() {
+        // given
+        let broken = PhantomData::<NoTrackedOthers>;
+
+        // when
+        let failed = failed(broken);
+
+        // then
+        assert_eq!(failed, ["tracked_lists_other_jvm_sources"]);
+    }
 
     #[test]
     fn should_pass_the_contract_when_run_against_the_fake() {

@@ -21,6 +21,7 @@ use jfl_application::source_tree::{
     BUILD_FILES, Exclusion, FileStat, FsKind, GitEntry, HintSubject, ListMode, ListedFile, Listing,
     MTime, ReadBytes, RescanReason, Skipped, SourceTree, SourceTreeError, Unlisted, UnlistedReason,
     WatchErrorKind, exclusion, hint_excluded, is_cookie_name, is_git_metadata, is_java_file_name,
+    is_other_source_name,
 };
 use jfl_domain::{FileUri, RelPath};
 
@@ -419,6 +420,8 @@ fn walk(
                 if let Some(path) = under(base, key).filter(|_| is_java_file_name(name)) {
                     let stat = (mode == ListMode::PathsAndStat).then_some(*stat);
                     listing.files.push(ListedFile { path, stat });
+                } else if is_other_source_name(name) {
+                    listing.record_other(under(base, key));
                 }
             }
             Entry::NonUtf8Java => listing.record_unlisted(Unlisted {

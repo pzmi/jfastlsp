@@ -36,6 +36,9 @@
 //!   callers outside the view), a record component or its accessor (record patterns), a
 //!   constructor a zero-argument call reaches (a subclass's implicit `super()`) or of an enum
 //!   (its constants), an annotation's `value` element;
+//! - files of other JVM languages can see the target (`OtherLanguageSources`, IDX-16): the syntax
+//!   index reads only `.java` (plan §1.4), so a Kotlin, Groovy or Scala use is in neither list;
+//!   build scripts and `buildSrc`'s sources count only for a target in build logic;
 //! - a known annotation processor is used in the view (`GeneratedSourcesUnknown`): what it
 //!   generates is not indexed before the project model names the roots (the card's Decided rule);
 //! - the target's top-level type is declared twice in the view (`TargetDeclaredTwice`): source
@@ -438,6 +441,10 @@ pub(super) async fn collect<S: Sources, D: Deadline>(
     if unlocated {
         completeness = completeness.and(IncompleteReason::TargetUnresolved);
     }
+    let subject = target
+        .and_then(|hit| snapshot.file(hit.file))
+        .map_or(&pinned.answer.path, |f| &f.path);
+    completeness = super::other_languages(completeness, &pinned.answer.other_sources, subject);
     if snapshot.processor_files() > 0 {
         completeness = completeness.and(IncompleteReason::GeneratedSourcesUnknown {
             files: snapshot.processor_files(),

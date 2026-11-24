@@ -404,6 +404,12 @@ pub enum IncompleteReason {
         /// How many files.
         files: u32,
     },
+    /// Files of other JVM languages (Kotlin, Groovy, Scala, …) can see the target and are not
+    /// indexed (plan §1.4): any of them may use it, or declare what a name binds to (IDX-16).
+    OtherLanguageSources {
+        /// How many files.
+        files: u32,
+    },
 }
 
 /// The plan's wording: `module :payments not indexed`, `deadline`.
@@ -458,6 +464,9 @@ impl fmt::Display for IncompleteReason {
                 write!(f, "{count} possible references left out (exact only)")
             }
             Self::SyntaxErrors { files } => write!(f, "{files} files have syntax errors"),
+            Self::OtherLanguageSources { files } => {
+                write!(f, "{files} files in other JVM languages not indexed")
+            }
         }
     }
 }
@@ -1419,6 +1428,7 @@ mod tests {
             IncompleteReason::TargetDeclaredTwice,
             IncompleteReason::PossibleLeftOut { count: 3 },
             IncompleteReason::SyntaxErrors { files: 4 },
+            IncompleteReason::OtherLanguageSources { files: 5 },
         ];
         // when
         let words: Vec<String> = reasons.iter().map(ToString::to_string).collect();
@@ -1434,6 +1444,7 @@ mod tests {
                 "the target's type is declared more than once in the view",
                 "3 possible references left out (exact only)",
                 "4 files have syntax errors",
+                "5 files in other JVM languages not indexed",
             ]
         );
         assert_eq!(

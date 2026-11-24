@@ -66,6 +66,11 @@ A Java compiler or build tool; refactoring, rename or code actions; completion; 
 Kotlin, Groovy or Scala sources; Maven or Bazel project models (Gradle only, §5.7); a GUI;
 remote or multi-user daemons; Windows (ADR 0006); telemetry of any kind (§12).
 
+Not indexing another JVM language is not a licence to claim completeness despite it (IDX-16):
+its files can use a Java declaration, or declare what a Java name binds to, so a view that holds
+them answers incomplete for what they can see (§2.1). Whether Kotlin becomes an indexed language
+is a DEC-02 question.
+
 ### 1.5 Guardrails
 
 - **No JVM and no build on the request path** (ADR 0015). JVMs run only as background workers
@@ -166,6 +171,22 @@ Every navigation query returns one envelope (ADR 0014):
   fresh at the pinned generation (§4.5). Then `exact ∪ possible` contains every reference. Before
   the project model exists (M3), "module" means the whole worktree's source set, and `complete`
   requires every source file under it indexed and fresh and no generated-source root missing.
+  **Other JVM languages are sources too** (IDX-16): the listing classifies files by name through
+  one allowlist (`jfl_application::source_tree::OTHER_JVM_EXTENSIONS`: Kotlin, Groovy, Scala,
+  Clojure, Xtend, JSP and tag files, AspectJ, BeanShell, GSP, jte; each with its reason) and
+  counts them, never reading them, unioned with the tracked ones (`git ls-files`) as `.java`
+  files are. References withdraw `complete` with `N files in other JVM languages not indexed`
+  when any can see the target's file; workspace symbols when the view holds any; definitions and
+  hover when any can see the request's file and the binding is not proved exact, and even a
+  proved one when an AspectJ file can see it (inter-type declarations and `declare parents` add
+  members and supertypes to Java classes). Gradle build scripts (`*.gradle`, `*.gradle.kts`)
+  and the sources under `buildSrc` count only for a file in build logic: under `buildSrc`, or
+  below a directory other than the root that holds a settings file. **A known limitation until
+  the project model (M3):** that rule is by directory, and build logic can compile sources from
+  elsewhere (`buildSrc` with `srcDir("../src/main/java")`, an included build whose source
+  directories lie outside it, `buildscript { classpath files(...) }` naming a project's output),
+  and an included build without its own settings file (Gradle 8 refuses one) is not recognised;
+  a build script's use of such a declaration is then not counted.
 - **`incomplete_because`**: a non-empty list whenever `complete` is `false`. An answer with no
   hits and no completeness statement is never returned.
 - **`view`** names the worktree, its `HEAD` and the generation the answer was computed at.

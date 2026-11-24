@@ -17,7 +17,9 @@
 //!   skipped (plan §11).
 //!
 //! Gaps (an unreadable directory, a `.java` name that is not UTF-8 or too long, a stat that fails,
-//! the file cap) are recorded in [`Listing::unlisted`], never dropped.
+//! the file cap) are recorded in [`Listing::unlisted`], never dropped. Other JVM languages' sources
+//! and build scripts are recorded by name in [`Listing::other`] (IDX-16): no stat, no read, and
+//! never against the file cap.
 
 use std::ffi::OsStr;
 use std::fs;
@@ -30,14 +32,15 @@ use std::sync::{Arc, Mutex, PoisonError};
 use ignore::{DirEntry, ParallelVisitor, ParallelVisitorBuilder, WalkBuilder, WalkState};
 use jfl_application::source_tree::{
     BUILD_FILES, Exclusion, GitEntry, GitMarker, ListMode, ListedFile, Listing, Skipped, Unlisted,
-    UnlistedReason, exclusion, is_git_metadata, nested_root,
+    UnlistedReason, exclusion, is_git_metadata, is_other_source_name, nested_root,
 };
 use jfl_domain::RelPath;
 
 use crate::FsConfig;
 use crate::file::file_stat;
 
-/// Lists the `.java` files under `root`, a directory.
+/// Lists the `.java` files under `root`, a directory, and counts the other JVM languages' sources
+/// and build scripts beside them.
 ///
 /// Pinned by the `source_tree` contract suite (`tests/contract.rs`), `tests/worktrees.rs` and
 /// `tests/symlinks.rs`.
@@ -344,6 +347,10 @@ impl ParallelVisitor for Visitor<'_> {
                 if is_file && is_java_name(entry.file_name()) {
                     return self.file(&entry);
                 }
+                if is_file && is_other_source_name(&entry.file_name().to_string_lossy()) {
+                    self.local
+                        .record_other(relative(self.root, entry.path()).ok());
+                }
                 WalkState::Continue
             }
             // A malformed `.gitignore` line is skipped by the walker as Git skips it; only an I/O
@@ -365,6 +372,10 @@ impl Drop for Visitor<'_> {
         let mut shared = self.shared.lock().unwrap_or_else(PoisonError::into_inner);
         shared.files.extend(local.files);
         shared.unlisted_count = shared.unlisted_count.saturating_add(local.unlisted_count);
+        shared.other_count = shared.other_count.saturating_add(local.other_count);
+        let room =
+            jfl_application::source_tree::MAX_LISTED_OTHER.saturating_sub(shared.other.len());
+        shared.other.extend(local.other.into_iter().take(room));
         for gap in local.unlisted {
             if shared.unlisted.len() < jfl_application::source_tree::MAX_REPORTED_UNLISTED {
                 shared.unlisted.push(gap);

@@ -48,8 +48,9 @@ pub use repo_probe::{
 pub use shared_index::SharedIndex;
 pub use source_tree::{
     Exclusion, FileStat, FsKind, GitEntry, GitMarker, Hint, HintSubject, Hints, ListMode,
-    ListedFile, Listing, MTime, ReadBytes, Rescan, RescanReason, RescanReasons, Skipped,
-    SourceTree, SourceTreeError, Unlisted, UnlistedReason, WatchErrorKind,
+    ListedFile, Listing, MTime, OtherLanguage, OtherSources, ReadBytes, Rescan, RescanReason,
+    RescanReasons, Skipped, SourceKind, SourceTree, SourceTreeError, Unlisted, UnlistedReason,
+    WatchErrorKind,
 };
 pub use summary_store::{
     CountingClock, Declarations, DeclarationsError, LruClock, NamePostings, StorageTier,

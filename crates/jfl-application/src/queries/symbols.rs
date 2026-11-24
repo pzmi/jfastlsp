@@ -12,8 +12,11 @@
 //! case-insensitive prefix, then humps (an earlier first hump first), then by name, file and
 //! position. Pinned by `symbols::tests`.
 //!
-//! **Completeness** is the pin's, plus `ResultsCapped` when more matched than are listed, and
-//! `Deadline` when the scan was cut. A workspace scan matches each distinct declaration name of
+//! **Completeness** is the pin's, plus `ResultsCapped` when more matched than are listed,
+//! `Deadline` when the scan was cut, and, for workspace symbols, `OtherLanguageSources` when the
+//! view holds files of other JVM languages, which may declare a symbol the index does not hold
+//! (IDX-16; pinned by
+//! `tests/queries.rs::should_answer_workspace_symbols_incomplete_when_a_kotlin_file_may_declare_one`). A workspace scan matches each distinct declaration name of
 //! the pinned generation once (the generation's name table, built once per generation and kept
 //! in the `QueryCache`); a symbol's location needs its file's text (`Sources`), read only for the
 //! symbols listed.
@@ -281,6 +284,12 @@ pub async fn workspace_symbols<S: Sources, D: Deadline>(
     let answer = pinned.answer;
     let limit = query.limit.unwrap_or(config.symbols_limit).max(1);
     let mut completeness = answer.completeness.clone();
+    // Any file of another JVM language may declare a symbol the search does not list (IDX-16).
+    if answer.other_sources.total() > 0 {
+        completeness = completeness.and(IncompleteReason::OtherLanguageSources {
+            files: answer.other_sources.total(),
+        });
+    }
     let empty = || Symbols {
         view: pinned.view(),
         symbols: Vec::new(),

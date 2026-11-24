@@ -94,8 +94,9 @@ pub fn check<F: Factory>(factory: &F) -> Vec<Violation> {
 
 /// Runs every case, waiting at most `hint_deadline` for each awaited hint.
 pub fn check_with<F: Factory>(factory: &F, hint_deadline: Duration) -> Vec<Violation> {
-    let cases: [(&'static str, Case<F>); 23] = [
+    let cases: [(&'static str, Case<F>); 24] = [
         ("lists_java_files_once", lists_java_files_once),
+        ("counts_other_jvm_sources", counts_other_jvm_sources),
         ("lists_with_stat", lists_with_stat),
         ("skips_nested_worktree", skips_nested_worktree),
         ("skips_nested_repository", skips_nested_repository),
@@ -206,6 +207,39 @@ fn lists_java_files_once<F: Factory>(factory: &F, _: Duration) -> Result<(), Str
         return Err("a Paths listing carried a stat".to_owned());
     }
     expect_skipped(&listing, &[])
+}
+
+/// Other JVM languages' sources and build scripts are counted under the `.java` files' exclusion
+/// rules, and never listed as files (IDX-16).
+fn counts_other_jvm_sources<F: Factory>(factory: &F, _: Duration) -> Result<(), String> {
+    let fx = factory.fixture(ROOMY)?;
+    fx.write("build.gradle", b"")?;
+    fx.write("src/main/java/a/A.java", b"class A {}")?;
+    fx.write("src/main/kotlin/a/Ledger.kt", b"fun f() {}")?;
+    fx.write("src/test/groovy/a/Spec.groovy", b"class Spec {}")?;
+    fx.write("web/index.JSP", b"<% %>")?;
+    fx.write("notes.txt", b"not a source")?;
+    fx.write("build/generated/G.kt", b"fun g() {}")?;
+    fx.write(".gitignore", b"gen/\n")?;
+    fx.write("gen/H.kt", b"fun h() {}")?;
+    fx.write("linked/.git", b"gitdir: /elsewhere/.git/worktrees/linked\n")?;
+    fx.write("linked/W.kt", b"fun w() {}")?;
+    let listing = list(&fx, ListMode::Paths)?;
+    expect_files(&listing, &["src/main/java/a/A.java"])?;
+    let other: Vec<&str> = listing.other.iter().map(RelPath::as_str).collect();
+    let want = [
+        "build.gradle",
+        "src/main/kotlin/a/Ledger.kt",
+        "src/test/groovy/a/Spec.groovy",
+        "web/index.JSP",
+    ];
+    if other != want || listing.other_count != 4 {
+        return Err(format!(
+            "counted {other:?} ({} in all), want {want:?}",
+            listing.other_count
+        ));
+    }
+    Ok(())
 }
 
 fn lists_with_stat<F: Factory>(factory: &F, _: Duration) -> Result<(), String> {
@@ -977,6 +1011,19 @@ mod tests {
         }
     });
 
+    // Counts no file of another language: a view with Kotlin callers that answers complete.
+    broken!(HidesOtherSources {
+        delegate!(read);
+        delegate!(stat);
+        delegate!(watch);
+        async fn list(&self, root: &FileUri, mode: ListMode) -> Result<Listing, SourceTreeError> {
+            let mut listing = self.0.list(root, mode).await?;
+            listing.other.clear();
+            listing.other_count = 0;
+            Ok(listing)
+        }
+    });
+
     // Reads the whole file whatever the limit.
     broken!(UnboundedRead {
         delegate!(list);
@@ -1422,6 +1469,18 @@ mod tests {
             failed,
             ["reports_a_non_utf8_name", "reports_an_unreadable_directory"]
         );
+    }
+
+    #[test]
+    fn should_fail_the_other_sources_case_when_other_languages_are_not_counted() {
+        // given
+        let suite_on_broken = || run::<HidesOtherSources>();
+
+        // when
+        let failed = suite_on_broken();
+
+        // then
+        assert_eq!(failed, ["counts_other_jvm_sources"]);
     }
 
     #[test]

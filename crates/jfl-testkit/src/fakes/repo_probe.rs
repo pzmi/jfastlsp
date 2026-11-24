@@ -15,7 +15,7 @@
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
-use jfl_application::source_tree::MTime;
+use jfl_application::source_tree::{MTime, is_other_source_name};
 use jfl_application::{
     ChangedFiles, GitFile, GitSnapshot, GitStat, GitStep, HeadState, ObjectId, RepoProbe,
     RepoProbeError, StatRecord, TrackedFiles, Worktree, WorktreeKind,
@@ -578,13 +578,23 @@ impl FakeRepoProbe {
     fn tracked_now(&self, worktree: &Worktree) -> Result<TrackedFiles, RepoProbeError> {
         self.with_tree(worktree, |model, at| {
             let tree = model.trees.get(at).ok_or(RepoProbeError::NotAWorktree)?;
+            let name = |path: &[u8]| -> Vec<u8> {
+                path.rsplit(|b| *b == b'/').next().unwrap_or(path).to_vec()
+            };
             let (files, unrepresentable) = convert(tree.index.keys().filter(|path| {
-                let name = path.rsplit(|b| *b == b'/').next().unwrap_or(path);
+                let name = name(path);
                 name.len() > ".java".len() && name.ends_with(b".java")
             }));
+            let (other, other_unrepresentable) = convert(
+                tree.index
+                    .keys()
+                    .filter(|path| is_other_source_name(&String::from_utf8_lossy(&name(path)))),
+            );
             Ok(TrackedFiles {
                 files,
                 unrepresentable,
+                other,
+                other_unrepresentable,
             })
         })
     }

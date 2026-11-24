@@ -1930,3 +1930,138 @@ fn should_say_implicit_uses_when_a_record_pattern_may_call_the_accessor() {
         );
     }
 }
+
+/// A Kotlin file of the view that calls `Tally.post(int)`: the syntax index reads only `.java`
+/// (plan §1.4), so its call is in neither `exact` nor `possible`.
+const KOTLIN_CALLER: (&str, &[u8]) = (
+    "m/src/main/kotlin/com/acme/refs/Ledger.kt",
+    b"package com.acme.refs\n\nfun record(t: Tally) {\n    t.post(7)\n}\n",
+);
+
+#[test]
+fn should_answer_incomplete_when_a_kotlin_file_of_the_view_may_use_the_target() {
+    // given: `Tally.post(int)`, whose references are complete without the Kotlin file
+    let world = World::new();
+    let mut service = world.service();
+    let tally = ask(&mut service, "refs/Tally.java");
+    let at = world.at("refs/Tally.java", "post(int amount)", 0, 1);
+    let before = refs(&service, &tally, at).unwrap();
+    world.tree.write(KOTLIN_CALLER.0, KOTLIN_CALLER.1).unwrap();
+    // when
+    let mut service = world.service();
+    let tally = ask(&mut service, "refs/Tally.java");
+    let after = refs(&service, &tally, at).unwrap();
+    // then: the same sites, and `complete` withdrawn for the Kotlin file
+    assert!(before.complete(), "{:?}", before.incomplete_because());
+    assert_eq!(all_places(&after), all_places(&before));
+    assert_eq!(
+        after.incomplete_because(),
+        [IncompleteReason::OtherLanguageSources { files: 1 }]
+    );
+}
+
+/// The definition, the hover and the hover's reference counts at `needle` of `Tally.java`, in a
+/// view that also holds `extra` (a path under the view's root, and its bytes).
+#[cfg(test)]
+fn tally_answers(
+    extra: (&str, &[u8]),
+    needle: &str,
+) -> (Envelope, Envelope, Option<jfl_application::ReferenceCounts>) {
+    let world = World::new();
+    world.tree.write(extra.0, extra.1).unwrap();
+    let mut service = world.service();
+    let tally = ask(&mut service, "refs/Tally.java");
+    let clock = still();
+    let config = QueryConfig::default();
+    let deadline = ClockDeadline::new(&clock, config.definition_budget);
+    let at = world.at("refs/Tally.java", needle, 0, 1);
+    let definition = def(&service, &tally, at).unwrap();
+    let hovered = block_on(hover(
+        &pinned(&tally),
+        &service.sources(),
+        at,
+        UTF16,
+        &config,
+        &deadline,
+        &QueryCache::new(),
+    ))
+    .unwrap();
+    (definition, hovered.envelope, hovered.references)
+}
+
+#[test]
+fn should_keep_a_proved_definition_complete_when_only_kotlin_can_see_it() {
+    // given: the declaration's own name (proved exact), and a call among overloads (not proved)
+    // when
+    let (proved, hovered, counts) = tally_answers(KOTLIN_CALLER, "post(int amount)");
+    let (overloaded, _, _) = tally_answers(KOTLIN_CALLER, "post(first)");
+    // then: a proved binding holds whatever Kotlin declares; the Kotlin call is still a reference
+    // no list holds, and an unproved binding may be a Kotlin declaration
+    assert_eq!(proved.exact().len(), 1);
+    assert!(proved.complete(), "{:?}", proved.incomplete_because());
+    assert!(hovered.complete(), "{:?}", hovered.incomplete_because());
+    assert_eq!(
+        counts.unwrap().to_string(),
+        "0 exact, 5 possible, incomplete"
+    );
+    assert!(overloaded.exact().is_empty());
+    assert!(
+        overloaded
+            .incomplete_because()
+            .contains(&IncompleteReason::OtherLanguageSources { files: 1 })
+    );
+}
+
+#[test]
+fn should_withdraw_complete_from_a_proved_definition_when_an_aspect_can_see_it() {
+    // given: an AspectJ aspect, whose inter-type declarations can add a `post` to `Tally`
+    let aspect: (&str, &[u8]) = (
+        "m/src/main/aspect/com/acme/refs/Audit.aj",
+        b"package com.acme.refs;\n\naspect Audit {\n    public void Tally.post(long amount) {}\n}\n",
+    );
+    // when
+    let (proved, hovered, _) = tally_answers(aspect, "post(int amount)");
+    // then
+    let reason = IncompleteReason::OtherLanguageSources { files: 1 };
+    assert_eq!(proved.exact().len(), 1);
+    assert_eq!(proved.incomplete_because(), core::slice::from_ref(&reason));
+    assert_eq!(hovered.incomplete_because(), [reason]);
+}
+
+#[test]
+fn should_answer_workspace_symbols_incomplete_when_a_kotlin_file_may_declare_one() {
+    // given
+    let world = World::new();
+    let mut service = world.service();
+    let before = ask(&mut service, "refs/Tally.java");
+    world.tree.write(KOTLIN_CALLER.0, KOTLIN_CALLER.1).unwrap();
+    let mut with_kotlin = world.service();
+    let after = ask(&mut with_kotlin, "refs/Tally.java");
+    let config = QueryConfig::default();
+    let clock = still();
+    let search = |service: &Service, answer: &Answer| {
+        block_on(workspace_symbols(
+            &pinned(answer),
+            &service.sources(),
+            SymbolQuery {
+                text: "Tally",
+                filter: None,
+                limit: None,
+            },
+            UTF16,
+            &config,
+            &ClockDeadline::new(&clock, config.symbols_budget),
+            &QueryCache::new(),
+        ))
+    };
+    // when
+    let plain = search(&service, &before);
+    let kotlin = search(&with_kotlin, &after);
+    // then
+    assert!(plain.completeness.is_complete(), "{plain:?}");
+    assert_eq!(kotlin.symbols, plain.symbols);
+    assert_eq!(
+        kotlin.completeness.reasons(),
+        [IncompleteReason::OtherLanguageSources { files: 1 }]
+    );
+}

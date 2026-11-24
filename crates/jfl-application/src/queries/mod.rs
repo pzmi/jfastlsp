@@ -9,6 +9,11 @@
 //!
 //! **Completeness starts from the pin** (the request's own view: `Pending` files, gaps, an
 //! unwatched view, pending changes) and each query only adds to it:
+//! - `OtherLanguageSources` when files of other JVM languages, which are not indexed (plan §1.4),
+//!   can see the target's file (references: they may use it), or the request's file when its
+//!   definition is not proved exact or an AspectJ file can see it (definition and hover:
+//!   [`definition_others`]), and for any of them in the view (workspace symbols: they may
+//!   declare the symbol) (IDX-16);
 //! - `TargetUnresolved` when syntax could not prove the binding (resolution rules in
 //!   [`resolve`]), `TargetNotIndexed` when every place the name could be declared in the view was
 //!   searched and none declares it, `ResultsCapped` when more matched than the answer lists;
@@ -50,7 +55,7 @@ use jfl_domain::{
 };
 
 use crate::clock::{WallClock, elapsed};
-use crate::source_tree::MTime;
+use crate::source_tree::{MTime, OtherSources};
 use crate::syntax_indexer::SiteSyntax;
 use crate::view_service::{self, Answer, GitObserved, Summary};
 use crate::views::{FileSeen, Published};
@@ -304,6 +309,53 @@ fn syntax_errors(completeness: Completeness, snapshot: &Snapshot) -> Completenes
     }
 }
 
+/// `completeness`, withdrawn when files of other JVM languages (Kotlin, Groovy, Scala, …), which
+/// the syntax index does not read (plan §1.4), can see `path`: the request's file for a
+/// definition not proved exact ([`definition_others`]: one of them may declare what its name
+/// binds to), the target's for references (one of them may use it). Build scripts and `buildSrc`'s sources count only for a path in build
+/// logic ([`OtherSources::seen_from`]).
+///
+/// Pinned by: `tests/queries.rs::should_answer_incomplete_when_a_kotlin_file_of_the_view_may_use_the_target`
+/// and `jfl-adapter-java`'s `tests/definitions/references.rs::should_count_build_scripts_and_build_src_only_for_build_logic_when_a_view_has_them`.
+fn other_languages(
+    completeness: Completeness,
+    others: &OtherSources,
+    path: &RelPath,
+) -> Completeness {
+    match others.seen_from(path) {
+        0 => completeness,
+        files => completeness.and(IncompleteReason::OtherLanguageSources { files }),
+    }
+}
+
+/// [`other_languages`] for a definition or hover from `path`, whose outcome is `proved` exact or
+/// not. A proved binding needs no file of another language to hold: the prover binds only
+/// through the file's own and enclosing types, supertypes resolved from them or single-type
+/// imports, and a supertype outside the index ends the proof; a Kotlin, Groovy, Scala, … type of
+/// the same qualified name as a Java one is a duplicate class, and none of them adds a member
+/// to a Java class (Kotlin's extension functions compile to static methods of another class).
+/// AspectJ does (inter-type declarations, `declare parents`), so an aspect that can see `path`
+/// withdraws `complete` from a proved binding too; every outcome that is not proved withdraws it
+/// for every file that can see `path` (a type of another language in the package may be the one
+/// meant).
+///
+/// Pinned by: `tests/queries.rs::should_keep_a_proved_definition_complete_when_only_kotlin_can_see_it`
+/// and `tests/queries.rs::should_withdraw_complete_from_a_proved_definition_when_an_aspect_can_see_it`.
+fn definition_others(
+    completeness: Completeness,
+    others: &OtherSources,
+    path: &RelPath,
+    proved: bool,
+) -> Completeness {
+    if !proved {
+        return other_languages(completeness, others, path);
+    }
+    match others.aspects_seen_from(path) {
+        0 => completeness,
+        _ => other_languages(completeness, others, path),
+    }
+}
+
 /// The location of `range` in a file's text, in `encoding`.
 fn convert(text: &FileText, range: ByteRange, encoding: PositionEncoding) -> Option<Range> {
     text.lines.range(range, encoding).ok()
@@ -553,6 +605,14 @@ async fn found<S: Sources, D: Deadline>(
         }
     };
     let mut completeness = syntax_errors(answer.completeness.clone(), &snapshot);
+    // A proved binding keeps `complete` beside other languages' files, but not beside an aspect's
+    // (`definition_others`).
+    completeness = definition_others(
+        completeness,
+        &answer.other_sources,
+        &answer.path,
+        matches!(outcome, Outcome::Exact(_)),
+    );
     // What the outcome lists, and how it is read.
     let mut target: Option<(Hit, TargetStatus)> = None;
     let mut exact: Vec<Hit> = Vec::new();

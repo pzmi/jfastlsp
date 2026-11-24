@@ -43,6 +43,12 @@
 //!   read. What a scan could not see (an unreadable directory, an unrepresentable path, a failed
 //!   `ls-files`) and every file without a summary (unreadable, refused by the indexer) is a gap:
 //!   the answer is `ModulePartlyIndexed`, never complete.
+//! - **Other JVM languages** (IDX-16). Each scan's listing, unioned with the tracked ones as
+//!   `.java` files are (`.gitignore`d or in build output), counts the view's Kotlin, Groovy,
+//!   Scala, … sources and Gradle build scripts ([`OtherSources`]); a request's [`Answer`] carries
+//!   the last scan's, and each query withdraws `complete` for those that can see its subject. An
+//!   edit of a counted file that still exists is no rescan (one stat); a file created or removed
+//!   is.
 //! - **Hints.** A `.java` file the view holds is a file event; any other path a hint names (a new
 //!   file, a directory, a `.gitignore`, a build file) asks for a rescan, since what changed below
 //!   it is not named (`should_rescan_when_a_hint_names_no_java_file`); a cookie of this daemon is
@@ -98,8 +104,9 @@ use crate::repo_probe::{
     GitFile, GitSnapshot, GitStat, HeadState, RepoProbe, RepoProbeError, Worktree,
 };
 use crate::source_tree::{
-    Exclusion, FileStat, FsKind, Hint, Hints, ListMode, MTime, Rescan, RescanReason, RescanReasons,
-    SourceTree, SourceTreeError, cookie_name, cookie_stamp, is_cookie, is_java_file_name,
+    BUILD_FILES, Exclusion, FileStat, FsKind, Hint, Hints, ListMode, MTime, OtherSources, Rescan,
+    RescanReason, RescanReasons, SourceTree, SourceTreeError, cookie_name, cookie_stamp, is_cookie,
+    is_java_file_name,
 };
 use crate::summary_store::SummaryStore;
 use crate::syntax_indexer::{MAX_SOURCE_BYTES, SiteSyntax, SyntaxIndexer, strip_bom};
@@ -314,6 +321,9 @@ pub struct Answer {
     pub completeness: Completeness,
     /// The view the completeness was computed from.
     pub complete_view: FileUri,
+    /// The view's other JVM languages' sources and build scripts, as its last scan listed them:
+    /// each query withdraws `complete` for those that can see what it answers about (IDX-16).
+    pub other_sources: Arc<OtherSources>,
     /// Each cookie's round trip, written to delivered (at most two).
     pub cookie_round_trips: Vec<Duration>,
 }
@@ -325,6 +335,8 @@ struct Opened<W> {
     watch: Option<W>,
     /// What the last scan could not see.
     scan_gaps: u64,
+    /// What the last scan counted of other JVM languages and build scripts (IDX-16).
+    other: Arc<OtherSources>,
     /// The roots of other views below this one, as the last scan skipped them (nested worktrees
     /// and repositories, agent worktrees, links) or as they were opened since: their files are
     /// never this view's.
@@ -347,6 +359,7 @@ struct Scan {
     stats: BTreeMap<RelPath, FileStat>,
     gaps: u64,
     nested: Vec<RelPath>,
+    other: OtherSources,
 }
 
 /// One summarised file: its path, what the stat saw before the read, the summary, and whether
@@ -913,6 +926,9 @@ where
             .filter(|s| s.why != Exclusion::BuildOutput)
             .map(|s| s.path.clone())
             .collect();
+        let mut other = listing.other.clone();
+        let kept = u64::try_from(listing.other.len()).unwrap_or(u64::MAX);
+        let mut unkept = listing.other_count.saturating_sub(kept);
         let mut stats = BTreeMap::new();
         let mut paths = BTreeSet::new();
         for file in &listing.files {
@@ -929,6 +945,13 @@ where
                         paths.insert(path);
                     }
                 }
+                unkept = unkept.saturating_add(tracked.other_unrepresentable);
+                other.extend(
+                    tracked
+                        .other
+                        .into_iter()
+                        .filter(|path| !nested.iter().any(|o| under(path, o))),
+                );
             }
             Err(_) => gaps = gaps.saturating_add(1),
         }
@@ -937,6 +960,7 @@ where
             stats,
             gaps,
             nested,
+            other: OtherSources::new(&other, unkept),
         })
     }
 
@@ -1150,6 +1174,7 @@ where
                 kind,
                 watch,
                 scan_gaps: scan.gaps,
+                other: Arc::new(scan.other),
                 nested: scan.nested,
                 counts: (Generation(0), 0, 0),
                 tally: (0, 0),
@@ -1177,6 +1202,18 @@ where
         Ok(())
     }
 
+    /// Whether `path` is another JVM language's file (not a [`BUILD_FILES`] file, whose hint
+    /// stays a rescan) that the view's last listing counted and that still exists: an edit,
+    /// which moves no count, so it costs one stat rather than a rescan (IDX-16). A file created
+    /// or removed is a rescan, whose listing counts again.
+    ///
+    /// Pinned by: `tests/view_service.rs::should_count_other_language_files_again_when_one_is_created_or_removed`.
+    async fn other_unchanged(&self, root: &FileUri, path: &RelPath) -> bool {
+        let held = self.views.get(root).is_some_and(|o| o.other.holds(path))
+            && !BUILD_FILES.contains(&path.file_name());
+        held && matches!(self.stat(root, path).await, Ok(Some(_)))
+    }
+
     /// Whether `path` lies under a nested root of the view of `root`: never the view's file.
     fn nested(&self, root: &FileUri, path: &RelPath) -> bool {
         self.views
@@ -1200,6 +1237,8 @@ where
                     }
                 } else if is_cookie(&path) || self.nested(root, &path) {
                     // Another daemon's cookie, or another view's file: no change of this view.
+                } else if self.other_unchanged(root, &path).await {
+                    // An edit of another language's file the last listing counted: no count moved.
                 } else if is_java_file_name(path.file_name())
                     && self
                         .registry
@@ -1437,6 +1476,7 @@ where
                 listed = Some(scan.paths);
                 if let Some(opened) = self.views.get_mut(root) {
                     opened.scan_gaps = scan.gaps;
+                    opened.other = Arc::new(scan.other);
                     opened.nested = scan.nested;
                 }
             }
@@ -1582,6 +1622,10 @@ where
             }
             let git = self.git(&worktree).await;
             let opened = self.views.get(&root).map(|o| (o.counts, o.scan_gaps));
+            let other_sources = self
+                .views
+                .get(&root)
+                .map_or_else(Arc::default, |o| Arc::clone(&o.other));
             let pin = self.registry.request_pin(id, &git)?;
             let mut completeness = pin.completeness.clone();
             let (files, indexed) = match opened {
@@ -1607,6 +1651,7 @@ where
                 generation: Arc::clone(&pin.generation),
                 completeness,
                 complete_view: pin.complete_view.clone(),
+                other_sources,
                 cookie_round_trips: round_trips,
             });
         }

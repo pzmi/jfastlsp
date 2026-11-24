@@ -38,6 +38,39 @@ pub mod snapshot;
 
 use cli::Git;
 
+/// The pathspecs of [`RepoProbe::tracked_java`]'s `ls-files`: `.java` as the listing matches it,
+/// and each extension of `jfl_application::source_tree::OTHER_JVM_EXTENSIONS` and
+/// `BUILD_SCRIPT_SUFFIXES` (`.gradle.kts` is under `.kts`) without regard to case, as
+/// `source_kind` matches them (IDX-16). `*` matches across `/` in a pathspec without `glob`
+/// magic, so each names the extension anywhere in the tree.
+///
+/// Pinned by: `tests::should_name_every_extension_of_the_registry_when_tracked_files_are_asked_for`.
+pub const TRACKED_PATHSPECS: [&str; 23] = [
+    "*.java",
+    ":(icase)*.kt",
+    ":(icase)*.kts",
+    ":(icase)*.groovy",
+    ":(icase)*.gvy",
+    ":(icase)*.gy",
+    ":(icase)*.gsh",
+    ":(icase)*.scala",
+    ":(icase)*.sc",
+    ":(icase)*.clj",
+    ":(icase)*.cljc",
+    ":(icase)*.xtend",
+    ":(icase)*.jsp",
+    ":(icase)*.jspf",
+    ":(icase)*.jspx",
+    ":(icase)*.tag",
+    ":(icase)*.tagx",
+    ":(icase)*.aj",
+    ":(icase)*.bsh",
+    ":(icase)*.gsp",
+    ":(icase)*.jte",
+    ":(icase)*.kte",
+    ":(icase)*.gradle",
+];
+
 /// The output a reconcile command may print: 64 MiB, room for `ls-files` of a worktree two
 /// hundred times the largest corpus repository (elasticsearch, 33.9k files); more is refused.
 pub const DEFAULT_MAX_OUTPUT: usize = 64 << 20;
@@ -332,17 +365,16 @@ impl<E: EnvSource> Inner<E> {
     }
 
     fn tracked_java(&self, worktree: &Worktree) -> Result<TrackedFiles, RepoProbeError> {
-        let printed = self.run(
-            GitStep::LsFiles,
-            worktree,
-            &["ls-files", "-z", "--cached", "--full-name", "--", "*.java"],
-            &[],
-        )?;
-        let paths = parse::java_names(&printed.stdout)
+        let mut args = vec!["ls-files", "-z", "--cached", "--full-name", "--"];
+        args.extend(TRACKED_PATHSPECS);
+        let printed = self.run(GitStep::LsFiles, worktree, &args, &[])?;
+        let (java, other) = parse::tracked_names(&printed.stdout)
             .map_err(|_| RepoProbeError::Malformed(GitStep::LsFiles))?;
         Ok(TrackedFiles {
-            files: paths.paths,
-            unrepresentable: paths.unrepresentable,
+            files: java.paths,
+            unrepresentable: java.unrepresentable,
+            other: other.paths,
+            other_unrepresentable: other.unrepresentable,
         })
     }
 }
@@ -390,5 +422,32 @@ pub(crate) fn map_io(error: &io::Error) -> RepoProbeError {
         io::ErrorKind::NotFound => RepoProbeError::NotFound,
         io::ErrorKind::PermissionDenied => RepoProbeError::PermissionDenied,
         kind => RepoProbeError::Io(kind),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use jfl_application::source_tree::{BUILD_SCRIPT_SUFFIXES, OTHER_JVM_EXTENSIONS};
+
+    use super::TRACKED_PATHSPECS;
+
+    #[test]
+    fn should_name_every_extension_of_the_registry_when_tracked_files_are_asked_for() {
+        // given
+        let wanted: Vec<String> = OTHER_JVM_EXTENSIONS
+            .iter()
+            .map(|(extension, _)| *extension)
+            .chain(BUILD_SCRIPT_SUFFIXES.iter().copied())
+            .filter(|suffix| *suffix != ".gradle.kts")
+            .map(|suffix| format!(":(icase)*{suffix}"))
+            .chain(core::iter::once("*.java".to_owned()))
+            .collect();
+        // when
+        let mut asked: Vec<&str> = TRACKED_PATHSPECS.to_vec();
+        asked.sort_unstable();
+        let mut wanted: Vec<&str> = wanted.iter().map(String::as_str).collect();
+        wanted.sort_unstable();
+        // then
+        assert_eq!(asked, wanted);
     }
 }

@@ -93,6 +93,29 @@ pub fn java_names(bytes: &[u8]) -> Result<Paths, Malformed> {
     Ok(paths.finish())
 }
 
+/// `ls-files -z` with the pathspecs of [`crate::TRACKED_PATHSPECS`]: the `.java` files, and the
+/// other JVM languages' sources and build scripts
+/// ([`jfl_application::source_tree::is_other_source_name`], classified by the name's bytes, lossily
+/// when they are not UTF-8, so such a file is counted as unrepresentable, never dropped). A name
+/// neither rule takes is dropped.
+pub fn tracked_names(bytes: &[u8]) -> Result<(Paths, Paths), Malformed> {
+    let mut java = Paths::default();
+    let mut other = Paths::default();
+    for record in records(bytes)? {
+        if record.is_empty() {
+            return Err(Malformed);
+        }
+        let name = record.rsplit(|b| *b == b'/').next().unwrap_or(record);
+        if name.len() > JAVA_EXTENSION.len() && name.ends_with(JAVA_EXTENSION.as_bytes()) {
+            java.push(record);
+        } else if jfl_application::source_tree::is_other_source_name(&String::from_utf8_lossy(name))
+        {
+            other.push(record);
+        }
+    }
+    Ok((java.finish(), other.finish()))
+}
+
 /// What `status -z --porcelain=v2` reported.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct Status {
@@ -295,6 +318,22 @@ mod tests {
         assert_eq!(parsed, [&b"a b"[..], b"c"]);
         assert!(empty.is_empty());
         assert_eq!(cut, Some(Malformed));
+    }
+
+    #[test]
+    fn should_split_java_from_other_jvm_sources_when_tracked_files_are_parsed() {
+        // given: a name that is not UTF-8 and ends in `.kt` is counted, never dropped
+        let output = b"a/A.java\0b/L.kt\0build.gradle\0b/\xff.kt\0README\0a/A.java\0";
+
+        // when
+        let (java, other) = tracked_names(output).unwrap();
+        let empty = tracked_names(b"\0").err();
+
+        // then
+        assert_eq!(strs(&java), ["a/A.java"]);
+        assert_eq!(strs(&other), ["b/L.kt", "build.gradle"]);
+        assert_eq!((java.unrepresentable, other.unrepresentable), (0, 1));
+        assert_eq!(empty, Some(Malformed));
     }
 
     #[test]

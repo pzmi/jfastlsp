@@ -636,3 +636,44 @@ fn should_say_syntax_errors_when_a_file_of_the_view_does_not_parse() {
     );
     assert_eq!(definition.incomplete_because(), [reason]);
 }
+
+#[test]
+fn should_count_build_scripts_and_build_src_only_for_build_logic_when_a_view_has_them() {
+    // given: Groovy build scripts, a Groovy source in `buildSrc` and a Java plugin beside it,
+    // which only the build's scripts and `buildSrc` can see
+    let plugin = "buildSrc/src/main/java/conventions/Conventions.java";
+    let mut files = shop_files();
+    for (path, text) in [
+        ("build.gradle", "plugins { id 'java' }\n"),
+        ("settings.gradle", "rootProject.name = 'shop'\n"),
+        (
+            "buildSrc/src/main/groovy/conventions/Lock.groovy",
+            "package conventions\nclass Lock {}\n",
+        ),
+        (
+            plugin,
+            "package conventions;\n\npublic class Conventions {\n    public void pin(int level) {}\n}\n",
+        ),
+    ] {
+        files.push((path.to_owned(), text.as_bytes().to_vec()));
+    }
+    files.sort();
+    let mut world = World::new(files);
+    let tally = "src/main/java/com/acme/refs/Tally.java";
+    let post = u32::try_from(world.text(tally).find("post(int amount)").unwrap())
+        .unwrap()
+        .saturating_add(1);
+    let pin = u32::try_from(world.text(plugin).find("pin(int level)").unwrap())
+        .unwrap()
+        .saturating_add(1);
+    // when
+    let main = world.refs(tally, post, &QueryCache::new());
+    let build_logic = world.refs(plugin, pin, &QueryCache::new());
+    // then: the main source set's target stays complete; the plugin's counts all three scripts'
+    // and sources' files
+    assert!(main.complete(), "{:?}", main.incomplete_because());
+    assert_eq!(
+        build_logic.incomplete_because(),
+        [jfl_domain::IncompleteReason::OtherLanguageSources { files: 3 }]
+    );
+}

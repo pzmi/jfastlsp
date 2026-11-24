@@ -64,6 +64,7 @@ mod support {
         golden!("jfl.definition.response.unwatched"),
         golden!("jfl.references.request"),
         golden!("jfl.references.response"),
+        golden!("jfl.references.response.other-languages"),
         golden!("jfl.hover.request"),
         golden!("jfl.hover.response"),
         golden!("jfl.symbols.request"),
@@ -199,6 +200,28 @@ mod support {
         });
         let query = Query {
             op: Operation::Def,
+            uri: uri(SHOP),
+            line: 12,
+            col: 18,
+        };
+        WireEnvelope::from_domain(&envelope, Some(query))
+    }
+
+    /// References answered from a view with Kotlin, Groovy or other JVM-language sources, which
+    /// the syntax index does not read (IDX-16, plan §1.4): any of them may use the target.
+    pub(super) fn other_languages_references_envelope() -> WireEnvelope {
+        let envelope = Envelope::new(EnvelopeParts {
+            view: view(118, Some(HEAD)),
+            target: Some(exact_target()),
+            exact: vec![location(BILL, range(40, 16, 40, 22))],
+            possible: vec![],
+            completeness: complete_at(118)
+                .and(IncompleteReason::OtherLanguageSources { files: 396 }),
+            freshness: fresh(),
+            position_encoding: PositionEncoding::Utf16,
+        });
+        let query = Query {
+            op: Operation::Refs,
             uri: uri(SHOP),
             line: 12,
             col: 18,
@@ -469,6 +492,10 @@ fn should_match_the_golden_when_every_envelope_query_is_encoded() {
         ),
         request_case::<References>("jfl.references.request", 2, references),
         response_case::<References>("jfl.references.response", ok(2, references_envelope())),
+        response_case::<References>(
+            "jfl.references.response.other-languages",
+            ok(11, other_languages_references_envelope()),
+        ),
         request_case::<messages::Implementations>(
             "jfl.implementations.request",
             5,

@@ -98,6 +98,7 @@ CLI carrier), **SEM-07** (M4),
 | IDX-10 | Queries: `sym`, `def`, `hover` | IDX-09 | deep | L |  | LSP-01 |
 | IDX-11 | Queries: `refs`, the `possible` superset, completeness | IDX-10 | deep | L |  | IDX-12 |
 | IDX-12 | Daemon and IPC: lock, socket, spawn, reconnect (daemon driver) | IDX-03, IDX-09, FORMAL-04 | deep | L |  | IDX-11 |
+| IDX-16 | Other JVM languages' sources make answers incomplete | IDX-11 | deep | M |  | FND-18 |
 | LSP-01 | LSP adapter on `lsp-server` and the LSP conformance harness | IDX-03; started before DEC-02 by the owner's delegation (2026-11-17); DEC-02 still gates work beyond the walking skeleton | deep | L |  | IDX-09, IDX-10 |
 | LSP-02 | `jfl lsp`: lifecycle, encodings, document sync, deadlines | LSP-01, IDX-12 | deep | L |  | IDX-11 |
 | LSP-03 | Navigation methods | LSP-02, IDX-11, DEC-06 | standard | L |  | LSP-04 |
@@ -2860,6 +2861,64 @@ the loop is held p95 299–307 ms per slice (the whole 4.1–4.3 s settle before
   - [x] reports the metrics it affects (`just bench-daemon`, `doc/bench/README.md`); no corpus applies (none of it reads a Java file; the orchestrator to confirm this reading of the clause)
   - [ ] the `endpoint` contract suite (ver §5): one suite over an in-memory duplex and `jfl-adapter-ipc`, with a deliberately broken implementation failing it
 - **Impact:** protocol (endpoint); new authority (sockets).
+
+#### IDX-16: Other JVM languages' sources make answers incomplete
+- **Depends on:** IDX-11. **Model:** deep. **Size:** M. **Parallel with:** FND-18.
+- **Cites:** plan §1.4, §2.1, §4.2; ADR 0014, ADR 0031. Approved by the owner, 2026-11-24.
+- **Why:** Gradle repositories mix Java with Kotlin, Groovy or Scala, which call Java declarations
+  and declare what Java names bind to. The syntax index reads only `.java` (plan §1.4), and
+  references, definitions and hover answered `complete=true` while a Kotlin file of the view used
+  the target: `jfl-application`'s `tests/queries.rs::should_answer_incomplete_when_a_kotlin_file_of_the_view_may_use_the_target`
+  failed on 73f88eb (`Tally.post(int)`'s references complete with `Ledger.kt` calling it).
+- **Done:** one allowlist registry, `jfl_application::source_tree::source_kind` over
+  `OTHER_JVM_EXTENSIONS` (`.kt`, `.kts`, `.groovy`, `.gvy`, `.gy`, `.gsh`, `.scala`, `.sc`,
+  `.clj`, `.cljc`, `.xtend`, `.jsp`, `.jspf`, `.jspx`, `.tag`, `.tagx`, `.aj`, `.bsh`, `.gsp`,
+  `.jte`, `.kte`, ASCII case ignored, each with its reason; `.cljs`, `.py`, `.rb`, `.js`, `.xml`,
+  reflective templates (`.ftl`, `.vm`, Thymeleaf) and string references left out with theirs) and
+  `BUILD_SCRIPT_SUFFIXES` (`.gradle`, `.gradle.kts`). The fs adapter's walk and the testkit fake
+  record such files by name under the `.java` exclusion rules (`Listing::other`, no stat, no
+  read, never against the file cap), and the git adapter's `ls-files` names them too
+  (`TRACKED_PATHSPECS`), so a tracked file under a `.gitignore`d or build-output directory is
+  unioned in as `.java` files are. The view service keeps the last scan's `OtherSources` and
+  hands it to each request. `OtherLanguageSources { files }`, worded
+  `N files in other JVM languages not indexed`, is added by references (files that can see the
+  target's file), workspace symbols (any in the view), and definition and hover (files that can
+  see the request's file) unless the binding is proved exact; a proved binding keeps `complete`
+  except when an AspectJ file can see the request's file (inter-type declarations and
+  `declare parents` add members and supertypes to Java classes). Build scripts and `buildSrc`'s
+  sources count only for a file in build logic (under `buildSrc`, or below a directory other
+  than the root holding a settings file). Hints for those names are no longer dropped
+  (`hint_excluded`): a file created or removed rescans; an edit of a counted file that still
+  exists costs one stat, not a rescan.
+- **Decided here:** build scripts are scoped to build logic, not counted for every target (every
+  Gradle repository would otherwise never answer complete); other-language sources in an
+  included build count for every target (an included build can substitute a library the main
+  build uses), those under `buildSrc` only for build logic. A proved-exact definition keeps
+  `complete` beside every language but AspectJ (the orchestrator's decision, 2026-11-24, on the
+  review's reading of the prover). **Known limitation until M3:** the build-logic rule is by
+  directory; build logic that compiles sources from elsewhere (`buildSrc` with
+  `srcDir("../src/main/java")`, an included build whose source directories lie outside it,
+  `buildscript { classpath files(...) }` naming a project's output), and an included build
+  without its own settings file (Gradle 8 refuses one), are not seen, so a build script's use of
+  such a declaration is not counted (plan §2.1).
+- **Cost seen:** `.jsp` in test resources counts like any source: fineract's one
+  (`integration-tests/src/test/resources/image-text-wrong-content.jsp`) withdraws `complete`
+  from all of its answers.
+- **Follow-ups:** workspace symbols do not withdraw `complete` for `SyntaxErrors` (a gap older
+  than this card; a card of its own); re-measure the common-name references on a quiet machine,
+  runs interleaved with main's, before M1's bench gate takes them as a baseline. A `.kt` or
+  `.groovy` writer into a watched, `.gitignore`d directory (a code generator's output not beside
+  a build file) now costs a rescan per file, as `.java` already did.
+- **Kotlin as an indexed language** is a DEC-02 question, not this card's.
+- **Reuse considered:** none needed: a name allowlist over the existing walk (`ignore`) and the
+  existing `ls-files` call.
+- **Accept:**
+  - [x] the bug confirmed by a failing test first (`tests/queries.rs::should_answer_incomplete_when_a_kotlin_file_of_the_view_may_use_the_target`, red on 73f88eb)
+  - [x] one registry of extensions with a reason each (`source_tree::tests::should_classify_a_file_by_its_extension_when_a_listing_meets_it`); the `source_tree` contract suite's `counts_other_jvm_sources` for the fake and the fs adapter, failed by `HidesOtherSources`; the `repo_probe` contract suite's `tracked_lists_other_jvm_sources` for the fake and the git adapter, failed by `NoTrackedOthers`; the union (`tests/view_service.rs::should_count_a_tracked_other_language_file_when_the_listing_cannot_see_it`)
+  - [x] the reason's wording and its protocol golden first (`jfl.references.response.other-languages`; `envelope::tests::should_word_each_query_reason_when_a_query_cannot_prove_its_answer`)
+  - [x] component tests for references, hover's counts and workspace symbols (`tests/queries.rs`), for definitions proved and not proved, with Kotlin and with an aspect (`should_keep_a_proved_definition_complete_when_only_kotlin_can_see_it`, `should_withdraw_complete_from_a_proved_definition_when_an_aspect_can_see_it`), build logic's scope (`jfl-adapter-java`'s `tests/definitions/references.rs::should_count_build_scripts_and_build_src_only_for_build_logic_when_a_view_has_them`), and the count kept current by hints (`tests/view_service.rs::should_count_other_language_files_again_when_one_is_created_or_removed`)
+  - [x] `just bench-views medium` before and after (`doc/bench/README.md`): no change past this VM's noise; spring-framework counts 436 such files (396 `.kt`, 17 `.groovy`, 13 `.aj`, 6 `.bsh`, 4 `.jsp`; its 34 `.gradle` scripts are build logic's) and every one of its 100 references answers says `436 files in other JVM languages not indexed`; junit-framework (small) counts 164 (154 `.kt`, 6 `.jte`, 4 `.groovy`; 79 `.gradle.kts` scripts scoped), and its 79 references answers that were complete are not
+- **Impact:** protocol (an additive `incomplete_because` reason); completeness of references, definition, hover and workspace symbols; the `source_tree` and `repo_probe` contract suites.
 
 ### Lane LSP: M1, the LSP carrier
 

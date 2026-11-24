@@ -113,6 +113,7 @@ f1d09d8b08b3ba117dee16a8eacebc84f3933e132148193ef58c72318611975b  crates/jfl-pro
 caa577851dfd00b856c1c3ec2f0ff2c7e83046f434381629d947978ab415e3bc  crates/jfl-protocol/tests/fixtures/v1/jfl.publishDiagnostics.notification.json
 9a269155f4104a8fa2ca0c0b1b06dc6e41586d4f5b97bd2788a8ea41dc53e2de  crates/jfl-protocol/tests/fixtures/v1/jfl.references.request.json
 4c23a3e3dcb8bfb0da5d744814ff395d6a3ad5a6985fdc00a0eef4c7beff4a43  crates/jfl-protocol/tests/fixtures/v1/jfl.references.response.json
+7a62c5240cd75da1dd2c635e8dee3c99f875084423a2ea20e64837ad382f6cd0  crates/jfl-protocol/tests/fixtures/v1/jfl.references.response.other-languages.json
 6726722ad2e2959b05ece0db00bdd79c22e218f6c1b63f1a0c569634ee061a21  crates/jfl-protocol/tests/fixtures/v1/jfl.status.request.json
 1d1a2ce8761655de976d8bf60ba6c92418d12357866b3dd632431c27b6d76614  crates/jfl-protocol/tests/fixtures/v1/jfl.status.response.json
 384a1e1867f817454dcb8c06987a9d7b638f1f217913a810c853c0da1faaf20b  crates/jfl-protocol/tests/fixtures/v1/jfl.stop.request.json
