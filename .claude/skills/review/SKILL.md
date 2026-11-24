@@ -165,8 +165,7 @@ Missing tests for a new branch is MEDIUM.
 message, in the crate's external allowlist, licence accepted by `deny.toml`, no git or foreign
 registry source without its recorded reason and per-crate exception; a dependency with C code (tree-sitter grammars) named as such;
 `Cargo.lock` consistent (`--locked` passes); Actions pinned by full commit SHA with minimal
-`permissions`; no `pull_request_target` with checkout of untrusted code. **Reuse** (ADR 0019,
-plan §16): a new subsystem built by hand where a maintained crate or tool fits, without the card's
+`permissions`; no `pull_request_target` with checkout of untrusted code. **Reuse** (plan §16): a new subsystem built by hand where a maintained crate or tool fits, without the card's
 `Reuse considered:` line or the commit saying why, is MEDIUM; GPL code linked into the binary, EPL code outside a separate process, or
 code, fixtures or positions taken from a non-permissive corpus repository (elasticsearch) is
 HIGH; a tool not pinned in `mise.toml` is MEDIUM.

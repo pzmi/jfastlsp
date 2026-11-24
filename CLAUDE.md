@@ -9,7 +9,7 @@ one daemon per user (Unix socket, single owner by lock) that indexes the Java so
 worktrees of a large Gradle repository at once. Every navigation answer is an envelope with
 `exact`, `possible` and `complete`, and **`complete=true` is never wrong** (ADR 0014). No JVM and no
 build on the request path (ADR 0015). **Speed is the primary value**: every change is measured on
-a pinned real-repository corpus (plan §1.7, ADR 0031). Reuse before building (ADR 0019). Status:
+a pinned real-repository corpus (plan §1.7, ADR 0031). Reuse before building (plan §16). Status:
 **pre-alpha, planning**; phase 0 measurements decide go/no-go (DEC-02). Public, open source
 (`MIT`, ADR 0033).
 
@@ -32,7 +32,9 @@ Citations read "plan §4.3", "fnd §3", "ver §6"; read the sections a task cite
 documents. Decisions in `doc/tasks.md` and Accepted ADRs override earlier plan text. The owner
 decided every record at the FND checkpoint (DEC-07, 2026-11-17) and the FORMAL checkpoint
 (2026-11-18): all are Accepted (owner) except 0001, 0005, 0011–0013, 0027 and 0030, which are
-superseded; a new record is Proposed until the owner's next checkpoint.
+superseded; 0010's sleep rule is superseded by 0039, and 0018, 0019, 0020, 0023, 0025, 0028 and
+0029 are Retired (owner, 2026-11-24: their detail lives in the doc each names). A new record is
+Proposed until the owner's next checkpoint.
 
 ## Workflow
 
@@ -115,8 +117,7 @@ allowlist or a pinned shape, never a list of bad patterns (fnd §3).
   (`/// Pinned by: <path>::<name>`); a performance claim names its benchmark and machine.
 - **Logging** (fnd §5): `tracing`, fixed `snake_case` event names, data in fields; no INFO per
   request; never source text.
-- **Dependencies**: reuse first; a card's `Reuse considered:` line says what was weighed (ADR
-  0019, plan §16). `cargo add`, reason in the commit; `Cargo.lock` committed, builds `--locked`;
+- **Dependencies**: reuse first; a card's `Reuse considered:` line says what was weighed (plan §16). `cargo add`, reason in the commit; `Cargo.lock` committed, builds `--locked`;
   licences per `deny.toml`; tools pinned in `mise.toml`; GitHub Actions pinned by commit SHA.
 - **Speed** (ADR 0031): a product task runs on the bench corpus (small at least) and reports the
   metrics it changes; from M1 a >10 % regression fails `bench.yml`'s `bench-gate` on its fixed
@@ -146,7 +147,7 @@ allowlist or a pinned shape, never a list of bad patterns (fnd §3).
   force-push, never push tags; `checkpoint-*` tags are local.
 - **Agents never push, by any means.** `.claude/settings.json` denies the common forms of
   `git push` (`git push …`, `git -C <dir> push …`, `git -c <k=v> push …`, `git --no-pager push …`,
-  `git --git-dir=… push …`, `git --work-tree=… push …`; ADR 0018, amended);
+  `git --git-dir=… push …`, `git --work-tree=… push …`; fnd §11.6);
   `scripts/land.sh`, run as a script by the orchestrator, is the only pusher.
 
 ## Sandbox

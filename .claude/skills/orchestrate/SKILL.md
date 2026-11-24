@@ -158,7 +158,7 @@ resetting the worktree"; never discard its uncommitted change without reading it
    `Cargo.lock` and the ADR index, aborts on any other conflict, runs `just check` on the
    merged tree and pushes only when it is green. It is the
    only way anything reaches `origin`: `.claude/settings.json` denies the common forms of
-   `git push` (ADR 0018, amended), and no agent or orchestrator pushes by any other means, even
+   `git push` (fnd §11.6), and no agent or orchestrator pushes by any other means, even
    after a failed land.
    Integration is direct on `main` (ADR 0002); there is no PR phase. Never land on red CI.
    `bench-gate` is not part of landing: it runs only in `bench.yml` on its runner class. A

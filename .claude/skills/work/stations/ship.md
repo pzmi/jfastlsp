@@ -17,7 +17,7 @@ intake.{taskId, title, branch, checkpoint, gate, pushOwner, ownerCriteria}, impl
    - the trailer block last, written by hand, in the order `Signed-off-by: Patryk Żmigrodzki <pzmi@users.noreply.github.com>`, then the `Co-Authored-By` and `Claude-Session` lines exactly as the caller's (or session's) attribution instructions give them; never `git commit -s` (it would append `Signed-off-by` after the block)
    - no model ids (outside the trailer block), secrets, tokens, internal hostnames, personal paths, private-repo content or the name of a private project (ADR 0004)
    Never `--no-verify`. If a hook fails, fix the cause; do not bypass.
-4. **Push.** Only when the caller owns the push (`pushOwner`; under `/orchestrate` it never does, ADR 0002). Then integration is `scripts/land.sh <sha>`, the only pusher (agents never push by any means; the common `git push` forms are denied, ADR 0018, amended), confirmed with `git ls-remote origin main`. Rejected: `git fetch`, land again. Never force. Not the push owner: stop here and report "commit ready" with the sha.
+4. **Push.** Only when the caller owns the push (`pushOwner`; under `/orchestrate` it never does, ADR 0002). Then integration is `scripts/land.sh <sha>`, the only pusher (agents never push by any means; the common `git push` forms are denied, fnd §11.6), confirmed with `git ls-remote origin main`. Rejected: `git fetch`, land again. Never force. Not the push owner: stop here and report "commit ready" with the sha.
 5. Checkpoint task: say that a `/review` plus the adversarial second review is due; do not start the next task.
 6. Write `ship.json`.
 
