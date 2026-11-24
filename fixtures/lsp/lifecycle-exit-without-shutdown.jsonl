@@ -1,0 +1,7 @@
+{"comment": "exit without shutdown ends the session and the process exits 1 (plan §2.5); the request after exit is never read."}
+{"send": {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"capabilities": {}}}}
+{"send": {"jsonrpc": "2.0", "method": "initialized", "params": {}}}
+{"send": {"jsonrpc": "2.0", "method": "exit"}}
+{"send": {"jsonrpc": "2.0", "id": 2, "method": "shutdown"}}
+{"expect": {"jsonrpc": "2.0", "id": 1, "result": {"capabilities": {"positionEncoding": "utf-16", "textDocumentSync": {"openClose": true, "change": 2}, "definitionProvider": true}, "serverInfo": {"name": "jfl", "version": "<any>"}}}}
+{"exit": 1}

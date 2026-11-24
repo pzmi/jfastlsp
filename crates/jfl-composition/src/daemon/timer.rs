@@ -17,3 +17,11 @@ pub(crate) fn ticker(period: Duration) -> tokio::time::Interval {
 pub(crate) async fn within<F: Future>(deadline: Duration, future: F) -> Option<F::Output> {
     tokio::time::timeout(deadline, future).await.ok()
 }
+
+/// Resolves once `after` has passed: the view service's cookie deadline
+/// (`jfl_application::WallClock::deadline`), which it races against the cookie's event, so it is a
+/// deadline on an event, never a wait for its own sake (ADR 0039). Tokio's `timeout` over a future
+/// that never resolves, since a plain sleep is banned even here.
+pub(crate) async fn deadline(after: Duration) {
+    let _passed = tokio::time::timeout(after, std::future::pending::<()>()).await;
+}

@@ -1,6 +1,9 @@
 {"comment": "A Content-Length that is not plain decimal digits. The framing is lost, so the server answers a ParseError (-32700) under a null id and ends the session: the request after it is never read (jfl-protocol's frame decoder stays failed rather than resynchronise on a guess)."}
+{"send": {"jsonrpc": "2.0", "id": "init", "method": "initialize", "params": {"capabilities": {}}}}
 {"send": {"jsonrpc": "2.0", "id": 1, "method": "textDocument/noSuchMethod"}}
 {"send_raw": "Content-Length: +2\r\n\r\n{}"}
 {"send": {"jsonrpc": "2.0", "id": 2, "method": "textDocument/noSuchMethod"}}
+{"expect": {"jsonrpc": "2.0", "id": "init", "result": "<any>"}}
 {"expect": {"jsonrpc": "2.0", "id": 1, "error": {"code": -32601, "message": "<any>"}}}
 {"expect": {"jsonrpc": "2.0", "id": null, "error": {"code": -32700, "message": "<any>"}}}
+{"exit": 1}

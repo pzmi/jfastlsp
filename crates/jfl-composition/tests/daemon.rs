@@ -79,6 +79,11 @@ mod given {
             )
         }
 
+        /// The scratch directory the state directory is in.
+        pub(crate) fn root(&self) -> &Path {
+            &self.root
+        }
+
         /// The pids spawned so far.
         pub(crate) fn spawned(&self) -> Vec<u32> {
             self.children
@@ -594,4 +599,100 @@ fn should_stop_the_daemon_of_another_major_and_start_its_own_when_a_proxy_connec
     .unwrap();
     assert_eq!(daemons.exit_of(first), Some(jfl_process::Exit::Code(0)));
     assert_eq!(daemons.spawned().len(), 2, "{:?}", daemons.spawned());
+}
+
+#[test]
+fn should_answer_a_definition_from_the_views_with_an_honest_envelope_when_a_client_asks() {
+    // given: the LSP fixture worktree (an astral line before every name asked about)
+    use jfl_protocol::messages::{Definition, PositionParams};
+    let daemons = Daemons::new();
+    let root = daemons.root().join("wt");
+    jfl_testkit::fixtures::git::Repo::init(
+        &root,
+        &[
+            (
+                "src/demo/Main.java",
+                include_bytes!("../../../fixtures/lsp/worktree/src/demo/Main.java"),
+            ),
+            (
+                "src/demo/greet/Greeter.java",
+                include_bytes!("../../../fixtures/lsp/worktree/src/demo/greet/Greeter.java"),
+            ),
+        ],
+    )
+    .unwrap();
+    let uri = |file: &str| {
+        DocumentUri::from(
+            jfl_domain::FileUri::from_path(&root.join(file).to_string_lossy()).unwrap(),
+        )
+    };
+    let at = |file: &str, line, col| PositionParams {
+        uri: uri(file),
+        line,
+        col,
+        position_encoding: jfl_domain::PositionEncoding::Utf16,
+        clamp: false,
+    };
+    let head = jfl_testkit::fixtures::git::git(&root, &["rev-parse", "HEAD"]).unwrap();
+    let mut proxy = daemons.proxy("defs", None);
+
+    // when: a call on a receiver the syntax cannot type, the cursor on a declaration's own name,
+    // whitespace, and a column past the line's end
+    let call = proxy
+        .call::<Definition>(at("src/demo/Main.java", 12, 68), BUDGET)
+        .unwrap();
+    let own = proxy
+        .call::<Definition>(at("src/demo/greet/Greeter.java", 10, 29), BUDGET)
+        .unwrap();
+    let blank = proxy
+        .call::<Definition>(at("src/demo/Main.java", 12, 2), BUDGET)
+        .unwrap();
+    let past = proxy
+        .call::<Definition>(at("src/demo/Main.java", 12, 400), BUDGET)
+        .unwrap();
+
+    // then: `exact` only where proved (the declaration's own name), the unproved call `possible`
+    // with its reason and never complete, the view naming the worktree's HEAD
+    let (Outcome::Result(call), Outcome::Result(own)) = (call.outcome, own.outcome) else {
+        panic!("not answered");
+    };
+    let wave = jfl_protocol::envelope::WireRange(
+        jfl_domain::Range::new(
+            jfl_domain::Position::new(10, 28),
+            jfl_domain::Position::new(10, 32),
+        )
+        .unwrap(),
+    );
+    assert!(call.exact.is_empty());
+    assert!(call.target.is_none());
+    assert_eq!(
+        call.possible
+            .iter()
+            .map(|p| (&p.uri, p.range))
+            .collect::<Vec<_>>(),
+        [(&uri("src/demo/greet/Greeter.java"), wave)]
+    );
+    assert!(!call.completeness.complete());
+    assert!(!call.completeness.incomplete_because().is_empty());
+    assert_eq!(
+        call.view.head.as_ref().map(ToString::to_string),
+        Some(head.trim().to_owned())
+    );
+    assert_eq!(
+        own.exact
+            .iter()
+            .map(|l| (&l.uri, l.range))
+            .collect::<Vec<_>>(),
+        [(&uri("src/demo/greet/Greeter.java"), wave)]
+    );
+    assert!(matches!(
+        own.target.map(|t| t.status),
+        Some(jfl_protocol::envelope::WireTargetStatus::Exact)
+    ));
+    assert!(
+        matches!(blank.outcome, Outcome::Error(e) if e.code == jfl_protocol::rpc::ErrorCode::NoSymbol)
+    );
+    assert!(
+        matches!(past.outcome, Outcome::Error(e) if e.code == jfl_protocol::rpc::ErrorCode::PositionOutOfRange)
+    );
 }

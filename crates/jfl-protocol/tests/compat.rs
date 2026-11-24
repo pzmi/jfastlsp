@@ -296,3 +296,21 @@ fn should_accept_a_stop_when_its_params_are_omitted_or_null() {
         Err(DecodeError::Malformed(_))
     ));
 }
+
+#[test]
+fn should_read_clamp_as_false_when_it_is_absent_and_write_it_only_when_true() {
+    // given
+    let absent = r#"{"uri":"file:///w/A.java","line":1,"col":2,"position_encoding":"utf-16"}"#;
+    let set =
+        r#"{"uri":"file:///w/A.java","line":1,"col":2,"position_encoding":"utf-16","clamp":true}"#;
+
+    // when
+    let read_absent: jfl_protocol::messages::PositionParams = serde_json::from_str(absent).unwrap();
+    let read_set: jfl_protocol::messages::PositionParams = serde_json::from_str(set).unwrap();
+
+    // then
+    assert!(!read_absent.clamp);
+    assert!(read_set.clamp);
+    assert_eq!(serde_json::to_string(&read_absent).unwrap(), absent);
+    assert_eq!(serde_json::to_string(&read_set).unwrap(), set);
+}

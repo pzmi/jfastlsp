@@ -805,6 +805,8 @@ name = "jfl-cli"
 version = "0.1.0"
 dependencies = [
  "jfl-composition",
+ "jfl-testkit",
+ "serde_json",
 ]
 
 [[package]]

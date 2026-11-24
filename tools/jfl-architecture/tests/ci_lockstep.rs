@@ -557,14 +557,15 @@ fn should_fail_lockstep_when_a_job_runs_in_a_container_or_with_services() -> Tes
 fn should_fail_lockstep_when_platform_tests_runs_other_stages() -> TestResult {
     for to in [
         "platform-tests: unit-tests",
-        "platform-tests: unit-tests integration-tests doctests script-tests",
+        "platform-tests: unit-tests integration-tests doctests",
+        "platform-tests: unit-tests integration-tests doctests lsp-conformance script-tests",
         "platform-tests:",
     ] {
         // given
         let mut files = baseline()?;
         edit(
             &mut files.justfile,
-            "platform-tests: unit-tests integration-tests doctests",
+            "platform-tests: unit-tests integration-tests doctests lsp-conformance",
             to,
         )?;
 

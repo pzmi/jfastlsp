@@ -18,3 +18,7 @@ jfl-composition = { path = "../jfl-composition" }
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+jfl-testkit = { path = "../jfl-testkit" }
+serde_json = "1.0.154"

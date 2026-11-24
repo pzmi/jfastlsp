@@ -18,6 +18,7 @@ pub const BUILTIN: &[(&str, &str)] = &[
     ("incremental", include_str!("../suites/incremental.toml")),
     ("kmp-lsp", include_str!("../suites/kmp-lsp.toml")),
     ("jdtls", include_str!("../suites/jdtls.toml")),
+    ("jfl-lsp", include_str!("../suites/jfl-lsp.toml")),
 ];
 
 /// What a suite does.
@@ -34,6 +35,8 @@ pub enum Kind {
     KmpLsp,
     /// The jdtls arm: the pinned stock jdtls, over LSP.
     Jdtls,
+    /// The built `jfl lsp` over LSP, from a fresh state directory (LSP-02).
+    JflLsp,
 }
 
 /// Repetition knobs shared by every suite.
@@ -144,6 +147,16 @@ pub struct Jdtls {
     pub deadline_secs: u64,
 }
 
+/// The `jfl-lsp` suite's knobs.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct JflLsp {
+    /// Types picked by seed; each is queried at a use in another file.
+    pub sites: usize,
+    /// Each session's deadline (`timeout`), seconds.
+    pub deadline_secs: u64,
+}
+
 /// One suite.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -167,6 +180,8 @@ pub struct Suite {
     pub kmp: Option<Kmp>,
     /// `jdtls` only.
     pub jdtls: Option<Jdtls>,
+    /// `jfl-lsp` only.
+    pub jfl_lsp: Option<JflLsp>,
 }
 
 impl Suite {
@@ -202,6 +217,7 @@ impl Suite {
             ),
             ("[kmp]", self.kmp.is_some(), Kind::KmpLsp),
             ("[jdtls]", self.jdtls.is_some(), Kind::Jdtls),
+            ("[jfl_lsp]", self.jfl_lsp.is_some(), Kind::JflLsp),
         ];
         if let Some((section, _, owner)) = sections
             .iter()
@@ -259,6 +275,15 @@ impl Suite {
                 {
                     return Err(BenchError::new(
                         "suite: [jdtls] needs sites >= 1 and a deadline",
+                    ));
+                }
+            }
+            Kind::JflLsp => {
+                if let Some(j) = &self.jfl_lsp
+                    && (j.sites == 0 || j.deadline_secs == 0)
+                {
+                    return Err(BenchError::new(
+                        "suite: [jfl_lsp] needs sites >= 1 and a deadline",
                     ));
                 }
             }

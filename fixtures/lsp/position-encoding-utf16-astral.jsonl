@@ -1,0 +1,21 @@
+{"comment": "utf-16 when the client offers no utf-8 (plan §2.3). Main.java's line 12 holds two astral characters (U+1F600, two UTF-16 units and four UTF-8 bytes each) before every name asked about, and the declarations answered sit after one (Main.java line 5, greet/Greeter.java line 2): the columns asked and answered are UTF-16 units. The definition result is the exact locations only (the LSP-02 card): the imported type and the unqualified call are proved, the call on an untyped receiver and the unproved overload are answered [] (their candidates stay in jfl/definition). A column past its line's end is clamped to the end (LSP 3.17), for a file the client did not open (the daemon clamps on the indexed text) as for one it did: whitespace there, so no definition, null."}
+{"send": {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"capabilities": {}}}}
+{"send": {"jsonrpc": "2.0", "method": "initialized", "params": {}}}
+{"send": {"jsonrpc": "2.0", "id": 2, "method": "textDocument/definition", "params": {"textDocument": {"uri": "file://{{root}}/src/demo/Main.java"}, "position": {"line": 12, "character": 27}}}}
+{"send": {"jsonrpc": "2.0", "id": 3, "method": "textDocument/definition", "params": {"textDocument": {"uri": "file://{{root}}/src/demo/Main.java"}, "position": {"line": 12, "character": 76}}}}
+{"send": {"jsonrpc": "2.0", "id": 4, "method": "textDocument/definition", "params": {"textDocument": {"uri": "file://{{root}}/src/demo/Main.java"}, "position": {"line": 12, "character": 68}}}}
+{"send": {"jsonrpc": "2.0", "id": 5, "method": "textDocument/definition", "params": {"textDocument": {"uri": "file://{{root}}/src/demo/Main.java"}, "position": {"line": 12, "character": 300}}}}
+{"send": {"jsonrpc": "2.0", "id": 6, "method": "textDocument/definition", "params": {"textDocument": {"uri": "file://{{root}}/src/demo/Main.java"}, "position": {"line": 12, "character": 84}}}}
+{"send": {"jsonrpc": "2.0", "method": "textDocument/didOpen", "params": {"textDocument": {"uri": "file://{{root}}/src/demo/Main.java", "languageId": "java", "version": 1, "text": "package demo;\n\nimport demo.greet.Greeter;\n\nclass Main {\n    /** 😀 */ void tick() {}\n\n    void ping(int a) {}\n\n    void ping(String a) {}\n\n    void run() {\n        String s = \"😀😀\"; Greeter greeter = new Greeter(); greeter.wave(); tick(); ping(s);\n    }\n}\n"}}}}
+{"send": {"jsonrpc": "2.0", "id": 7, "method": "textDocument/definition", "params": {"textDocument": {"uri": "file://{{root}}/src/demo/Main.java"}, "position": {"line": 12, "character": 300}}}}
+{"send": {"jsonrpc": "2.0", "id": 8, "method": "shutdown"}}
+{"send": {"jsonrpc": "2.0", "method": "exit"}}
+{"expect": {"jsonrpc": "2.0", "id": 1, "result": {"capabilities": {"positionEncoding": "utf-16", "textDocumentSync": {"openClose": true, "change": 2}, "definitionProvider": true}, "serverInfo": {"name": "jfl", "version": "<any>"}}}}
+{"expect": {"jsonrpc": "2.0", "id": 2, "result": [{"uri": "file://{{root_uri}}/src/demo/greet/Greeter.java", "range": {"start": {"line": 2, "character": 29}, "end": {"line": 2, "character": 36}}}]}}
+{"expect": {"jsonrpc": "2.0", "id": 3, "result": [{"uri": "file://{{root}}/src/demo/Main.java", "range": {"start": {"line": 5, "character": 19}, "end": {"line": 5, "character": 23}}}]}}
+{"expect": {"jsonrpc": "2.0", "id": 4, "result": []}}
+{"expect": {"jsonrpc": "2.0", "id": 5, "result": null}}
+{"expect": {"jsonrpc": "2.0", "id": 6, "result": []}}
+{"expect": {"jsonrpc": "2.0", "id": 7, "result": null}}
+{"expect": {"jsonrpc": "2.0", "id": 8, "result": null}}
+{"exit": 0}

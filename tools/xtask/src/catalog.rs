@@ -125,8 +125,9 @@ pub(crate) fn rows() -> Vec<Row> {
             .needs("cargo-nextest"),
             true,
         ),
-        // Integration, component and contract tests: every tests/ target but the LSP transcripts,
-        // which `lsp-conformance` runs (LSP-01), so each runs in one stage.
+        // Integration, component and contract tests: every tests/ target but `jfl lsp`'s (its
+        // transcripts and live sessions), which `lsp-conformance` runs (LSP-01, LSP-02), so each
+        // runs in one stage.
         row(
             Stage::call(
                 "integration-tests",
@@ -140,7 +141,7 @@ pub(crate) fn rows() -> Vec<Row> {
                     "--test",
                     "*",
                     "-E",
-                    "not binary_id(jfl-adapter-lsp::lsp_transcripts)",
+                    "not (binary_id(jfl-cli::lsp_transcripts) | binary_id(jfl-cli::lsp_daemon))",
                 ]),
             )
             .needs("cargo-nextest"),
@@ -159,9 +160,8 @@ pub(crate) fn rows() -> Vec<Row> {
             Stage::in_process("script-tests", stages::SCRIPT_TESTS, stages::script_tests),
             true,
         ),
-        // The LSP conformance level (ver §2, LSP-01): the transcripts of fixtures/lsp/ against a
-        // server binary over stdio. Until `jfl lsp` exists (LSP-02), the server is the LSP
-        // adapter's test-only `jfl-lsp-stub`.
+        // The LSP conformance level (ver §2, LSP-01, LSP-02): the transcripts of fixtures/lsp/ and
+        // the live sessions against the built `jfl lsp` over stdio.
         row(
             Stage::call(
                 "lsp-conformance",
@@ -172,9 +172,11 @@ pub(crate) fn rows() -> Vec<Row> {
                     "--no-tests",
                     "fail",
                     "-p",
-                    "jfl-adapter-lsp",
+                    "jfl-cli",
                     "--test",
                     "lsp_transcripts",
+                    "--test",
+                    "lsp_daemon",
                 ]),
             )
             .needs("cargo-nextest"),

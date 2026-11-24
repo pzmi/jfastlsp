@@ -236,3 +236,43 @@ fn should_stay_inside_the_git_dir_when_head_names_a_ref_that_climbs_out() {
             .all(|f| f.path.path().starts_with(main.git_dir.path()))
     );
 }
+
+#[test]
+fn should_name_the_commit_of_head_when_it_is_detached_loose_or_packed() {
+    // given
+    let scratch = Scratch::new("head-commit");
+    let (main_repo, main, agent) = setup(&scratch);
+    let commit = |repo: &Repo, rev: &str| {
+        jfl_application::ObjectId::parse(repo.git(&["rev-parse", rev]).unwrap().trim())
+    };
+    let main_head = commit(&main_repo, "HEAD");
+
+    // when
+    let loose = jfl_adapter_git::snapshot::head_commit(&main).unwrap();
+    let linked = jfl_adapter_git::snapshot::head_commit(&agent).unwrap();
+    main_repo.git(&["pack-refs", "--all"]).unwrap();
+    let packed = jfl_adapter_git::snapshot::head_commit(&main).unwrap();
+    main_repo
+        .git(&["commit", "--quiet", "--allow-empty", "--message", "next"])
+        .unwrap();
+    main_repo.git(&["checkout", "--quiet", "--detach"]).unwrap();
+    let detached = jfl_adapter_git::snapshot::head_commit(&main).unwrap();
+    let unborn_root = scratch.path().join("unborn");
+    fs::create_dir_all(&unborn_root).unwrap();
+    Repo::open(&unborn_root).git(&["init", "--quiet"]).unwrap();
+    let unborn_tree = scratch
+        .probe()
+        .resolve_blocking(&scratch.uri("unborn"))
+        .unwrap()
+        .unwrap();
+    let unborn = jfl_adapter_git::snapshot::head_commit(&unborn_tree).unwrap();
+
+    // then
+    assert!(main_head.is_some());
+    assert_eq!(loose, main_head);
+    assert_eq!(packed, main_head);
+    assert_eq!(linked, commit(&main_repo, "refs/heads/agent"));
+    assert_eq!(detached, commit(&main_repo, "HEAD"));
+    assert_ne!(detached, main_head);
+    assert_eq!(unborn, None);
+}

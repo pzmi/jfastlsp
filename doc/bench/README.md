@@ -50,6 +50,7 @@ A suite is a TOML file (`tools/jfl-bench/suites/`, embedded in the binary; or an
 | `incremental` | syntax-tier **proxies** for an index kept fresh (BENCH-03): one edit, a rebase and a switch between the pinned commit pairs of `doc/bench-corpus.md`, the fan-out of the most-imported types, a warm reopen | `jfl-bench`, `git` | `<case>/proxy/...`: `edit/proxy/{rehash,reparse,decl_diff,total}_ms/{p50,p95}` (over edits of 20 seed-picked files), `{rebase,switch}/proxy/diff_ms`, `t4/reparse_ms`, `t4/total_ms`, `changed_files`, `deleted_files`; `fanout/kNN/proxy/{dependants,importers,mentions,scan_ms,t4/reparse_ms}`; `reopen/proxy/{walk_ms,stat_ms,t4/rehash_ms,t4/cold/rehash_ms}` |
 | `kmp-lsp` | the kmp-lsp arm at its pinned release (`scripts/kmp-lsp-fetch.sh`): `kmp-lsp index` with an empty cache and with its cache, `refs` and `find` for the first 10 of `rg-floor`'s picks | hyperfine 2.0.0 | `index_ms`, `index_rss_peak`, `index_cached_ms`; `refs/p50`, `refs/p95`, `find/p50`, `find/p95` (median over queries), `refs/rss_peak`, `find/rss_peak`; `refs/qNN/matches`, `find/qNN/matches` (result lines of one untimed run; an exit that is neither a result nor kmp-lsp's "nothing found" fails the run) |
 | `jdtls` | the pinned stock jdtls (`scripts/jdtls-fetch.sh`, checksum-verified; started by `src/jdtls.rs` with a fresh `-data` per run, nothing of ours in between) over LSP: `initialize`, time to `ServiceReady`, then `definition`, `references`, `hover`, `workspace/symbol` at usage sites of seed-picked types; only `fixture` in the sandbox | `jfl-bench` (an LSP client) | `initialize_ms`, `ready_ms` (one session); per operation `p50`, `p95` (over all requests), `found`; `backend_rss_peak`, `backend_rss` (the JVM, found as the `timeout`'s child in `/proc`, bounded by the configured heap: `-Xms` is the cap up to 1 GiB), `backend_heap_used`, `backend_heap_committed` (`jcmd GC.heap_info`) |
+| `jfl-lsp` | the built `jfl lsp` (LSP-02; `just bench jfl-lsp SIZE` builds it, release) over LSP from a fresh state directory: a cold session (`initialize`, then the first `textDocument/definition` at a usage site, which starts the daemon and opens the view), definition round trips at the usage sites of seed-picked types, and a warm session against the same daemon | `jfl-bench` (an LSP client) | `initialize_ms`, `first_definition_ms` (both from the process's start), `initialize_warm_ms`, `first_definition_warm_ms`; `definition/p50`, `definition/p95` (over all timed requests), `definition/found` |
 | `e1` | the E1 pipeline in process, stage by stage (`jfl-bench parse`, one process per measurement) | `jfl-bench` | per thread count `tN` and stage `read`, `hash`, `parse`, `extract` (cumulative): `work_ms`, `total_ms`; for the full index also `list_ms`, `files_per_s`, `mb_per_s`, `file_p50_ms`, `file_p95_ms`, `file_max_ms`, `rss_peak_mib`, `rss_steady_mib`, and the counts `files`, `err_files`, `failed_files`, `decls`; `cold/<stage>/work_ms` and `total_ms` |
 
 **Queries are picked from the corpus by seed**, not by hand, and **series are keyed by slot**
@@ -481,6 +482,47 @@ build beside it: within this VM's noise for 20 samples).
 
 - **A cold `jfl` call** against a running daemon pays the connect and handshake once (about 0.05 ms) and a round trip per request (about 0.04 ms): together under 1 % of `jfl def`'s proposed p50 of 20 ms (plan §1.7); the first call of a session that must spawn the daemon pays about 2 ms more, before any index exists.
 - **The round trip** is the floor every query's answer adds to its own work: two frames through `jfl-protocol`'s decoder, one current-thread runtime hop and the writer task's.
+
+### `jfl lsp` end to end (LSP-02, `just bench jfl-lsp`)
+
+`tools/jfl-bench/src/jfl.rs` drives the release `jfl lsp` as a client would, over its stdio, each
+session under `timeout`: a fresh state directory (no daemon, no stored summary), so the cold
+session's first definition pays the daemon's spawn, the view's open (its own directory read first,
+the rest `Pending` and settled after the answer) and the query; then 2 untimed and 10 timed rounds
+of a definition at each of 20 usage sites (seed 1); then a second session started while the
+daemon still runs. Plan §1.7's rows from M1 are measured this way (through `jfl lsp`).
+
+Measured 2026-11-24 (LSP-02, after its review: the definition result is the exact locations or
+a proved owner's overload set, nothing else) on the 4 vCPU Xeon VM (Intel Xeon @ 2.10GHz, 15 GB),
+another reviewer building beside it (load average 3 to 4); one sample each for the single-shot
+rows:
+
+| | small (junit-framework) | medium (spring-framework), two runs |
+|:--|--:|--:|
+| `initialize` (cold process, budget < 200 ms against a warm daemon) | 3.6 ms | 4.1 / 4.5 ms |
+| first useful answer from the process's start (budget < 2 s, medium) | 72.4 ms | 232 / 219 ms |
+| `initialize`, warm daemon | 3.9 ms | 5.3 / 4.8 ms |
+| first definition of the warm session | 5.0 ms | 6.2 / 6.7 ms |
+| definition round trip over LSP, p50 | 1.16 ms | 0.72 / 0.70 ms |
+| definition round trip over LSP, p95 | 10.5 ms | 4.2 / 4.4 ms |
+| definitions with a location in the result (of 20) | 11 | 14 / 14 |
+
+The first build (before the review), on the same VM: `initialize` 3.5–5.3 ms, the first useful
+answer 52 ms (small) and 239–243 ms (medium), definition p50 0.66–0.86 ms and p95 2.5–7.7 ms;
+19 and 20 of 20 definitions had a location then, because unproved candidates were sent too.
+
+- **`initialize`** never touches the daemon (plan §2.5), so warm and cold are the same work: the
+  process's start and one answer on the session's main loop.
+- **The first useful answer** on medium is a quarter of a second: the spawn (about 2 ms), the
+  open of the request's own directory and the query; the rest of the view (9.2k files) is read by
+  `settle` after the answer, which the next request waits behind (an untimed one here), then the
+  store's write-back in slices of 256 summaries between requests. Until `settle` has published,
+  an answer is partial, and its envelope says so (`ModulePartlyIndexed`; LSP's definition result
+  has no place for it).
+- **Definition through `jfl lsp`** adds the proxy's link thread and two frames each way to the
+  daemon's own cost (`just bench-queries`); well inside plan §1.7's `jfl def` row (p50 < 20 ms,
+  p95 < 50 ms), which LSP-06 gates.
+- Hover through the proxy is not measured: LSP-03 announces it (the LSP-02 card's "Left").
 
 ## Adding a suite
 

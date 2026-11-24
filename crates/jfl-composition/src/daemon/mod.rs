@@ -7,18 +7,23 @@
 //! - [`run`]: the daemon process: `setsid`, the start order, the serve loop, the shutdown order.
 //! - [`proxy`]: the client side: connect, the spawn lock and its second check, the spawn and the
 //!   notify handshake, the version handshake, re-sent documents and request.
-//! - [`service`]: the request seam the views (IDX-09) and the LSP proxy (LSP-02) plug into.
+//! - [`service`]: the request seam; [`views`] serves the views and their queries through it.
+//! - [`lsp`]: `jfl lsp`, the stdio language server over a proxy (LSP-02).
+//! - [`ports`]: the blocking pool and the clock the adapters and the view service run on.
 //!
 //! **The state directory** is [`DaemonConfig::state_dir`], `--state-dir` or [`default_state_dir`];
 //! [`run::run`] hands its service factory the checked [`StateDir`] once the lock is held, so the
 //! summary store (and any other cache) opens under `StateDir::path()` only in the owner.
 
 pub mod host;
+pub mod lsp;
+pub mod ports;
 pub mod proxy;
 pub mod run;
 pub mod service;
 pub mod stepped;
 mod timer;
+pub mod views;
 
 use std::ffi::OsString;
 use std::fs::OpenOptions;
@@ -91,10 +96,79 @@ impl DaemonConfig {
     }
 }
 
-/// Runs the daemon of `config` with today's services (the request seam's [`service::Unwired`]
-/// until the views are wired here): why it stopped, or why it failed (the process exits 1).
+/// Runs the daemon of `config`, serving the views ([`views::Views`], its summary store under the
+/// state directory): why it stopped, or why it failed (the process exits 1).
 pub fn serve(config: &DaemonConfig) -> Result<run::Ended, String> {
-    run::run(config, |_state| service::Unwired)
+    run::run(config, |state| {
+        let pool = ports::TokioPool::current()
+            .ok_or_else(|| "the views need the daemon's runtime".to_owned())?;
+        views::Views::open(state.path(), &pool, &format!("jfl{}", std::process::id()))
+    })
+}
+
+/// A launcher that starts nothing: for a client that only talks to a running daemon.
+struct NoLaunch;
+
+impl Launcher for NoLaunch {
+    fn launch(&mut self, _notify: &Path) -> io::Result<Box<dyn Spawned>> {
+        Err(io::Error::other("this client starts no daemon"))
+    }
+}
+
+/// A proxy connected to the daemon of `state_dir` and past its handshake, without starting one;
+/// `None` when the directory does not exist or no daemon answers within `budget`.
+fn connected(state_dir: &Path, budget: Duration) -> Option<proxy::Proxy<NoLaunch>> {
+    if !state_dir.is_dir() {
+        return None;
+    }
+    let state = StateDir::open(state_dir).ok()?;
+    let socket = jfl_adapter_ipc::SocketPath::of_state(&state).ok()?;
+    let mut proxy = proxy::Proxy::new(
+        &format!("probe{}", std::process::id()),
+        jfl_protocol::messages::ClientKind::Cli,
+        state,
+        socket,
+        NoLaunch,
+        proxy::Budget {
+            reply: budget,
+            spawn: budget,
+        },
+    );
+    if proxy.connect().ok()? != proxy::ProxyPhase::Connecting {
+        return None;
+    }
+    proxy.on_accepted().ok()?;
+    Some(proxy)
+}
+
+/// The pid of the daemon serving `state_dir`, asked over its socket (`jfl/status`) without
+/// starting one; `None` when none answers within `budget`.
+///
+/// Pinned by: `crates/jfl-cli/tests/lsp_daemon.rs`, which finds and kills the daemon a session
+/// started.
+#[must_use]
+pub fn running_pid(state_dir: &Path, budget: Duration) -> Option<u32> {
+    use jfl_protocol::messages::{Status, StatusParams};
+    let mut proxy = connected(state_dir, budget)?;
+    proxy
+        .request::<Status>(StatusParams { worktree: None })
+        .ok()?;
+    match proxy.read_answer::<Status>().ok()?.outcome {
+        jfl_protocol::rpc::Outcome::Result(status) => Some(status.daemon.pid),
+        jfl_protocol::rpc::Outcome::Error(_) => None,
+    }
+}
+
+/// Asks the daemon serving `state_dir`, if one answers within `budget`, to stop (`jfl/stop`);
+/// whether it answered. It removes its socket and releases its lock as it exits.
+#[must_use]
+pub fn stop_running(state_dir: &Path, budget: Duration) -> bool {
+    use jfl_protocol::messages::{Stop, StopParams};
+    let Some(mut proxy) = connected(state_dir, budget) else {
+        return false;
+    };
+    proxy.request::<Stop>(StopParams {}).is_ok_and(|sent| sent)
+        && proxy.read_answer::<Stop>().is_ok()
 }
 
 /// The default state directory: `$XDG_STATE_HOME/jfl`, else `$HOME/.local/state/jfl`; `None`

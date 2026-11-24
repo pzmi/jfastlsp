@@ -44,6 +44,9 @@ pub struct Args {
     /// Let the jdtls arm import a corpus checkout's build (runs its Gradle build: a dispatch job
     /// or the owner, never the sandbox).
     pub trusted_build: bool,
+    /// The `jfl` binary for the jfl-lsp suite (default: the release build under the target
+    /// directory, `just bench jfl-lsp` builds it).
+    pub jfl: Option<PathBuf>,
 }
 
 /// The size name of the synthetic multi-module fixture (`tools/jfl-bench/fixtures/multi-module`),
@@ -65,7 +68,7 @@ pub fn run(args: &Args, drop: &dyn CacheDrop) -> Result<Report> {
     let driven: &[&str] = match args.suite.kind {
         Kind::RgFloor => &["rg", "hyperfine"],
         Kind::KmpLsp => &["hyperfine"],
-        Kind::E1 | Kind::Incremental | Kind::Jdtls => &[],
+        Kind::E1 | Kind::Incremental | Kind::Jdtls | Kind::JflLsp => &[],
     };
     for tool in driven {
         if machine::find_on_path(tool).is_some_and(|p| machine::is_shim(&p)) {
@@ -155,6 +158,30 @@ pub fn run(args: &Args, drop: &dyn CacheDrop) -> Result<Report> {
                 .as_ref()
                 .context("jdtls suite without [jdtls]")?;
             let (m, slots) = jdtls_suite(args, j, &mut notes)?;
+            query_slots = slots;
+            m
+        }
+        Kind::JflLsp => {
+            let j = args
+                .suite
+                .jfl_lsp
+                .as_ref()
+                .context("jfl-lsp suite without [jfl_lsp]")?;
+            let jfl = args.jfl.clone().context("no jfl binary: pass --jfl PATH")?;
+            let run = &args.suite.run;
+            let (m, slots) = crate::jfl::jfl_lsp_suite(
+                &crate::jfl::JflRun {
+                    size: &args.size,
+                    root: &args.corpus_root,
+                    jfl: &jfl,
+                    scratch: &args.scratch,
+                    warmup: run.warmup,
+                    runs: run.runs,
+                    seed: run.seed,
+                },
+                j,
+                &mut notes,
+            )?;
             query_slots = slots;
             m
         }
@@ -721,6 +748,7 @@ mod tests {
             kmp_lsp: None,
             jdtls_home: Some(scratch.join("no-such-jdtls")),
             trusted_build: false,
+            jfl: None,
         }
     }
 

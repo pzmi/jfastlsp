@@ -7,7 +7,7 @@
 //! through hyperfine, the `e1` suite runs the E1 parse pipeline in process and reports its
 //! stages, throughput and RSS. BENCH-03 adds the comparison arms (`arms`: kmp-lsp through
 //! hyperfine, stock jdtls over LSP, started by `jdtls`) and the `incremental` suite of proxies for an
-//! index kept fresh. Everything here reports and never gates; the CI gate is BENCH-04.
+//! index kept fresh; LSP-02 the `jfl-lsp` suite (`jfl`), the built `jfl lsp` over LSP. Everything here reports and never gates; the CI gate is BENCH-04.
 
 pub mod arms;
 pub mod cli;
@@ -17,6 +17,7 @@ pub mod error;
 pub mod hyperfine;
 pub mod incremental;
 pub mod jdtls;
+pub mod jfl;
 pub mod lsp;
 pub mod machine;
 pub mod procfs;

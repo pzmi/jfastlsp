@@ -1,0 +1,16 @@
+# The built `jfl lsp` over the corpus (LSP-02, ADR 0031, plan §1.7): a cold session from a fresh
+# state directory (`initialize`, then the first definition, which starts the daemon and opens the
+# view: the time to the first useful answer), definition round trips at usage sites, and a warm
+# session against the same daemon (`initialize` against a warm daemon: 200 ms, reported only).
+name = "jfl-lsp"
+description = "jfl lsp from a fresh state directory: initialize, the first definition, definition round trips over LSP, and initialize against the warm daemon."
+kind = "jfl-lsp"
+
+[run]
+warmup = 2
+runs = 10
+seed = 1
+
+[jfl_lsp]
+sites = 20
+deadline_secs = 600

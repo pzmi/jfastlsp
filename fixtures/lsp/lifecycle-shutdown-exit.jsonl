@@ -1,0 +1,18 @@
+{"comment": "The lifecycle (plan §2.5, LSP 3.17): before initialize every request, known or not, is ServerNotInitialized (-32002) and a notification is dropped; initialize is answered at once with the capabilities that exist (utf-16 when the client offers no utf-8), never waiting on the daemon; a second initialize is InvalidRequest; shutdown answers null, after which a request is InvalidRequest; exit ends the session, the input after it unread, and the process exits 0 because shutdown came first. No request here needs the daemon, so none is started."}
+{"send": {"jsonrpc": "2.0", "id": 1, "method": "textDocument/definition", "params": {"textDocument": {"uri": "file://{{root}}/src/demo/Main.java"}, "position": {"line": 0, "character": 0}}}}
+{"send": {"jsonrpc": "2.0", "id": "pre", "method": "textDocument/noSuchMethod"}}
+{"send": {"jsonrpc": "2.0", "method": "textDocument/didOpen", "params": {"textDocument": {"uri": "file://{{root}}/src/demo/Main.java", "languageId": "java", "version": 1, "text": "package demo;\n\nimport demo.greet.Greeter;\n\nclass Main {\n    /** 😀 */ void tick() {}\n\n    void ping(int a) {}\n\n    void ping(String a) {}\n\n    void run() {\n        String s = \"😀😀\"; Greeter greeter = new Greeter(); greeter.wave(); tick(); ping(s);\n    }\n}\n"}}}}
+{"send": {"jsonrpc": "2.0", "id": 2, "method": "initialize", "params": {"processId": null, "rootUri": null, "capabilities": {}}}}
+{"send": {"jsonrpc": "2.0", "id": 3, "method": "initialize", "params": {"capabilities": {}}}}
+{"send": {"jsonrpc": "2.0", "method": "initialized", "params": {}}}
+{"send": {"jsonrpc": "2.0", "id": 4, "method": "shutdown"}}
+{"send": {"jsonrpc": "2.0", "id": 5, "method": "textDocument/definition", "params": {"textDocument": {"uri": "file://{{root}}/src/demo/Main.java"}, "position": {"line": 12, "character": 76}}}}
+{"send": {"jsonrpc": "2.0", "method": "exit"}}
+{"send": {"jsonrpc": "2.0", "id": 6, "method": "shutdown"}}
+{"expect": {"jsonrpc": "2.0", "id": 1, "error": {"code": -32002, "message": "<any>"}}}
+{"expect": {"jsonrpc": "2.0", "id": "pre", "error": {"code": -32002, "message": "<any>"}}}
+{"expect": {"jsonrpc": "2.0", "id": 2, "result": {"capabilities": {"positionEncoding": "utf-16", "textDocumentSync": {"openClose": true, "change": 2}, "definitionProvider": true}, "serverInfo": {"name": "jfl", "version": "<any>"}}}}
+{"expect": {"jsonrpc": "2.0", "id": 3, "error": {"code": -32600, "message": "<any>"}}}
+{"expect": {"jsonrpc": "2.0", "id": 4, "result": null}}
+{"expect": {"jsonrpc": "2.0", "id": 5, "error": {"code": -32600, "message": "<any>"}}}
+{"exit": 0}

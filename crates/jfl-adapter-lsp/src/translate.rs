@@ -14,11 +14,15 @@
 
 use std::collections::HashMap;
 
-use gen_lsp_types::{Location, Position, Range, TextDocumentPositionParams, Uri};
+use gen_lsp_types::{
+    DidChangeTextDocumentParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams, Location,
+    Position, Range, TextDocumentContentChangeEvent, TextDocumentPositionParams, Uri,
+};
 use jfl_domain::{ByteOffset, FileUri, LineIndex, PositionEncoding, PositionError, UriError};
 use jfl_protocol::DocumentUri;
-use jfl_protocol::envelope::{WireEnvelope, WireLocation, WireRange};
+use jfl_protocol::envelope::{WireEnvelope, WireLocation, WireRange, WireTargetStatus};
 use jfl_protocol::messages::PositionParams;
+use serde_json::Value;
 
 /// The client's spelling of each document it opened (`didOpen`), by the file it names.
 ///
@@ -89,6 +93,7 @@ pub fn position_params(
         line: params.position.line,
         col: params.position.character,
         position_encoding: encoding,
+        clamp: true,
     })
 }
 
@@ -123,8 +128,120 @@ pub fn locations(envelope: &WireEnvelope, echo: &Echo<'_>) -> Vec<Location> {
     exact.chain(possible).collect()
 }
 
+/// `textDocument/definition`'s result for an envelope (plan §2.5, the LSP-02 card's decision):
+/// the `exact` locations; else, when the target is a proved owner's overload set
+/// (`ambiguous`), those overloads; else nothing. The other `possible` candidates (same-name
+/// members of any type, for an unknown receiver) are never sent: plan §2.2 forbids a same-name
+/// match from another type, and LSP's result has no place to say they are unproved. LSP's
+/// definition cannot carry completeness either: an empty, incomplete answer is `[]`; hover's
+/// status line is LSP's channel for it (LSP-03), and `jfl/definition` and the CLI keep the whole
+/// envelope.
+///
+/// Pinned by: `translate::tests::should_send_exact_hits_or_the_overload_set_and_nothing_else_when_a_definition_is_translated`.
+#[must_use]
+pub fn definition(envelope: &WireEnvelope, echo: &Echo<'_>) -> Vec<Location> {
+    if !envelope.exact.is_empty() {
+        return envelope
+            .exact
+            .iter()
+            .map(|hit| location(hit, echo))
+            .collect();
+    }
+    let overloads = envelope
+        .target
+        .as_ref()
+        .is_some_and(|t| t.status == WireTargetStatus::Ambiguous);
+    if overloads {
+        return envelope
+            .possible
+            .iter()
+            .map(|hit| {
+                location(
+                    &WireLocation {
+                        uri: hit.uri.clone(),
+                        range: hit.range,
+                    },
+                    echo,
+                )
+            })
+            .collect();
+    }
+    Vec::new()
+}
+
+/// The encoding a session uses, from `initialize`'s params: `utf-8` when the client offers it in
+/// `capabilities.general.positionEncodings`, `utf-16` otherwise (plan §2.3; `jfl-domain`'s
+/// [`PositionEncoding::negotiate`]). Params of any shape are read: what is not an offer is none.
+///
+/// Pinned by: `translate::tests::should_pick_utf8_only_when_the_client_offers_it` and
+/// `fixtures/lsp/position-encoding-utf8.jsonl`.
+#[must_use]
+pub fn negotiate(initialize: &Value) -> PositionEncoding {
+    let offered = initialize
+        .pointer("/capabilities/general/positionEncodings")
+        .and_then(Value::as_array)
+        .map(|names| names.iter().filter_map(Value::as_str).collect::<Vec<_>>())
+        .unwrap_or_default();
+    PositionEncoding::negotiate(offered)
+}
+
+/// What the server can do, as `initialize` answers it: capabilities only for what exists (the
+/// negotiated encoding, open and close with incremental changes, definition), and the server's
+/// name and version.
+///
+/// Pinned by: `fixtures/lsp/lifecycle-shutdown-exit.jsonl`.
+#[must_use]
+pub fn initialize_result(encoding: PositionEncoding, version: &str) -> Value {
+    serde_json::json!({
+        "capabilities": {
+            "positionEncoding": encoding.lsp_name(),
+            "textDocumentSync": { "openClose": true, "change": 2 },
+            "definitionProvider": true,
+        },
+        "serverInfo": { "name": "jfl", "version": version },
+    })
+}
+
+/// `textDocument/didOpen`'s document: its URI as sent, its version and text.
+#[must_use]
+pub fn did_open(params: Value) -> Option<(DocumentUri, i32, String)> {
+    let params = serde_json::from_value::<DidOpenTextDocumentParams>(params).ok()?;
+    let item = params.text_document;
+    Some((
+        DocumentUri::parse(&item.uri.0).ok()?,
+        item.version,
+        item.text,
+    ))
+}
+
+/// `textDocument/didChange`'s document, its new version and its changes, in order.
+#[must_use]
+pub fn did_change(
+    params: Value,
+) -> Option<(DocumentUri, i32, Vec<TextDocumentContentChangeEvent>)> {
+    let params = serde_json::from_value::<DidChangeTextDocumentParams>(params).ok()?;
+    let uri = DocumentUri::parse(&params.text_document.text_document_identifier.uri.0).ok()?;
+    Some((uri, params.text_document.version, params.content_changes))
+}
+
+/// `textDocument/didClose`'s document.
+#[must_use]
+pub fn did_close(params: Value) -> Option<DocumentUri> {
+    let params = serde_json::from_value::<DidCloseTextDocumentParams>(params).ok()?;
+    DocumentUri::parse(&params.text_document.uri.0).ok()
+}
+
+/// A position request's document and position (`textDocument/definition` and the others).
+#[must_use]
+pub fn text_document_position(params: Value) -> Option<(DocumentUri, Position)> {
+    let params = serde_json::from_value::<TextDocumentPositionParams>(params).ok()?;
+    let uri = DocumentUri::parse(&params.text_document.uri.0).ok()?;
+    Some((uri, params.position))
+}
+
 /// The byte offset of an LSP position: a column past the end of its line is the line's end
-/// (LSP 3.17); a line past the end of the text, or a column inside a character, is still refused.
+/// (LSP 3.17, `jfl-domain`'s [`LineIndex::clamp`]); a line past the end of the text, or a column
+/// inside a character, is still refused.
 ///
 /// Pinned by: `translate::tests::should_clamp_the_column_when_it_is_past_the_line_end`.
 pub fn offset(
@@ -132,13 +249,11 @@ pub fn offset(
     position: Position,
     encoding: PositionEncoding,
 ) -> Result<ByteOffset, PositionError> {
-    let at = jfl_domain::Position::new(position.line, position.character);
-    match index.offset(at, encoding) {
-        Err(PositionError::ColumnPastLineEnd {
-            line, line_length, ..
-        }) => index.offset(jfl_domain::Position::new(line, line_length), encoding),
-        other => other,
-    }
+    let at = index.clamp(
+        jfl_domain::Position::new(position.line, position.character),
+        encoding,
+    )?;
+    index.offset(at, encoding)
 }
 
 #[cfg(test)]
@@ -156,6 +271,33 @@ mod tests {
             uri: DocumentUri::from(FileUri::parse(uri).unwrap()),
             range: WireRange(jfl_domain::Range::new(at, at).unwrap()),
         }
+    }
+
+    #[test]
+    fn should_pick_utf8_only_when_the_client_offers_it() {
+        // given
+        let offers = [
+            serde_json::json!({"capabilities": {"general": {"positionEncodings": ["utf-16", "utf-8"]}}}),
+            serde_json::json!({"capabilities": {"general": {"positionEncodings": ["utf-32", "utf-16"]}}}),
+            serde_json::json!({"capabilities": {}}),
+            serde_json::json!({"capabilities": {"general": {"positionEncodings": "utf-8"}}}),
+            Value::Null,
+        ];
+
+        // when
+        let picked: Vec<PositionEncoding> = offers.iter().map(negotiate).collect();
+
+        // then
+        assert_eq!(
+            picked,
+            [
+                PositionEncoding::Utf8,
+                PositionEncoding::Utf16,
+                PositionEncoding::Utf16,
+                PositionEncoding::Utf16,
+                PositionEncoding::Utf16,
+            ]
+        );
     }
 
     #[test]
@@ -252,6 +394,38 @@ mod tests {
             got[1].range,
             Range::new(Position::new(1, 2), Position::new(1, 4))
         );
+    }
+
+    #[test]
+    fn should_send_exact_hits_or_the_overload_set_and_nothing_else_when_a_definition_is_translated()
+    {
+        // given
+        let envelope = |target: &str, exact: &str| -> WireEnvelope {
+            serde_json::from_str(&format!(
+                r#"{{"schema_version":{{"major":1,"minor":0}},"position_encoding":"utf-16","query":null,"view":{{"worktree":"file:///w","head":null,"generation":1}},"target":{target},"exact":[{exact}],"possible":[{{"uri":"file:///w/P.java","range":[1,2,1,4],"reason":"overload_not_proved","why":"overload not proved"}}],"complete":false,"incomplete_because":["deadline"],"freshness":{{"synced_at":null,"pending_events":0}}}}"#
+            ))
+            .unwrap()
+        };
+        let hit = r#"{"uri":"file:///w/E.java","range":[5,0,5,3]}"#;
+        let exact = envelope(r#"{"symbol":"a.E#m()","status":"exact"}"#, hit);
+        let overloads = envelope(
+            r#"{"symbol":"a.P#m()","status":"ambiguous","overloads":1}"#,
+            "",
+        );
+        let unresolved = envelope("null", "");
+
+        // when
+        let uris = |e: &WireEnvelope| -> Vec<String> {
+            definition(e, &Echo::default())
+                .into_iter()
+                .map(|l| l.uri.0)
+                .collect()
+        };
+
+        // then: never the possible candidates of an unproved receiver
+        assert_eq!(uris(&exact), ["file:///w/E.java"]);
+        assert_eq!(uris(&overloads), ["file:///w/P.java"]);
+        assert!(uris(&unresolved).is_empty());
     }
 
     #[test]

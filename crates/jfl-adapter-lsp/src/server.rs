@@ -25,8 +25,15 @@
 //!   leave its own state half applied, which is its bug to fix, but the session keeps serving
 //!   (fnd §4.3 rule 3).
 //!
-//! All threads are scoped: [`serve`] returns only after the input ended, every job finished and
-//! every reply was written. Pinned by `tests/server.rs` and
+//! - **The handler may end the session** ([`Handler::ended`], LSP's `exit`, plan §2.5): checked
+//!   after each notification; the loop then stops reading, and [`serve`] returns once every job
+//!   finished and every reply was written, with [`End::Exit`].
+//!
+//! The pool and the writer are scoped threads: [`serve`] returns only after every job finished and
+//! every reply was written. The reader is not: it blocks in `read`, which nothing can interrupt
+//! portably, so a session the handler ended returns without waiting for its client to close the
+//! input (the reader then stops at its next read, whose message has no one to take it; in a
+//! process that exits, at once). Pinned by `tests/server.rs` and
 //! `tests/properties.rs::should_answer_every_request_once_when_traffic_is_mixed`.
 
 use std::collections::HashMap;
@@ -97,6 +104,24 @@ pub trait Handler {
     /// Applies a notification, in order. One the handler does not know is ignored, never answered
     /// (plan §2.5).
     fn notification(&mut self, notification: Notification);
+
+    /// `$/cancelRequest` marked request `id`, still in flight, cancelled: told on the main loop, in
+    /// order with the other messages, so the handler can drop work it queued for the request
+    /// before that work starts. The answer is the loop's business either way (`RequestCancelled`).
+    ///
+    /// Pinned by: `tests/server.rs::should_tell_the_handler_when_a_request_in_flight_is_cancelled`.
+    fn cancelled(&mut self, id: &RequestId) {
+        let _ = id;
+    }
+
+    /// Whether the session ends now, checked after each notification (LSP's `exit`): the loop
+    /// reads nothing more, lets every request in flight finish and its answer be written, and
+    /// [`serve`] returns [`End::Exit`].
+    ///
+    /// Pinned by: `tests/server.rs::should_end_the_session_and_answer_what_is_in_flight_when_the_handler_ends_it`.
+    fn ended(&self) -> bool {
+        false
+    }
 }
 
 /// What becomes of a request.
@@ -195,7 +220,7 @@ pub struct Ended {
 /// id; an oversized frame or a malformed body is answered and the session goes on.
 pub fn serve<R, W, H>(input: R, output: W, mut handler: H, config: &Config) -> Ended
 where
-    R: Read + Send,
+    R: Read + Send + 'static,
     W: Write + Send,
     H: Handler,
 {
@@ -214,7 +239,11 @@ where
         let (in_tx, in_rx) = sync_channel::<Incoming>(INCOMING_CAPACITY);
         let (out_tx, out_rx) = sync_channel::<Outgoing>(OUTGOING_CAPACITY);
         let writer = scope.spawn(move || write_all(output, &out_rx));
-        scope.spawn(move || read_all(input, max_frame_len, &in_tx));
+        // Detached (module documentation): a session ended by its handler must not wait for the
+        // client to close the input. Failing to start it is an input that ended at once.
+        let reader = thread::Builder::new()
+            .name("jfl-lsp-reader".to_owned())
+            .spawn(move || read_all(input, max_frame_len, &in_tx));
         for _ in 0..config.workers.get() {
             let out_tx = out_tx.clone();
             let (job_rx, in_flight) = (&job_rx, &in_flight);
@@ -226,7 +255,10 @@ where
             jobs: job_tx,
             in_flight: &in_flight,
         };
-        let input = main.run(in_rx);
+        let input = match reader {
+            Ok(_detached) => main.run(in_rx),
+            Err(err) => End::Read(err.kind()),
+        };
         drop(main);
         let output = writer.join().unwrap_or(Some(io::ErrorKind::Other));
         Ended { input, output }
@@ -260,6 +292,10 @@ impl<H: Handler> MainLoop<'_, H> {
                 Incoming::Message(Message::Request(request)) => self.request(request),
                 Incoming::Message(Message::Notification(notification)) => {
                     self.notification(notification);
+                    let handler = &*self.handler;
+                    if panic::catch_unwind(AssertUnwindSafe(|| handler.ended())).unwrap_or(false) {
+                        return End::Exit;
+                    }
                 }
                 // The server sends the client no requests yet, so no response is awaited.
                 Incoming::Message(Message::Response(_)) => {}
@@ -335,10 +371,13 @@ impl<H: Handler> MainLoop<'_, H> {
 
     fn notification(&mut self, notification: Notification) {
         if notification.method == "$/cancelRequest" {
-            if let Ok(CancelParams { id }) = serde_json::from_value(notification.params)
-                && let Some(cancel) = lock(self.in_flight).get(&id)
-            {
-                cancel.set();
+            if let Ok(CancelParams { id }) = serde_json::from_value(notification.params) {
+                let found = lock(self.in_flight).get(&id).cloned();
+                if let Some(cancel) = found {
+                    cancel.set();
+                    let handler = &mut *self.handler;
+                    let _ = panic::catch_unwind(AssertUnwindSafe(|| handler.cancelled(&id)));
+                }
             }
             return;
         }

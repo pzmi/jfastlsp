@@ -11,14 +11,18 @@
 //! - [`transport`]: frames in through the bounded decoder, frames out (results on the typed path).
 //! - [`translate`]: LSP params and results to and from `jfl-protocol`'s, URIs echoed as sent and
 //!   columns clamped to the line end.
+//! - [`document`]: an open document's text, `didChange`'s ranged edits applied through
+//!   `jfl-domain`'s conversions.
 //! - [`memory`]: a byte pipe for running a session in process (tests, benchmarks).
 //!
-//! The binary `jfl-lsp-stub` is a test-only server on this crate for the black-box transcripts
-//! (`fixtures/lsp/*.jsonl`) until `jfl lsp` exists (LSP-02).
+//! `jfl lsp` (`jfl-composition`'s `daemon::lsp`, LSP-02) is the server these make; the black-box
+//! transcripts of `fixtures/lsp/` run against it (`crates/jfl-cli/tests/lsp_transcripts.rs`).
 
+pub mod document;
 pub mod memory;
 pub mod server;
 pub mod translate;
 pub mod transport;
 
+pub use lsp_server::{Notification, Request, RequestId};
 pub use server::{Cancel, Config, Dispatch, Ended, Handler, Job, Reply, serve};

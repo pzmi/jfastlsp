@@ -32,6 +32,7 @@ usage: jfl-bench <command>
       --jdtls-home DIR     the jdtls arm's verified install (default: scripts/jdtls-fetch.sh's)
       --trusted-build      let the jdtls arm import a corpus checkout's Gradle build (never in the
                            sandbox: a bench.yml dispatch job or the owner)
+      --jfl PATH           the jfl-lsp suite's `jfl` binary (a release build)
   compare A.json B.json  per-metric change between two reports [--band PCT, default 20] [--strict]
   parse ROOT             the E1 pipeline once, one JSON line [--threads N] [--upto read|hash|parse|extract]
   queries ROOT           queries picked by seed [--count N] [--seed N]
@@ -41,7 +42,7 @@ usage: jfl-bench <command>
 
 SIZE is a corpus size of scripts/bench-corpus.sh, or `fixture` (the synthetic multi-module
 project of tools/jfl-bench/fixtures, the jdtls arm's sandbox input).
-Suites built in: rg-floor, e1, incremental, kmp-lsp, jdtls; or a path to a .toml suite.
+Suites built in: rg-floor, e1, incremental, kmp-lsp, jdtls, jfl-lsp; or a path to a .toml suite.
 Reports, never gates.";
 
 /// Parsed `--flag value` pairs and positionals.
@@ -148,6 +149,7 @@ fn cmd_run(p: Parsed) -> Result<()> {
         "seed",
         "kmp-lsp",
         "jdtls-home",
+        "jfl",
     ])?;
     if cfg!(debug_assertions) && !p.switch("allow-debug") {
         return Err(BenchError::new(
@@ -183,6 +185,7 @@ fn cmd_run(p: Parsed) -> Result<()> {
         kmp_lsp: p.flag("kmp-lsp").map(PathBuf::from),
         jdtls_home: p.flag("jdtls-home").map(PathBuf::from),
         trusted_build: p.switch("trusted-build"),
+        jfl: p.flag("jfl").map(PathBuf::from),
     };
     let result = runner::run(&args, &runner::SystemCacheDrop);
     let _ = std::fs::remove_dir_all(&scratch);

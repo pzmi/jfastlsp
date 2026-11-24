@@ -28,8 +28,8 @@ use jfl_adapter_ipc::notify::{Notice, NotifyListener, Waited};
 use jfl_adapter_ipc::{Flock, LockError, SocketPath, StateDir};
 use jfl_protocol::codec;
 use jfl_protocol::messages::{
-    ClientInfo, ClientKind, DidClose, DidCloseParams, DidOpen, DidOpenParams, Handshake,
-    HandshakeParams, Method, Stop, StopParams,
+    ClientInfo, ClientKind, ContentChange, DidChange, DidChangeParams, DidClose, DidCloseParams,
+    DidOpen, DidOpenParams, Handshake, HandshakeParams, Method, Stop, StopParams,
 };
 use jfl_protocol::rpc::{ErrorCode, Outcome, RequestId, Response};
 use jfl_protocol::{DocumentUri, PROTOCOL_VERSION, Version};
@@ -168,6 +168,9 @@ pub struct Proxy<L> {
     /// proxy collects no zombies.
     spawned: Vec<Box<dyn Spawned>>,
     protocol: Version,
+    /// The end of the [`Proxy::call`] in progress: every wait inside it is cut there, so a call
+    /// takes at most its budget, not a reply budget per wait.
+    until: Option<Instant>,
 }
 
 impl<L> std::fmt::Debug for Proxy<L> {
@@ -217,6 +220,7 @@ impl<L: Launcher> Proxy<L> {
             child: None,
             spawned: Vec::new(),
             protocol: PROTOCOL_VERSION,
+            until: None,
         }
     }
 
@@ -278,11 +282,31 @@ impl<L: Launcher> Proxy<L> {
         RequestId::String(format!("{}/{what}{}", self.name, self.serial))
     }
 
-    fn send(&mut self, body: &[u8]) -> bool {
+    /// The budget of one wait: the reply budget, cut at the end of the call in progress.
+    fn wait_budget(&self) -> Duration {
         let reply = self.budget.reply;
-        self.conn
-            .as_mut()
-            .is_some_and(|conn| conn.send(body, &mut deadline(reply)).is_ok())
+        self.until.map_or(reply, |end| {
+            reply.min(end.saturating_duration_since(Instant::now()))
+        })
+    }
+
+    /// Writes one frame. A write whose deadline passed may have left part of the frame on the
+    /// wire: the connection is dropped then, so no frame follows a half-written one, and the next
+    /// step connects again, re-sending the documents and the request. A daemon gone is left to
+    /// be noticed as its end of file (the model's `notice`).
+    fn send(&mut self, body: &[u8]) -> bool {
+        let budget = self.wait_budget();
+        let Some(conn) = self.conn.as_mut() else {
+            return false;
+        };
+        match conn.send(body, &mut deadline(budget)) {
+            Ok(()) => true,
+            Err(RecvError::TimedOut) => {
+                self.reset();
+                false
+            }
+            Err(_) => false,
+        }
     }
 
     fn reset(&mut self) {
@@ -484,7 +508,7 @@ impl<L: Launcher> Proxy<L> {
     }
 
     fn recv(&mut self) -> Result<Vec<u8>, ProxyError> {
-        let reply = self.budget.reply;
+        let reply = self.wait_budget();
         let conn = self.conn.as_mut().ok_or(ProxyError::Closed)?;
         match conn.recv(&mut deadline(reply)) {
             Ok(Received::Frame(body)) => Ok(body),
@@ -554,6 +578,27 @@ impl<L: Launcher> Proxy<L> {
         self.phase == ProxyPhase::Ready && self.send(&body)
     }
 
+    /// The client changed a document to `text` (the whole text: the LSP proxy applies a client's
+    /// ranged edits itself); a ready proxy forwards it as one full-text change (whether it did is
+    /// returned). A document not open is opened, so a re-send carries it either way.
+    pub fn did_change(&mut self, uri: DocumentUri, version: i32, text: String) -> bool {
+        if !self.docs.contains_key(&uri) {
+            return self.did_open(uri, version, text);
+        }
+        let body = codec::encode(&codec::notification::<DidChange>(DidChangeParams {
+            uri: uri.clone(),
+            version,
+            position_encoding: jfl_domain::PositionEncoding::Utf16,
+            changes: vec![ContentChange {
+                range: None,
+                text: text.clone(),
+            }],
+        }))
+        .unwrap_or_default();
+        self.docs.insert(uri, Doc { version, text });
+        self.phase == ProxyPhase::Ready && self.send(&body)
+    }
+
     /// The client closes a document; a ready proxy forwards it (whether it did is returned).
     pub fn did_close(&mut self, uri: &DocumentUri) -> bool {
         self.docs.remove(uri);
@@ -562,6 +607,14 @@ impl<L: Launcher> Proxy<L> {
         }))
         .unwrap_or_default();
         self.phase == ProxyPhase::Ready && self.send(&body)
+    }
+
+    /// The client gives up waiting for its request (its deadline passed, or the call failed): the
+    /// request is dropped, and so is the connection, whose late answer to it would otherwise be
+    /// read as the next one's. The documents stay, re-sent on the next connection.
+    pub fn abandon(&mut self) {
+        self.want = None;
+        self.reset();
     }
 
     /// The client session ends: its connection closed, its spawn lock released, its documents
@@ -586,6 +639,17 @@ impl<L: Launcher> Proxy<L> {
         budget: Duration,
     ) -> Result<Response<M::Result>, ProxyError> {
         let mut remaining = deadline(budget);
+        self.until = Instant::now().checked_add(budget);
+        let answer = self.call_until::<M>(params, &mut remaining);
+        self.until = None;
+        answer
+    }
+
+    fn call_until<M: Method>(
+        &mut self,
+        params: M::Params,
+        remaining: &mut impl FnMut() -> Option<Duration>,
+    ) -> Result<Response<M::Result>, ProxyError> {
         let mut failure = None;
         let mut spawned_here = false;
         self.request::<M>(params)?;

@@ -414,7 +414,7 @@ proptest! {
     ) {
         // given
         let references = ReferencesParams {
-            at: PositionParams { uri: DocumentUri::from(&uri), line, col, position_encoding: encoding },
+            at: PositionParams { uri: DocumentUri::from(&uri), line, col, position_encoding: encoding, clamp: false },
             exact_only,
         };
         let change = notification::<DidChange>(DidChangeParams {

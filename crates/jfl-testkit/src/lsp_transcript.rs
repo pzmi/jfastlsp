@@ -13,6 +13,10 @@
 //! - `{"exit": N}`: the server's exit code once its input ended; when no line says, the code is not
 //!   checked (LSP-02 states it in its lifecycle transcripts: 0 after `shutdown`, 1 without).
 //!
+//! **Placeholders.** A transcript that names files of a fixture worktree writes `{{root}}` for its
+//! directory; [`substitute`] replaces it with the scratch copy's path before [`parse`], so every
+//! frame's length is the substituted one.
+//!
 //! **Running.** Every client line goes into a file that becomes the server's standard input, so
 //! the input ends after the last one; standard output and standard error go to files. The server
 //! must exit within the deadline (it is killed otherwise and the run fails), and its output is then
@@ -32,13 +36,20 @@
 //! 4. Every server message must be expected and every expected one sent: nothing extra, nothing
 //!    missing.
 //!
-//! Pinned by the unit tests below and `crates/jfl-adapter-lsp/tests/lsp_transcripts.rs` (with its
+//! **A live session** ([`Live`]) is for what a transcript cannot say: a step that must wait for an
+//! answer (a daemon killed between two requests). The client writes to the server's standard
+//! input as it goes, the server's output still goes to a file, and each answer is waited for with
+//! [`wait_until`].
+//!
+//! Pinned by the unit tests below and `crates/jfl-cli/tests/lsp_transcripts.rs` (with its
 //! negative control).
 
+use std::ffi::OsStr;
 use std::fmt::Write as _;
 use std::fs::{self, File};
+use std::io::Write as _;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::{Child, ChildStdin, Command, Stdio};
 use std::time::Duration;
 
 use jfl_protocol::frame::{DEFAULT_MAX_FRAME_LEN, FrameDecoder};
@@ -148,6 +159,15 @@ impl std::fmt::Write for Header<'_> {
 
 /// Every `*.jsonl` transcript in `dir`, by name.
 pub fn load_dir(dir: &Path) -> Result<Vec<Transcript>, Failure> {
+    texts(dir)?
+        .iter()
+        .map(|(name, text)| parse(name, text))
+        .collect()
+}
+
+/// Every `*.jsonl` file in `dir` as text, by name (its stem): for a caller that substitutes
+/// placeholders before [`parse`].
+pub fn texts(dir: &Path) -> Result<Vec<(String, String)>, Failure> {
     let mut paths: Vec<PathBuf> = fs::read_dir(dir)
         .map_err(|e| fail(format!("{}: {e}", dir.display())))?
         .filter_map(|entry| entry.ok().map(|e| e.path()))
@@ -163,15 +183,33 @@ pub fn load_dir(dir: &Path) -> Result<Vec<Transcript>, Failure> {
                 .ok_or_else(|| fail(format!("{}: not a UTF-8 name", path.display())))?;
             let text =
                 fs::read_to_string(path).map_err(|e| fail(format!("{}: {e}", path.display())))?;
-            parse(name, &text)
+            Ok((name.to_owned(), text))
         })
         .collect()
+}
+
+/// `text` with every `{{root}}` replaced by `root`.
+#[must_use]
+pub fn substitute(text: &str, root: &Path) -> String {
+    text.replace("{{root}}", &root.to_string_lossy())
 }
 
 /// Runs `transcript` against `program` with `args` (environment cleared) and checks its output.
 pub fn run(
     program: &Path,
     args: &[&str],
+    transcript: &Transcript,
+    scratch: &Path,
+    deadline: Duration,
+) -> Result<(), Failure> {
+    run_with_env(program, args, &[], transcript, scratch, deadline)
+}
+
+/// [`run`], the environment cleared but for `env` (a server that runs `git` needs `PATH`).
+pub fn run_with_env(
+    program: &Path,
+    args: &[&str],
+    env: &[(&str, &OsStr)],
     transcript: &Transcript,
     scratch: &Path,
     deadline: Duration,
@@ -187,6 +225,7 @@ pub fn run(
     let mut child = Command::new(program)
         .args(args)
         .env_clear()
+        .envs(env.iter().copied())
         .stdin(Stdio::from(File::open(&stdin).map_err(|e| io("stdin", e))?))
         .stdout(Stdio::from(
             File::create(&stdout).map_err(|e| io("stdout", e))?,
@@ -229,6 +268,123 @@ pub fn run(
         ))),
         (None, _) => Ok(()),
     }
+}
+
+/// A server driven step by step: its input a pipe the test writes as it goes, its output a file
+/// read whole at each wait. The server is killed when this is dropped while it still runs.
+#[derive(Debug)]
+pub struct Live {
+    child: Child,
+    input: Option<ChildStdin>,
+    output: PathBuf,
+    taken: usize,
+}
+
+impl Live {
+    /// Starts `program` with `args`, the environment cleared but for `env`, its output and errors
+    /// in files under `dir`.
+    pub fn start(
+        program: &Path,
+        args: &[&str],
+        env: &[(&str, &OsStr)],
+        dir: &Path,
+    ) -> Result<Self, Failure> {
+        let io = |what: &str, e: std::io::Error| fail(format!("{what}: {e}"));
+        fs::create_dir_all(dir).map_err(|e| io("creating the scratch directory", e))?;
+        let output = dir.join("stdout");
+        let mut child = Command::new(program)
+            .args(args)
+            .env_clear()
+            .envs(env.iter().copied())
+            .stdin(Stdio::piped())
+            .stdout(Stdio::from(
+                File::create(&output).map_err(|e| io("stdout", e))?,
+            ))
+            .stderr(Stdio::from(
+                File::create(dir.join("stderr")).map_err(|e| io("stderr", e))?,
+            ))
+            .spawn()
+            .map_err(|e| io("starting the server", e))?;
+        let input = child.stdin.take();
+        Ok(Self {
+            child,
+            input,
+            output,
+            taken: 0,
+        })
+    }
+
+    /// Sends `message` in a frame.
+    pub fn send(&mut self, message: &Value) -> Result<(), Failure> {
+        let body = serde_json::to_vec(message).map_err(|e| fail(e.to_string()))?;
+        let mut frame = format!("Content-Length: {}\r\n\r\n", body.len()).into_bytes();
+        frame.extend(body);
+        self.input
+            .as_mut()
+            .ok_or_else(|| fail("the input is closed"))?
+            .write_all(&frame)
+            .map_err(|e| fail(format!("writing to the server: {e}")))
+    }
+
+    /// The server's next message, waited for at most `deadline`.
+    pub fn next(&mut self, deadline: Duration) -> Result<Value, Failure> {
+        let mut found = None;
+        let waited = wait_until(deadline, "the server's next message", || {
+            let bytes = fs::read(&self.output).unwrap_or_default();
+            found = complete_frames(&bytes).into_iter().nth(self.taken);
+            found.is_some()
+        });
+        waited.map_err(|e| fail(e.to_string()))?;
+        self.taken = self.taken.saturating_add(1);
+        found.ok_or_else(|| fail("no message"))
+    }
+
+    /// Closes the server's input, then waits at most `deadline` for its exit code.
+    pub fn finish(mut self, deadline: Duration) -> Result<Option<i32>, Failure> {
+        self.input = None;
+        let mut code = None;
+        let waited = wait_until(deadline, "the server to exit", || {
+            match self.child.try_wait() {
+                Ok(Some(status)) => {
+                    code = Some(status.code());
+                    true
+                }
+                Ok(None) => false,
+                Err(_) => true,
+            }
+        });
+        waited.map_err(|e| fail(e.to_string()))?;
+        Ok(code.flatten())
+    }
+}
+
+impl Drop for Live {
+    fn drop(&mut self) {
+        if matches!(self.child.try_wait(), Ok(None)) {
+            let _ = self.child.kill();
+            let _ = self.child.wait();
+        }
+    }
+}
+
+/// The JSON bodies of the whole frames at the start of `bytes`: a frame still being written, and
+/// whatever follows it, is left out.
+fn complete_frames(bytes: &[u8]) -> Vec<Value> {
+    let mut decoder = FrameDecoder::new(DEFAULT_MAX_FRAME_LEN);
+    let mut rest = bytes;
+    let mut out = Vec::new();
+    while let Ok(progress) = decoder.feed(rest) {
+        rest = rest.get(progress.consumed..).unwrap_or_default();
+        match progress.frame {
+            Some(body) => match serde_json::from_slice(&body) {
+                Ok(value) => out.push(value),
+                Err(_) => break,
+            },
+            None if progress.consumed == 0 || rest.is_empty() => break,
+            None => {}
+        }
+    }
+    out
 }
 
 /// The JSON bodies of the frames in `bytes`, which must end between frames.
@@ -323,6 +479,26 @@ pub fn compare(expected: &[Value], got: &[Value]) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn should_take_only_whole_frames_when_the_output_is_still_being_written() {
+        // given
+        let whole = b"Content-Length: 2\r\n\r\n{}Content-Length: 7\r\n\r\n[1,2,3]";
+        let cut = b"Content-Length: 2\r\n\r\n{}Content-Length: 7\r\n\r\n[1,";
+
+        // when
+        let complete = complete_frames(whole);
+        let partial = complete_frames(cut);
+        let empty = complete_frames(b"");
+
+        // then
+        assert_eq!(
+            complete,
+            [serde_json::json!({}), serde_json::json!([1, 2, 3])]
+        );
+        assert_eq!(partial, [serde_json::json!({})]);
+        assert!(empty.is_empty());
+    }
     use serde_json::json;
 
     #[test]

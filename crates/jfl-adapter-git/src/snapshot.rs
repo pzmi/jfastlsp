@@ -34,7 +34,7 @@ use std::path::Path;
 
 use jfl_application::source_tree::MTime;
 use jfl_application::{
-    GitFile, GitSnapshot, GitStat, HeadState, RepoProbeError, StatRecord, Worktree,
+    GitFile, GitSnapshot, GitStat, HeadState, ObjectId, RepoProbeError, StatRecord, Worktree,
 };
 use jfl_domain::{FileUri, RelPath};
 
@@ -46,6 +46,57 @@ pub const MAX_SYMREF_DEPTH: usize = 5;
 
 /// The longest `HEAD` or loose ref read: a `ref: ` line with a long name, or an object id.
 const MAX_REF_FILE: u64 = 4096;
+
+/// The longest `packed-refs` read for [`head_commit`]: 64 MiB, about 600,000 refs; a larger one
+/// leaves the commit unknown.
+pub const MAX_PACKED_REFS: u64 = 64 << 20;
+
+/// The commit `HEAD` names, read without spawning anything: a detached `HEAD`'s id, or the id the
+/// branch it names holds (a loose ref, followed at most [`MAX_SYMREF_DEPTH`] times, else its line
+/// in `packed-refs`). `None` when it names none: an unborn branch, or anything unreadable (a
+/// `packed-refs` over [`MAX_PACKED_REFS`]). What an answer's view names as its `HEAD`; the stat set
+/// ([`snapshot`]) is what freshness compares.
+///
+/// Pinned by: `tests/stat_set.rs::should_name_the_commit_of_head_when_it_is_detached_loose_or_packed`.
+pub fn head_commit(worktree: &Worktree) -> Result<Option<ObjectId>, RepoProbeError> {
+    let head = join(&worktree.git_dir, "HEAD")?;
+    let mut next = read_ref_file(&head)?;
+    for _ in 0..MAX_SYMREF_DEPTH {
+        let name = match next {
+            HeadState::Detached(id) => return Ok(Some(id)),
+            HeadState::Unreadable => return Ok(None),
+            HeadState::Symbolic(name) => name,
+        };
+        if name == REFTABLE_MARKER {
+            return Err(RepoProbeError::ReftableUnsupported);
+        }
+        let home = match parse::ref_home(&name) {
+            RefHome::GitDir => &worktree.git_dir,
+            RefHome::CommonDir => &worktree.common_dir,
+        };
+        let loose = join(home, &name)?;
+        next = match read_small(Path::new(loose.path()), MAX_REF_FILE)? {
+            Some(bytes) => parse::head(&bytes),
+            None => return packed(worktree, &name),
+        };
+    }
+    Ok(None)
+}
+
+/// The id `packed-refs` holds for `name` (`<id> <name>` lines; `#` and `^` lines skipped).
+fn packed(worktree: &Worktree, name: &str) -> Result<Option<ObjectId>, RepoProbeError> {
+    let path = join(&worktree.common_dir, "packed-refs")?;
+    let Some(bytes) = read_small(Path::new(path.path()), MAX_PACKED_REFS)? else {
+        return Ok(None);
+    };
+    Ok(bytes.split(|b| *b == b'\n').find_map(|line| {
+        let line = core::str::from_utf8(line).ok()?;
+        let (id, named) = line.split_once(' ')?;
+        (named.trim_end_matches('\r') == name)
+            .then(|| ObjectId::parse(id))
+            .flatten()
+    }))
+}
 
 /// The stat set of `worktree`.
 pub fn snapshot(worktree: &Worktree) -> Result<GitSnapshot, RepoProbeError> {

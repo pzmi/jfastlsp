@@ -68,9 +68,10 @@ unit-tests:
     bash {{xtask}} check-only unit-tests
 
 # The tests that can differ by platform, natively on each target of ADR 0006: what the
-# `linux-arm` and `macos` jobs of ci.yml run (fnd §7.2 rule 4). Not a stage of `check`: on Linux
-# x86-64 the `tests` job runs the same stages, so each stage of `check` stays in one job.
-platform-tests: unit-tests integration-tests doctests
+# `linux-arm` and `macos` jobs of ci.yml run (fnd §7.2 rule 4), `jfl lsp`'s transcripts included
+# (LSP-02). Not a stage of `check`: on Linux x86-64 the `tests` job runs the same stages, so each
+# stage of `check` stays in one job.
+platform-tests: unit-tests integration-tests doctests lsp-conformance
 
 integration-tests:
     bash {{xtask}} check-only integration-tests
@@ -81,8 +82,8 @@ doctests:
 script-tests:
     bash {{xtask}} check-only script-tests
 
-# The LSP conformance level (ver §2, LSP-01): the transcripts of fixtures/lsp/ against a server
-# binary over stdio (the adapter's test-only jfl-lsp-stub until `jfl lsp` exists, LSP-02).
+# The LSP conformance level (ver §2, LSP-01, LSP-02): the transcripts of fixtures/lsp/ against the
+# built `jfl lsp` over stdio.
 lsp-conformance:
     bash {{xtask}} check-only lsp-conformance
 
@@ -170,9 +171,10 @@ bench-corpus size="small" cache="":
 # The benchmark suites over the pinned corpus (BENCH-02, BENCH-03, ADR 0031): JSON results with the
 # machine's facts in `out`. Reports, never gates: `check` and `land.sh` do not run it (fnd §9).
 # `just bench rg-floor small`, `just bench e1 medium`, `just bench incremental lombok`,
-# `just bench kmp-lsp medium`, `just bench jdtls fixture`, `just bench path/to/suite.toml small`.
-# Fetches what the suite needs first: the corpus (and its commit pairs for `incremental`), the
-# pinned kmp-lsp build or the pinned jdtls; `fixture` is the synthetic project in tools/jfl-bench.
+# `just bench kmp-lsp medium`, `just bench jdtls fixture`, `just bench jfl-lsp medium`,
+# `just bench path/to/suite.toml small`. Fetches what the suite needs first: the corpus (and its
+# commit pairs for `incremental`), the pinned kmp-lsp build or the pinned jdtls, or builds `jfl`
+# (release) for `jfl-lsp`; `fixture` is the synthetic project in tools/jfl-bench.
 bench suite="rg-floor" corpus="small" out="target/bench": _preflight (_require "hyperfine") (_require "rg")
     #!/usr/bin/env bash
     set -euo pipefail
@@ -183,15 +185,20 @@ bench suite="rg-floor" corpus="small" out="target/bench": _preflight (_require "
       if [ "$suite" = incremental ]; then bash scripts/bench-corpus.sh fetch-pairs "$corpus"; fi
     fi
     packages=(-p jfl-bench)
+    extra=()
     case "$suite" in
       kmp-lsp) bash scripts/kmp-lsp-fetch.sh ;;
       jdtls) bash scripts/jdtls-fetch.sh ;;
+      jfl-lsp)
+        {{cargo}} build --locked --release --bin jfl
+        extra=(--jfl "${CARGO_TARGET_DIR:-target}/release/jfl") ;;
     esac
     {{cargo}} build --locked --profile bench-tool "${packages[@]}"
     # The real binaries first on PATH: a mise shim in front of rg or hyperfine adds its own launcher's
     # start-up time and memory to every timed run.
     PATH="$(dirname "$(mise which hyperfine)"):$(dirname "$(mise which rg)"):$PATH" \
-      "${CARGO_TARGET_DIR:-target}/bench-tool/jfl-bench" run "$suite" "$corpus" --out {{quote(out)}}
+      "${CARGO_TARGET_DIR:-target}/bench-tool/jfl-bench" run "$suite" "$corpus" --out {{quote(out)}} \
+      ${extra[@]+"${extra[@]}"}
 
 # jfl-domain's in-process position benchmark (IDX-01, divan): synthetic text, then every tracked
 # `.java` file of the pinned corpus, streamed on stdin with a NUL after each (jfl-domain holds no

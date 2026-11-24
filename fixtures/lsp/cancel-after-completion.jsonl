@@ -1,0 +1,10 @@
+{"comment": "$/cancelRequest for a request already answered is ignored: no second answer, nothing else changes (plan §2.5). initialize and shutdown are answered on the session's main loop before the next message is read, so each cancel here comes after its answer by construction. A cancel that comes before the answer (RequestCancelled, -32800) needs a request still in flight when it is read, which a transcript, whose input is written whole before the server starts, cannot hold back: crates/jfl-composition/tests/lsp.rs forces those orders in process."}
+{"send": {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"capabilities": {}}}}
+{"send": {"jsonrpc": "2.0", "method": "$/cancelRequest", "params": {"id": 1}}}
+{"send": {"jsonrpc": "2.0", "method": "initialized", "params": {}}}
+{"send": {"jsonrpc": "2.0", "id": 2, "method": "shutdown"}}
+{"send": {"jsonrpc": "2.0", "method": "$/cancelRequest", "params": {"id": 2}}}
+{"send": {"jsonrpc": "2.0", "method": "exit"}}
+{"expect": {"jsonrpc": "2.0", "id": 1, "result": {"capabilities": {"positionEncoding": "utf-16", "textDocumentSync": {"openClose": true, "change": 2}, "definitionProvider": true}, "serverInfo": {"name": "jfl", "version": "<any>"}}}}
+{"expect": {"jsonrpc": "2.0", "id": 2, "result": null}}
+{"exit": 0}

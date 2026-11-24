@@ -32,16 +32,21 @@ mod support {
     ///   the counter.
     /// - `quick` (pool): answers its snapshot at once; `panic` (pool): panics.
     /// - `boom` (main loop) and notification `boom`: the handler itself panics; after notification
-    ///   `break-snapshot`, taking a snapshot panics.
+    ///   `break-snapshot`, taking a snapshot panics; after notification `exit`, the session ends.
     pub(crate) struct Probe {
         pub(crate) log: Vec<String>,
         pub(crate) counter: u64,
         pub(crate) gate: Arc<Mutex<Receiver<()>>>,
         pub(crate) started: SyncSender<RequestId>,
         pub(crate) broken_snapshot: bool,
+        pub(crate) exited: bool,
     }
 
     impl Handler for Probe {
+        fn cancelled(&mut self, id: &RequestId) {
+            self.log.push(format!("cancelled {id}"));
+        }
+
         type Snapshot = u64;
 
         fn snapshot(&self) -> Arc<u64> {
@@ -76,9 +81,15 @@ mod support {
                 panic!("a handler that fails on a notification");
             } else if notification.method == "break-snapshot" {
                 self.broken_snapshot = true;
+            } else if notification.method == "exit" {
+                self.exited = true;
             } else {
                 self.log.push(notification.method);
             }
+        }
+
+        fn ended(&self) -> bool {
+            self.exited
         }
     }
 
@@ -113,6 +124,7 @@ mod support {
                 gate: Arc::new(Mutex::new(gate_rx)),
                 started: started_tx,
                 broken_snapshot: false,
+                exited: false,
             };
             let server = thread::spawn(move || serve(server_in, server_out, probe, &config));
             Self {
@@ -197,6 +209,53 @@ mod support {
 }
 
 use support::{Session, config, error_code, frame};
+
+#[test]
+fn should_tell_the_handler_when_a_request_in_flight_is_cancelled() {
+    // given
+    let mut session = Session::start(config(1024));
+    session.request(1, "get");
+    assert_eq!(session.started.recv().unwrap(), RequestId::from(1));
+
+    // when: one cancel in flight, one for an id never seen
+    session.cancel(json!(1));
+    session.cancel(json!(2));
+    session.request(3, "log");
+    let log = session.recv();
+    session.gate.send(()).unwrap();
+    let cancelled = session.recv();
+
+    // then
+    assert_eq!(
+        log,
+        json!({"jsonrpc": "2.0", "id": 3, "result": ["cancelled 1"]})
+    );
+    assert_eq!(error_code(&cancelled), Some(-32800));
+    session.finish();
+}
+
+#[test]
+fn should_end_the_session_and_answer_what_is_in_flight_when_the_handler_ends_it() {
+    // given
+    let mut session = Session::start(config(1024));
+    session.request(1, "get");
+    assert_eq!(session.started.recv().unwrap(), RequestId::from(1));
+
+    // when
+    session.notify("exit", json!({}));
+    session.request(2, "now");
+    session.gate.send(()).unwrap();
+    let answer = session.recv();
+
+    // then
+    assert_eq!(answer, json!({"jsonrpc": "2.0", "id": 1, "result": 0}));
+    // The client has not closed its input: the session ended on the handler's word alone, and
+    // read nothing after it (request 2 is never answered).
+    let ended = session.server.join().unwrap();
+    assert_eq!(ended.input, End::Exit);
+    assert_eq!(ended.output, None);
+    drop(session.to_server);
+}
 
 #[test]
 fn should_apply_notifications_in_order_when_a_request_follows_them() {

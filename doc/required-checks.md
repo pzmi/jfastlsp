@@ -48,12 +48,12 @@ without a row, a row without a job, or any difference fails the `architecture` s
 | `required` | Required | `ubuntu-24.04` | the aggregate of every other job's result |
 
 Every stage of `just check` is in exactly one job. `platform-tests` is not a stage of `check`: it
-runs the unit, integration and doctest stages natively on Linux arm64 here and on macOS arm64 in
-`macos.yml` (ADR 0006, fnd §7.2 rule 4; see "Reported checks"), which the `tests` job already
-runs on Linux x86-64. `workflows-verify` (pinact's
+runs the unit, integration, doctest and LSP conformance stages natively on Linux arm64 here and on
+macOS arm64 in `macos.yml` (ADR 0006, fnd §7.2 rule 4; see "Reported checks"), which the `tests`
+job already runs on Linux x86-64. `workflows-verify` (pinact's
 version-comment check) and `dco-event` need the GitHub API or the pushed range, so they are
 recipes outside `check`; the lockstep test also requires `platform-tests` to depend on exactly
-`unit-tests`, `integration-tests` and `doctests`. It checks shapes it allows rather than bypasses
+`unit-tests`, `integration-tests`, `doctests` and `lsp-conformance` (LSP-02). It checks shapes it allows rather than bypasses
 it knows: every `run:` of a job is `rustup toolchain install` or exactly one line `just <recipe> [args]`, the first `just` of a job
 after its `rustup toolchain install` (the justfile builds xtask with the pinned toolchain while it
 parses, so every recipe needs it; FND-13), each argument a plain

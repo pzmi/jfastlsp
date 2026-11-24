@@ -592,6 +592,26 @@ impl LineIndex {
         ))
     }
 
+    /// `position` with a column past the end of its line moved to the line's end: LSP 3.17's rule
+    /// ("defaults back to the line length"), which the LSP carrier asks for explicitly; the CLI
+    /// refuses the same column ([`LineIndex::offset`], plan §2.3). A line past the last, or a
+    /// column inside a character, is still refused.
+    ///
+    /// Pinned by: `text::tests::should_clamp_a_column_to_its_line_end_when_it_is_past_it`.
+    pub fn clamp(
+        &self,
+        position: Position,
+        encoding: PositionEncoding,
+    ) -> Result<Position, PositionError> {
+        match self.offset(position, encoding) {
+            Ok(_) => Ok(position),
+            Err(PositionError::ColumnPastLineEnd {
+                line, line_length, ..
+            }) => Ok(Position::new(line, line_length)),
+            Err(other) => Err(other),
+        }
+    }
+
     /// The range of positions of `range`, columns in `encoding`.
     ///
     /// Pinned by: `text::tests::should_convert_a_range_when_it_spans_lines`.
@@ -755,6 +775,26 @@ mod tests {
         assert_eq!(idx.offset(utf16, PositionEncoding::Utf16), Ok(b));
         assert_eq!(idx.offset(utf32, PositionEncoding::Utf32), Ok(b));
         assert_eq!(idx.offset(utf8, PositionEncoding::Utf8), Ok(b));
+    }
+
+    #[test]
+    fn should_clamp_a_column_to_its_line_end_when_it_is_past_it() {
+        // given: a line with an astral character (two UTF-16 units, four bytes)
+        let index = LineIndex::new("a\u{1F600}b\nxy").unwrap();
+
+        // when
+        let past16 = index.clamp(Position::new(0, 40), PositionEncoding::Utf16);
+        let past8 = index.clamp(Position::new(0, 40), PositionEncoding::Utf8);
+        let inside = index.clamp(Position::new(0, 2), PositionEncoding::Utf16);
+        let within = index.clamp(Position::new(1, 1), PositionEncoding::Utf16);
+        let line = index.clamp(Position::new(5, 0), PositionEncoding::Utf16);
+
+        // then
+        assert_eq!(past16, Ok(Position::new(0, 4)));
+        assert_eq!(past8, Ok(Position::new(0, 6)));
+        assert!(inside.is_err());
+        assert_eq!(within, Ok(Position::new(1, 1)));
+        assert!(line.is_err());
     }
 
     #[test]

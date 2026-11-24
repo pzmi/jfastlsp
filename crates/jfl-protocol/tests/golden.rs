@@ -152,6 +152,7 @@ mod support {
             line,
             col,
             position_encoding: PositionEncoding::Utf16,
+            clamp: false,
         }
     }
 

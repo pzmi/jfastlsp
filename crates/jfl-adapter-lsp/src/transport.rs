@@ -66,6 +66,8 @@ pub enum End {
     Framing(FrameError),
     /// The read itself failed.
     Read(io::ErrorKind),
+    /// The handler ended the session (LSP's `exit`); the input was not read to its end.
+    Exit,
 }
 
 /// The client's frames, decoded with a limit.

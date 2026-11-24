@@ -601,7 +601,7 @@ impl Host {
                 server: &self.server,
                 overlays: &state.overlays,
             };
-            service.answer(&call, &context)
+            service.answer(&call, &context).await
         };
         self.deliver(conn, body).await;
         Ok(stop)
@@ -734,16 +734,25 @@ fn remove(path: &SocketPath) -> Result<(), HostError> {
     }
 }
 
+/// The modification time of `uri`'s file now: one stat, when an overlay's text arrives.
+fn disk_time(uri: &jfl_protocol::DocumentUri) -> Option<std::time::SystemTime> {
+    fs::metadata(uri.file().path())
+        .and_then(|m| m.modified())
+        .ok()
+}
+
 /// Applies a notification to a connection's state; returns the id of a request it cancelled.
 fn note_into(state: &mut Conn, note: Note) -> Option<RequestId> {
     match note.method.as_str() {
         DidOpen::NAME => {
             if let Ok(params) = codec::payload_from_value::<DidOpenParams>(note.params) {
+                let disk = disk_time(&params.uri);
                 state.overlays.insert(
                     params.uri,
                     Overlay {
                         version: params.version,
                         text: params.text,
+                        disk,
                     },
                 );
             }
@@ -754,9 +763,11 @@ fn note_into(state: &mut Conn, note: Note) -> Option<RequestId> {
                 && let Some(overlay) = state.overlays.get_mut(&params.uri)
             {
                 overlay.version = params.version;
-                // Full-text changes only; ranged edits are LSP-02's document sync.
+                // Full-text changes only: the LSP proxy applies a client's ranged edits to its own
+                // copy and sends the whole text (LSP-02).
                 if let Some(full) = params.changes.into_iter().rev().find(|c| c.range.is_none()) {
                     overlay.text = full.text;
+                    overlay.disk = disk_time(&params.uri);
                 }
             }
             None

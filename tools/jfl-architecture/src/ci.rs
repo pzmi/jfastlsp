@@ -110,8 +110,14 @@ pub const ALLOWED_ENV: [(&str, &str, Level); 8] = [
     ("RESULTS", "${{ join(needs.*.result, ' ') }}", Level::Step),
 ];
 
-/// What `platform-tests` runs on Linux arm64 and macOS (fnd §7.2 rule 4).
-pub const PLATFORM_TESTS: [&str; 3] = ["unit-tests", "integration-tests", "doctests"];
+/// What `platform-tests` runs on Linux arm64 and macOS (fnd §7.2 rule 4): `jfl lsp`'s transcripts
+/// too (LSP-02), whose daemon watches files and runs `git` natively.
+pub const PLATFORM_TESTS: [&str; 4] = [
+    "unit-tests",
+    "integration-tests",
+    "doctests",
+    "lsp-conformance",
+];
 
 /// The `run:` lines a job may have besides `just` commands, exactly: setup that runs no stage.
 /// `rustup toolchain install` installs the toolchain rust-toolchain.toml pins.

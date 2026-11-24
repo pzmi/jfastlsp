@@ -1,13 +1,15 @@
-//! The `jfl` binary: `jfl daemon` runs the daemon (normally spawned on demand by a proxy, plan
-//! §5.2); without arguments, `jfl` prints its version. The other subcommands arrive with IDX-13.
+//! The `jfl` binary: `jfl lsp` is the stdio language server (plan §2.5, a proxy over the daemon);
+//! `jfl daemon` runs the daemon (normally spawned on demand by a proxy, plan §5.2); without
+//! arguments, `jfl` prints its version. The other subcommands arrive with IDX-13.
 
 use std::ffi::OsString;
 use std::process::ExitCode;
 
+use jfl_composition::daemon::lsp::{self, LspConfig};
 use jfl_composition::daemon::{self, DaemonConfig};
 
-const USAGE: &str =
-    "usage: jfl [daemon [--state-dir DIR] [--notify PATH] [--idle-timeout SECONDS]]";
+const USAGE: &str = "usage: jfl [lsp [--state-dir DIR] [--idle-timeout SECONDS]]\n       \
+                     jfl [daemon [--state-dir DIR] [--notify PATH] [--idle-timeout SECONDS]]";
 
 fn main() -> ExitCode {
     let args: Vec<OsString> = std::env::args_os().skip(1).collect();
@@ -26,6 +28,13 @@ fn main() -> ExitCode {
             },
             Err(why) => {
                 eprintln!("jfl daemon: {why}\n{USAGE}");
+                ExitCode::from(2)
+            }
+        },
+        Some((command, rest)) if command == "lsp" => match LspConfig::from_args(rest) {
+            Ok(config) => ExitCode::from(lsp::run(&config)),
+            Err(why) => {
+                eprintln!("jfl lsp: {why}\n{USAGE}");
                 ExitCode::from(2)
             }
         },

@@ -2516,12 +2516,105 @@ plugin; LSP-06 is M1's gate and makes the bench gate blocking.
   denies them in every crate, and frames go through `jfl-protocol`. If `log` is bridged
   (`tracing-subscriber`'s default `tracing-log` feature does it), keep the `lsp_server` target below
   DEBUG.
+- **As built (LSP-02, 2026-11-24):** `jfl lsp [--state-dir DIR] [--idle-timeout SECONDS]`
+  (`jfl-composition::daemon::lsp` on the LSP adapter's session): `initialize` answered on the main
+  loop at once with `positionEncoding` (`utf-8` when offered), `textDocumentSync` (open/close,
+  incremental) and `definitionProvider`, and nothing else; before `initialize` every request is
+  `ServerNotInitialized` (-32002) and a notification dropped; after it an unknown request is
+  `MethodNotFound` (LSP-01's transcripts now send `initialize` first);
+  after `shutdown` every request is `InvalidRequest`; `exit` ends the session (the adapter's new
+  `Handler::ended`; its reader thread is detached, so the session does not wait for the client to
+  close its input) and the process exits 0 only when `shutdown` came first, 1 otherwise, the
+  input's end or lost framing included (the `malformed-header-*` transcripts now state `exit 1`).
+  Document sync: the session keeps each open document's text (`jfl_adapter_lsp::document`),
+  applies `didChange`'s ranged edits through `jfl-domain` and sends the daemon the whole text with
+  the client's version; a change that does not fit, a version that does not increase, or a text
+  past `MAX_DOCUMENT_BYTES` (a sixth of the 16 MiB frame, so any text fits a frame escaped)
+  parts the document (`ContentModified` until it is opened again). One link thread owns the
+  daemon proxy and takes notifications and requests in the order read (`LINK_QUEUE` 64); a cancel
+  for a request still waiting for the link is answered `RequestCancelled` at once and the request
+  is never asked (the adapter's new `Handler::cancelled`). Each request has one deadline,
+  `CALL_BUDGET` (8 s) from its dispatch: the link asks the daemon with what is left (every wait
+  of the proxy's call cut there), and a request whose deadline passed in the queue is not asked;
+  either way it is answered `ServerCancelled` (-32802), which the client may retry. A proxy write
+  whose deadline passed (part of a frame may be on the wire) drops the connection. The daemon serves the views (`daemon::views`: the
+  view service on the real adapters, the store under `<state>/summaries`, one `QueryCache`,
+  `settle` after a request opened a view and `write_back` in slices of 256 between requests, never
+  dropped half done; ports on Tokio's blocking pool of 4 threads and the system clock, the cookie
+  deadline in `daemon/timer.rs`), `jfl/definition` and `jfl/hover` over a pinned generation under
+  the 300 ms deadline, the view's `HEAD` read from its files (`jfl_adapter_git::snapshot::head_commit`).
+  The service seam is async (`Service::answer` returns a future the loop awaits;
+  `Service::background` is the work between requests, run when nothing else is ready).
+- **Decided (LSP-02):** an open document whose text differs from the disk is answered
+  `ContentModified`, not from the disk: the index holds the disk's text, the client's position
+  its buffer's, and a wrong `exact` is the worst answer (ADR 0014). Plan §4.4 decides which is
+  current: the daemon stamps each overlay with the file's mtime when it arrives, and a disk
+  written after it wins (answered from the disk). Indexing overlays is later work.
+- **Decided (orchestrator, LSP-02 review): the LSP definition mapping.** `textDocument/definition`
+  returns the `exact` locations; or, with none, the bounded overload set of a proved owner (target
+  `ambiguous`, plan §2.5); otherwise `[]` (`null` when no name is at the position). The other
+  `possible` candidates (same-name members of any type, plan §2.2) are never sent. LSP's
+  definition result cannot carry completeness: an empty, incomplete answer is `[]` by necessity;
+  hover's status line is LSP's completeness channel (LSP-03), and the `possible` set and
+  completeness stay in `jfl/definition` and the CLI (`jfl_adapter_lsp::translate::definition`).
+- **Decided (orchestrator, LSP-02 review): a column past its line's end is clamped** for the LSP
+  carrier (LSP 3.17, IDX-01's decision): `jfl-domain`'s `LineIndex::clamp`, and an additive
+  `PositionParams::clamp` (written only when `true`) that `jfl lsp` sets, so the daemon clamps on
+  the indexed text of a file the client did not open; `jfl/*` callers without it keep the strict
+  refusal (`PositionOutOfRange`).
+- **Decided (orchestrator, LSP-02 review):** a hit in an open document whose text differs from
+  the disk is refused like the request's own file (`ContentModified`): its range would be placed
+  by the disk's text in a buffer that holds another.
+- **Decided (LSP-02):** `uri-echo.jsonl` (LSP-01) pinned the stub's invented answer; it is
+  replaced by `uri-echo-worktree.jsonl` against a real worktree under `a+b/c@d/`, the same rule
+  (echo as sent for a document opened or named, canonical otherwise). Transcripts that name a
+  worktree's files write `{{root}}` (the client's spelling) and `{{root_uri}}` (the daemon's),
+  substituted by `crates/jfl-cli/tests/lsp_transcripts.rs` over a git copy of
+  `fixtures/lsp/worktree/`; the runner keeps `PATH` (the daemon runs `git`).
+- **Decided (LSP-02):** a cancellation that comes before the answer cannot be a transcript (the
+  runner writes the whole input before the server starts, so nothing holds a request in flight);
+  both orders are forced in process (`crates/jfl-composition/tests/lsp.rs`, the link played by
+  the test over channels, every reply matched by its id, since the pool answers in any order;
+  1,100 runs without a failure, 600 of them six at a time), the after-completion order is also a
+  transcript.
 - **Accept:**
-  - [ ] transcripts: lifecycle, both exit codes, cancellation before and after completion, UTF-16 positions on a line with astral characters, `utf-8` when the client offers it
-  - [ ] a `jfl-bench` suite records `initialize` latency against a warm daemon (ver §10); the 200 ms budget is reported, not asserted in a parallel test
-  - [ ] after the daemon is killed mid-session the next request is answered by a respawned daemon with the open documents restored (e2e)
-  - [ ] runs on the bench corpus (small at least, `just bench`) and reports the metrics it affects; its correctness tests also run against the real-corpus cases that apply (BENCH-05)
-- **Impact:** LSP capabilities (lifecycle).
+  - [x] transcripts: lifecycle, both exit codes, cancellation before and after completion, UTF-16 positions on a line with astral characters, `utf-8` when the client offers it (`fixtures/lsp/`: `lifecycle-shutdown-exit` (0), `lifecycle-exit-without-shutdown` (1), `cancel-after-completion`, `position-encoding-utf16-astral`, `position-encoding-utf8`, `document-sync`, `uri-echo-worktree`, run by `crates/jfl-cli/tests/lsp_transcripts.rs` with its negative controls; cancellation before completion in process, Decided above: `crates/jfl-composition/tests/lsp.rs`)
+  - [x] a `jfl-bench` suite records `initialize` latency against a warm daemon (ver §10); the 200 ms budget is reported, not asserted in a parallel test (`just bench jfl-lsp SIZE`: `initialize_warm_ms`, beside the cold session's `initialize_ms` and `first_definition_ms`; `doc/bench/README.md`)
+  - [x] after the daemon is killed mid-session the next request is answered by a respawned daemon with the open documents restored (e2e) (`crates/jfl-cli/tests/lsp_daemon.rs::should_answer_from_a_restarted_daemon_with_the_open_documents_when_the_daemon_was_killed`: the re-sent overlay makes the new daemon answer `ContentModified` again)
+  - [x] runs on the bench corpus (small at least, `just bench`) and reports the metrics it affects; its correctness tests also run against the real-corpus cases that apply (BENCH-05): `just bench jfl-lsp small` and `medium` (`doc/bench/README.md`); BENCH-05 has no cases yet
+- **Left after LSP-02:**
+  - **hover over LSP** is LSP-03's, and needs a protocol decision first: `HoverResult` carries no
+    completeness, so the status line (plan §2.2, LSP's only completeness channel) cannot say
+    `(incomplete: …)` for a resolved target; adding `complete`/`incomplete_because` is a member
+    `complete` covers (a new major by `messages.rs`'s rule), a `status` string a minor. The daemon
+    answers `jfl/hover` already; no `hoverProvider` is announced until then, and hover round trips
+    through the proxy are not measured yet;
+  - `jfl/status` still lists no view; `Freshness::synced_at` is `null` (the view service does not
+    record when a generation was reconciled);
+  - `ServiceConfig::read_budget` and `unwritten_cap` keep their defaults (no memory tier exists
+    yet, DEC-03), and the store's cap is a constant (2 GiB);
+  - the `ARCH-position-arithmetic` item for the review checklist (fnd §3.3): `.claude/` is the
+    orchestrator's, so it is reported, not written;
+  - the tracing subscriber (none is installed; `lsp_server`'s `log` stays unbridged);
+  - `$/progress`, and a daemon that answers a cancelled request's work early (cancellation is
+    the proxy's bookkeeping; the daemon finishes what it started);
+  - a daemon spawned with no `PATH` cannot run `git` (`jfl lsp` passes on its own environment's
+    allowlist; a client that starts it with none gets an error naming git);
+  - **`settle` holds the daemon's loop** for the whole view's read once a request opened it
+    (about 2 s on medium, about 9 s projected on large): a request behind it waits, past
+    `CALL_BUDGET` (8 s) on large, and is answered with an error the client may retry. IDX-09
+    says never to drop `settle` half done, so the fix is settling in slices between requests
+    (a views model change first, ADR 0007);
+  - the session's open documents, like the daemon's overlays, are not bounded in number (plan
+    §5.9); each is bounded by `MAX_DOCUMENT_BYTES`;
+  - `head_commit` may read `packed-refs` inline on the loop, after the pin (`view.head` can name a
+    commit `HEAD` moved to after the pin); a re-sent overlay after a reconnect is stamped with the
+    disk's current mtime (the safe direction: `ContentModified`);
+  - a "second request during `settle`" row in the `jfl-lsp` suite (its untimed rounds hide it);
+  - an open document that differs from the disk costs a read of the file on each request (to
+    compare it), inline on the daemon's loop.
+- **Impact:** LSP capabilities (lifecycle, document sync, definition); CLI (`jfl lsp`); daemon
+  (serves the views); fixtures (LSP transcripts, the LSP fixture worktree).
 
 #### LSP-03: Navigation methods
 - **Depends on:** LSP-02, IDX-11, DEC-06. **Model:** standard. **Size:** L. **Parallel with:** LSP-04.

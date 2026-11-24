@@ -225,6 +225,9 @@ jfl-adapter-ipc = { tokio = ["rt"] }
 # proptest, not proptest-state-machine, whose default features add 16 crates against the std-only
 # proptest every crate here takes), with the same features as jfl-domain's, for the same reasons.
 jfl-composition = { proptest = ["std"] }
+# jfl-cli (LSP-02): serde_json writes the LSP messages of the end-to-end tests of `jfl lsp` (the
+# transcripts' runner and the live session are jfl-testkit's); in the graph already.
+jfl-cli = { serde_json = ["default"] }
 
 [external.build]
 

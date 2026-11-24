@@ -288,6 +288,14 @@ pub struct PositionParams {
     /// The column's encoding, which the answer's ranges use too.
     #[serde(with = "encoding")]
     pub position_encoding: PositionEncoding,
+    /// Move a column past the end of its line to the line's end (LSP 3.17's rule, which `jfl lsp`
+    /// asks for) instead of refusing it (`PositionOutOfRange`, the CLI's rule, plan §2.3).
+    /// Additive (LSP-02): written only when `true`, `false` when absent, so a daemon that does not
+    /// know it refuses, never answers for another position.
+    ///
+    /// Pinned by: `tests/compat.rs::should_read_clamp_as_false_when_it_is_absent_and_write_it_only_when_true`.
+    #[serde(default, skip_serializing_if = "core::ops::Not::not")]
+    pub clamp: bool,
 }
 
 /// `jfl/references` params.

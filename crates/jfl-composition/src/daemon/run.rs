@@ -13,6 +13,13 @@
 //! another. A failed accept (out of descriptors) pauses accepting until the next tick, without
 //! spinning. Every timer is in [`super::timer`].
 //!
+//! **Between requests** the loop runs the service's background work ([`Service::background`]:
+//! the views' `settle` after a request that opened one, then their `write_back` in slices), one
+//! step at a time and only when nothing else is ready (the `select!` is biased, the work last), so
+//! a waiting frame, a signal or a tick is taken before the next step. A step runs to its end once
+//! started: a `settle` or a reconcile dropped half way would leave its view's build set for good
+//! (IDX-09's wiring notes).
+//!
 //! Pinned by `tests/daemon.rs`.
 
 use std::collections::BTreeMap;
@@ -90,11 +97,12 @@ pub enum Ended {
 
 /// Runs the daemon of `config` until it shuts down: `Ok` with why it stopped (exit 0), or why it
 /// could not start or stop cleanly (exit 1; the reason was reported on the notify socket too, for a
-/// proxy that spawned it). `make` builds the request service once the lock is held, with the
-/// checked state directory (where the views' summary store lives, IDX-09).
+/// proxy that spawned it). `make` builds the request service once the lock is held, inside the
+/// runtime (its blocking pool is the adapters'), with the checked state directory (where the
+/// views' summary store lives, IDX-09); a service that cannot be built fails the start.
 pub fn run<S: Service>(
     config: &DaemonConfig,
-    make: impl FnOnce(&StateDir) -> S,
+    make: impl FnOnce(&StateDir) -> Result<S, String>,
 ) -> Result<Ended, String> {
     // The first act, before the lock: a signal to the launcher's group can then only reach a
     // daemon that holds nothing yet (obligation 3). EPERM: already a session leader.
@@ -118,11 +126,7 @@ pub fn run<S: Service>(
         Ok(socket) => socket,
         Err(e) => return fail(e.to_string()),
     };
-    let rt = match tokio::runtime::Builder::new_current_thread()
-        .enable_io()
-        .enable_time()
-        .build()
-    {
+    let rt = match super::ports::runtime() {
         Ok(rt) => rt,
         Err(e) => return fail(format!("cannot start the runtime: {e}")),
     };
@@ -139,7 +143,10 @@ pub fn run<S: Service>(
         };
         // The host reports its own failures on the notify socket.
         host.lock().map_err(|e| e.to_string())?;
-        let mut service = make(&state);
+        let mut service = match make(&state) {
+            Ok(service) => service,
+            Err(e) => return fail(e),
+        };
         host.unlink_stale().map_err(|e| e.to_string())?;
         host.listen().map_err(|e| e.to_string())?;
         let ended = serve(&mut host, &mut service, sigterm, config.idle).await;
@@ -167,13 +174,19 @@ async fn serve(
     let mut tick = timer::ticker(TICK.min(idle.max(Duration::from_millis(10))));
     let mut idle_since = Some(Instant::now());
     let mut accepting = true;
+    // Whether the service may have background work: set by every frame handled, cleared when it
+    // says it has none.
+    let mut working = true;
     let ended = loop {
         tokio::select! {
+            biased;
+            _ = sigterm.recv() => break Ended::Terminated,
             accepted = listener.accept(), if accepting => {
                 accepting = accept(accepted, host, &events, &mut tasks);
             }
             Some(event) = inbox.recv() => {
                 let ended = handle(event, host, service, &events, &mut tasks).await;
+                working = true;
                 for conn in host.take_severed() {
                     tasks.end(conn);
                 }
@@ -186,7 +199,6 @@ async fn serve(
                     idle_since = None;
                 }
             }
-            _ = sigterm.recv() => break Ended::Terminated,
             _ = tick.tick() => {
                 accepting = true;
                 match host.tick() {
@@ -196,6 +208,12 @@ async fn serve(
                 }
                 if idle_since.is_some_and(|since| since.elapsed() >= idle) {
                     break Ended::Idle;
+                }
+            }
+            () = std::future::ready(()), if working => {
+                match service.background() {
+                    Some(step) => step.await,
+                    None => working = false,
                 }
             }
         }
