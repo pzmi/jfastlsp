@@ -636,3 +636,135 @@ fn should_refuse_a_part_when_a_rescan_is_due_or_a_path_is_not_delivered() -> Tes
     assert_eq!(rescan, Err(ViewError::RescanDue));
     Ok(())
 }
+
+#[test]
+fn should_keep_the_left_paths_dirty_and_certify_when_a_rescan_leaves_them() -> TestResult {
+    // given: both files delivered (a settle's deferred files), then a commit's `.git` event
+    let (mut registry, mut store, a2, b2) = both_delivered()?;
+    registry
+        .deliver(Event::Git { view: root()? })
+        .map_err(err)?;
+
+    // when: the rescan leaves B, reads A, and publishes; then a part takes B
+    let mut statted = Vec::new();
+    let pending = registry
+        .reconcile_start_leaving(
+            &root()?,
+            Some(&BTreeSet::from([rel("A.java")?, rel("B.java")?])),
+            &BTreeSet::from([rel("B.java")?]),
+            |p| {
+                statted.push(p.as_str().to_owned());
+                if p.as_str() == "A.java" { a2 } else { b2 }
+            },
+            || git(2),
+        )
+        .map_err(err)?;
+    store.0.insert(3);
+    registry
+        .summarised(&root()?, &rel("A.java")?, a2, 3, Stamp(1))
+        .map_err(err)?;
+    registry.publish(&root()?, &store).map_err(err)?;
+    let after_rescan = registry.view(&root()?).ok_or("no view")?.clone();
+    registry
+        .reconcile_part(&root()?, &BTreeSet::from([rel("B.java")?]), |_| b2)
+        .map_err(err)?;
+    store.0.insert(4);
+    registry
+        .summarised(&root()?, &rel("B.java")?, b2, 4, Stamp(2))
+        .map_err(err)?;
+    registry.publish(&root()?, &store).map_err(err)?;
+
+    // then: the rescan neither statted nor read B, recorded the new HEAD and certified the view
+    // with B still delivered; the part then published B
+    assert_eq!(pending, BTreeSet::from([rel("A.java")?]));
+    assert_eq!(statted, vec!["A.java".to_owned()]);
+    assert_eq!(after_rescan.dirty, BTreeSet::from([rel("B.java")?]));
+    assert!(after_rescan.certain && !after_rescan.rescan);
+    assert_eq!(after_rescan.published.git, git(2));
+    let summaries: Vec<Option<u32>> = after_rescan
+        .published
+        .index
+        .values()
+        .map(|e| e.summary)
+        .collect();
+    assert_eq!(summaries, vec![Some(3), Some(2)]);
+    let view = registry.view(&root()?).ok_or("no view")?;
+    assert!(view.dirty.is_empty());
+    assert_eq!(view.published.generation.0, 3);
+    Ok(())
+}
+
+#[test]
+fn should_refuse_to_leave_a_needed_path_when_a_rescan_starts() -> TestResult {
+    // given: both files delivered, no rescan due, and a request on A whose stat saw it change
+    let (mut registry, _store, a2, b2) = both_delivered()?;
+    let stat = |p: &RelPath| if p.as_str() == "A.java" { a2 } else { b2 };
+    let only_b = BTreeSet::from([rel("B.java")?]);
+    let only_a = BTreeSet::from([rel("A.java")?]);
+    let r1 = RequestId(1);
+    registry
+        .request_start(r1, &file("A.java")?, &a2, &git(1), Stamp(0))
+        .map_err(err)?;
+
+    // when: paths are left without a rescan; then with one, an undelivered path, A, and B
+    let no_rescan = registry.reconcile_start_leaving(&root()?, None, &only_b, stat, || git(1));
+    registry
+        .deliver(Event::Git { view: root()? })
+        .map_err(err)?;
+    let undelivered = registry.reconcile_start_leaving(
+        &root()?,
+        None,
+        &BTreeSet::from([rel("C.java")?]),
+        stat,
+        || git(1),
+    );
+    let needed = registry.reconcile_start_leaving(&root()?, None, &only_a, stat, || git(1));
+    let other = registry.reconcile_start_leaving(&root()?, None, &only_b, stat, || git(1));
+
+    // then: only the rescan leaving B, which no request needs, is taken
+    assert_eq!(no_rescan, Err(ViewError::NotARescan));
+    assert_eq!(undelivered, Err(ViewError::NotDirty));
+    assert_eq!(needed, Err(ViewError::NeededNotTaken));
+    assert_eq!(other, Ok(only_a));
+    Ok(())
+}
+
+#[test]
+fn should_return_from_sync_only_when_the_paths_its_rescan_left_are_published() -> TestResult {
+    // given: both files delivered, and a sync whose rescan leaves B
+    let (mut registry, mut store, a2, b2) = both_delivered()?;
+    registry.sync_start(&root()?).map_err(err)?;
+    registry
+        .reconcile_start_leaving(
+            &root()?,
+            None,
+            &BTreeSet::from([rel("B.java")?]),
+            |_| a2,
+            || git(1),
+        )
+        .map_err(err)?;
+    store.0.insert(3);
+    registry
+        .summarised(&root()?, &rel("A.java")?, a2, 3, Stamp(1))
+        .map_err(err)?;
+    registry.publish(&root()?, &store).map_err(err)?;
+
+    // when: sync returns after the rescan, during the part that takes B, and after it
+    let after_rescan = registry.sync_done(&root()?);
+    registry
+        .reconcile_part(&root()?, &BTreeSet::from([rel("B.java")?]), |_| b2)
+        .map_err(err)?;
+    let during_part = registry.sync_done(&root()?);
+    store.0.insert(4);
+    registry
+        .summarised(&root()?, &rel("B.java")?, b2, 4, Stamp(2))
+        .map_err(err)?;
+    registry.publish(&root()?, &store).map_err(err)?;
+    let after_part = registry.sync_done(&root()?);
+
+    // then
+    assert_eq!(after_rescan, Err(ViewError::SyncState));
+    assert_eq!(during_part, Err(ViewError::SyncState));
+    assert_eq!(after_part, Ok(()));
+    Ok(())
+}

@@ -407,7 +407,9 @@ mod machine {
                     )?;
                 }
                 Op::SyncDone => {
-                    let expect = r.sync_waiting && r.sync_scanned;
+                    // Builds run whole here, so none is in progress; a delivered path still
+                    // waits for one (IDX-09e: the barrier waits for what a rescan left).
+                    let expect = r.sync_waiting && r.sync_scanned && r.dirty.is_empty();
                     if expect {
                         r.sync_waiting = false;
                     }

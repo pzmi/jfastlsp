@@ -14,9 +14,10 @@
 //!   versions.toml agreeing with mise.lock (XT-02, [`tools`]).
 //! - `install-tools [--archives DIR] [TOOL...]`: the pinned release assets, checksum-verified, into
 //!   the tool cache outside the repository, which the stages' PATH puts first (XT-02).
-//! - `formal-verify [MODEL]`: Apalache's bounded verification and a simulation of each model of
-//!   the `MODELS` registry, or the one named, after the preflight, on the stages' PATH; not a stage
-//!   of `check` (FORMAL-01, [`formal`]).
+//! - `formal-verify [MODEL [apalache|simulation]]`: Apalache's bounded verification and a
+//!   simulation of each model of the `MODELS` registry, or the one named, after the preflight, on
+//!   the stages' PATH; not a stage of `check` (FORMAL-01, [`formal`]). With a part, that half
+//!   alone: `formal.yml` runs each in its own job (IDX-09e).
 //! - `conformance [MODEL] [SEED] [TRACES] [STEPS]`: the `conformance-replay` stage for one model
 //!   (or `all`), at a given seed and budget, so a printed seed repeats a run (FORMAL-02,
 //!   [`conformance`]).
@@ -53,7 +54,8 @@ commands:
   doctor                   every pinned tool present at its version (tools/versions.toml)
   install-tools [--archives DIR] [TOOL...]
                            install the pinned tools, checksum-verified, into the tool cache
-  formal-verify [MODEL]    Apalache and a simulation over the registered Quint models
+  formal-verify [MODEL [apalache|simulation]]
+                           Apalache and a simulation over the registered Quint models
   conformance [MODEL|all] [SEED] [TRACES] [STEPS]
                            repeat a conformance-replay run (a printed seed, a budget)";
 
@@ -73,7 +75,7 @@ enum Command {
         archives: Option<PathBuf>,
         names: Vec<String>,
     },
-    FormalVerify(Option<String>),
+    FormalVerify(Option<String>, formal::Part),
     Conformance(conformance::Run),
 }
 
@@ -107,9 +109,13 @@ fn parse(args: &[String]) -> Result<(Option<PathBuf>, Command), String> {
             install_tools(Some(PathBuf::from(dir)), names)?
         }
         [c, names @ ..] if c == "install-tools" => install_tools(None, names)?,
-        [c] if c == "formal-verify" => Command::FormalVerify(None),
+        [c] if c == "formal-verify" => Command::FormalVerify(None, formal::Part::Both),
         [c, model] if c == "formal-verify" && !model.starts_with('-') => {
-            Command::FormalVerify(Some(model.clone()))
+            Command::FormalVerify(Some(model.clone()), formal::Part::Both)
+        }
+        [c, model, part] if c == "formal-verify" && !model.starts_with('-') => {
+            let part = formal::Part::parse(part).ok_or_else(|| USAGE.to_owned())?;
+            Command::FormalVerify(Some(model.clone()), part)
         }
         [c, words @ ..] if c == "conformance" && words.iter().all(|w| !w.starts_with('-')) => {
             Command::Conformance(
@@ -236,7 +242,7 @@ fn run(root: &Path, command: Command) -> i32 {
                 return 2;
             }
         },
-        Command::Preflight | Command::FormalVerify(_) | Command::Conformance(_) => Vec::new(),
+        Command::Preflight | Command::FormalVerify(..) | Command::Conformance(_) => Vec::new(),
         Command::Doctor => {
             let tools = match tools::manifest(root) {
                 Ok(tools) => tools,
@@ -276,7 +282,8 @@ fn run(root: &Path, command: Command) -> i32 {
         Ok(context) => context,
         Err(code) => return code,
     };
-    if stages.is_empty() && !matches!(command, Command::FormalVerify(_) | Command::Conformance(_)) {
+    if stages.is_empty() && !matches!(command, Command::FormalVerify(..) | Command::Conformance(_))
+    {
         return 0;
     }
     let tools = match tools::manifest(root) {
@@ -288,8 +295,8 @@ fn run(root: &Path, command: Command) -> i32 {
     };
     let dirs = tools::path_dirs(tools::cache_dir().as_deref(), &tools);
     context.path = stage_path(root, &dirs);
-    if let Command::FormalVerify(model) = &command {
-        return formal::verify(&context, &tools, model.as_deref());
+    if let Command::FormalVerify(model, part) = &command {
+        return formal::verify(&context, &tools, model.as_deref(), *part);
     }
     if let Command::Conformance(run) = &command {
         return conformance::conformance(&context, run);
@@ -350,10 +357,21 @@ mod tests {
                 vec!["tool-config", "/t"],
                 Command::ToolConfig(Some(PathBuf::from("/t"))),
             ),
-            (vec!["formal-verify"], Command::FormalVerify(None)),
+            (
+                vec!["formal-verify"],
+                Command::FormalVerify(None, formal::Part::Both),
+            ),
             (
                 vec!["formal-verify", "smoke"],
-                Command::FormalVerify(Some("smoke".to_owned())),
+                Command::FormalVerify(Some("smoke".to_owned()), formal::Part::Both),
+            ),
+            (
+                vec!["formal-verify", "views", "apalache"],
+                Command::FormalVerify(Some("views".to_owned()), formal::Part::Apalache),
+            ),
+            (
+                vec!["formal-verify", "views", "simulation"],
+                Command::FormalVerify(Some("views".to_owned()), formal::Part::Simulation),
             ),
             (
                 vec!["conformance"],
@@ -398,6 +416,8 @@ mod tests {
             vec!["install-tools", "--force", "x"],
             vec!["formal-verify", "--all"],
             vec!["formal-verify", "a", "b"],
+            vec!["formal-verify", "views", "apalache", "simulation"],
+            vec!["formal-verify", "--all", "apalache"],
             vec!["conformance", "--seed", "1"],
             vec!["conformance", "smoke", "nope"],
         ];

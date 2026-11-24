@@ -19,7 +19,7 @@
 //! Every type of the observation, nested ones included, has `deny_unknown_fields` and a derived
 //! `PartialEq` (IDX-09's obligation 9), so the comparison covers the whole model state.
 //!
-//! Three negative controls, each diverging where its fault first shows (the first two: plan
+//! Four negative controls, each diverging where its fault first shows (the first two: plan
 //! §7.1, publishing before the last summary is stored):
 //!
 //! - [`control`], the registered one: the registry is shown a store that lags the observed one
@@ -35,6 +35,11 @@
 //!   model's `reconcilePart`: step 18 of `views-settle-in-slices`, whose part holds another path
 //!   beside the needed one. Pinned by
 //!   tests/replay.rs::should_diverge_at_the_part_when_the_views_control_leaves_out_a_needed_path.
+//! - [`control_rescan_leaving_needed`] (IDX-09e): a rescan also leaves the paths the waiting
+//!   requests need; the registry's guard refuses it (`NeededNotTaken`) at the model's
+//!   `reconcileStart`: step 8 of `views-rescan-during-a-settle`, whose rescan leaves another path.
+//!   Pinned by
+//!   tests/replay.rs::should_diverge_at_the_rescan_when_the_views_control_leaves_a_needed_path.
 //!
 //! Cookie events carry their cookie's sequence number as its stamp, which is where the model
 //! writes it (`cookieSeq`). A rescan is given the scripted tree's listing of the view's present
@@ -352,6 +357,8 @@ enum Fault {
     PublishAtStart,
     /// A part leaves out the paths the waiting requests need.
     PartWithoutNeeded,
+    /// A rescan leaves the paths the waiting requests need too.
+    RescanLeavingNeeded,
 }
 
 type Registry = ViewRegistry<Disk, GitVer, Summary>;
@@ -691,8 +698,19 @@ impl ViewsDriver {
         Ok(())
     }
 
-    fn reconcile_start(&mut self, view: &str) -> Result<(), StepError> {
+    fn reconcile_start(&mut self, view: &str, leave: &BTreeSet<String>) -> Result<(), StepError> {
         let root = root_of(view).map_err(StepError::Harness)?;
+        let mut left = BTreeSet::new();
+        for path in leave {
+            let rel = file_of(path)
+                .ok()
+                .and_then(|f| f.relative_to(&root))
+                .ok_or_else(|| refused("the path is not under the view"))?;
+            left.insert(rel);
+        }
+        if self.fault == Fault::RescanLeavingNeeded && !left.is_empty() {
+            left.extend(self.registry.needed(&root));
+        }
         let files = self.tree.files.clone();
         let git = self.git(view);
         let listed: BTreeSet<RelPath> = files
@@ -701,9 +719,10 @@ impl ViewsDriver {
             .filter_map(|(p, _)| rel_of(p).ok())
             .collect();
         self.registry
-            .reconcile_start(
+            .reconcile_start_leaving(
                 &root,
                 Some(&listed),
+                &left,
                 |rel| {
                     files.get(&model_path(&root, rel)).cloned().unwrap_or(Disk {
                         ver: 0,
@@ -917,7 +936,12 @@ impl ViewsDriver {
                 let root = root_of(&view).map_err(StepError::Harness)?;
                 self.registry.watch_restored(&root).map_err(refused)
             }
-            "reconcileStart" => self.reconcile_start(&view()?),
+            "reconcileStart" => {
+                let leave = step
+                    .pick::<BTreeSet<String>>("leave")?
+                    .ok_or_else(|| harness(step, "no `leave` pick"))?;
+                self.reconcile_start(&view()?, &leave)
+            }
             "reconcilePart" => {
                 let take = step
                     .pick::<BTreeSet<String>>("take")?
@@ -931,7 +955,10 @@ impl ViewsDriver {
                     store: &self.store,
                     hidden: match self.fault {
                         Fault::LaggingStore => self.last_put.as_ref(),
-                        Fault::None | Fault::PublishAtStart | Fault::PartWithoutNeeded => None,
+                        Fault::None
+                        | Fault::PublishAtStart
+                        | Fault::PartWithoutNeeded
+                        | Fault::RescanLeavingNeeded => None,
                     },
                 };
                 self.registry
@@ -1195,4 +1222,11 @@ pub fn control_publishing_at_start() -> Replayer {
 /// it diverges at the `reconcilePart` that a request waits on.
 pub fn control_part_without_needed() -> Replayer {
     Replayer::new(ViewsDriver::new(Fault::PartWithoutNeeded))
+}
+
+/// The fourth control (IDX-09e): a rescan that leaves paths also leaves the ones the waiting
+/// requests need, as a shell leaving every deferred file would; the registry's guard refuses it
+/// (`NeededNotTaken`), so it diverges at the `reconcileStart` that a request waits on.
+pub fn control_rescan_leaving_needed() -> Replayer {
+    Replayer::new(ViewsDriver::new(Fault::RescanLeavingNeeded))
 }

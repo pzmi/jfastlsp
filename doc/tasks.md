@@ -2220,10 +2220,74 @@ the loop is held p95 299–307 ms per slice (the whole 4.1–4.3 s settle before
   length 5 took 1169 s after IDX-09d, leaving about 14 minutes of room in the 60-minute job at
   CI's doubling (`doc/formal-models.md`, Budget), so measure first, and split
   the job or lower the simulation's share if it does not fit.
+- **As built (2026-11-24):** model first, the reviewer's change. `views.qnt`'s
+  `reconcileStart(view, leave)`: a rescan may leave delivered paths unread; they stay `dirty`, so
+  `completeAt` stays false until a part takes them; never a path a waiting request needs
+  (`needed`), and nothing without a rescan. `syncable` adds `dirty` empty and no build in
+  progress, so `sync` waits for the parts that take what its rescan left (`SyncIsBarrier`
+  unchanged). No invariant changed. Scenario `rescanDuringASettle` (regression trace
+  `views-rescan-during-a-settle`, 24 steps): two files delivered, a commit's HEAD seen by a
+  request's stat (the linked-worktree trigger), the rescan reads the request's file and leaves
+  the other, the answer incomplete; the commit's `.git` event sets a second rescan that leaves
+  it again; a part takes it; the next answer is complete. Guard tests and twins
+  (`rescanLeavingANeededPathIsRefusedTest`, `leavingWithoutARescanIsRefusedTest`,
+  `syncWaitsForTheLeftPathsTest`). Three broken controls, each found by the simulation in its
+  action's place in `step` (20,000 × 30, seeds 0x1 to 0x5): `reconcileStartDroppingLeft`
+  (`CompleteIsHonest`, after about 3,620 samples), `reconcileStartLeavingNeeded`
+  (`FreshAfterStat`, within 30) and `syncDoneBeforeTheParts` (`SyncIsBarrier`, within 110);
+  `step`'s `leave` pick includes picks holding a needed path, so the guard's fault is reached.
+  `syncStart` and `syncDone` became a group of their own in `daemonStep` (`syncStep`, as rare
+  as one build stimulus): a started `sync` makes a rescan due, which refuses every part, and
+  with the `leave` pick IDX-09d's `reconcilePartIgnoringRequests` was found only after about
+  16,000 of the 20,000 samples; now after about 1,950, so every control is found within a
+  quarter of the samples (`doc/formal-models.md`, controls).
+  The registry's `reconcile_start_leaving` (refusals `NotARescan`, `NotDirty`, `NeededNotTaken`)
+  and `sync_done` follow; the driver replays `leave`, and a fourth control,
+  `control_rescan_leaving_needed`, diverges at step 8 of the new trace
+  (`tests/replay.rs::should_diverge_at_the_rescan_when_the_views_control_leaves_a_needed_path`).
+  The shell: a rescan delivers the deferred files the settle has not and leaves every one the
+  listing admits and no waiting request needs, unstatted and unread; `sync` still reads them
+  in its rescan (`reconcile_with(whole)`: its barrier waits for them anyway, and the daemon
+  does not serve `sync` yet). Pinned by `tests/view_service.rs`:
+  `should_leave_the_deferred_files_to_the_settle_when_a_request_finds_a_commit`,
+  `should_read_one_slice_per_step_when_a_hint_asks_for_a_rescan_during_the_settle`,
+  `should_read_a_file_created_during_the_settle_and_leave_the_deferred_ones_when_it_is_asked_for`
+  (each fails when the rescan leaves nothing), and `tests/views.rs`'s three new tests.
+- **Measured** (`doc/bench/README.md`, "Rescans during a settle", medium, 2026-11-24, a loaded
+  VM, before = origin/main): the request that finds a commit in the linked worktree took
+  2.7–3.0 s before (8,775 deferred files read inline) and 92–99 ms after; a build-file hint
+  2.4–3.6 s and 100–110 ms; a created file asked for 3.5–3.6 s and 97–98 ms; the longest hold
+  of any step after 195–258 ms (one slice); the full index within noise. Over `jfl lsp`, the
+  first definition after a commit 3.7–4.6 s before, 0.10–0.31 s after; SIGTERM to exit
+  160–534 ms. Large, projected: a few hundred milliseconds for the triggering request (the
+  rescan's listing and its stats, about 0.4 s at most) against about 9 s before.
+- **Decided (the orchestrator, 2026-11-24): the formal job is split.** Together, `formal-verify
+  views` took 1,762 s on a loaded VM, about 59 minutes at CI's estimated doubling against the
+  60-minute job, so `formal.yml` would have gone red at random. It now runs one job per model and
+  part (`just formal-verify <model> apalache|simulation`, xtask's `Part`), each with the 60
+  minutes to itself; every bound and seed unchanged. Sized from the local times with the
+  doubling (`doc/formal-models.md`, Budget): `apalache (views)` 1,565 s here, about 52 minutes
+  at the doubling (about 8 minutes of room, the long pole); `simulation (views)` 212 s, about 7.
+  A dispatch of `formal.yml` right after landing checks it (Left).
+- **Left:**
+  - a lost watch and an overflow are not driven in the bench (they set the same rescan; the
+    component tests cover the path);
+  - **ready follow-up** (FND-17 has landed): a daemon-level test of a rescan during a settle in
+    `tests/daemon.rs` (a commit in a linked worktree while a large view settles; every answer
+    before the last slice incomplete, none waiting for the whole view); the component tests,
+    the lowest level that can fail for the bound, and the bench cover it meanwhile;
+  - `syncable` waits for `dirty` to empty, so in the model a stream of writes delivered after a
+    `sync` started postpones it without bound (sound for `SyncIsBarrier`; the shell's whole
+    build avoids it in practice); narrow it to the paths the rescan left if a liveness property
+    for views ever needs it;
+  - dispatch `formal.yml` once right after landing and record `apalache (views)`'s time here;
+  - `sync` reads the deferred files whole: when M2's CLI serves it, answer it from the
+    background steps;
+  - the reference machine (`tests/views_machine.rs`) draws neither parts nor `leave`.
 - **Accept:**
-  - [ ] the model change above with its scenario, control (found by the simulation) and driver; `formal-verify views` within the budget
-  - [ ] a rescan during a settle reads at most one slice of deferred files per step, and a request that finds a rescan due answers within its budget on large (`tests/view_service.rs`, `tests/daemon.rs`)
-  - [ ] measured on medium with large projected: the longest hold during a settle with each trigger above
+  - [x] the model change above with its scenario, control (found by the simulation) and driver; `formal-verify views` within the budget (green; each half in a job of its own, Budget)
+  - [x] a rescan during a settle reads at most one slice of deferred files per step, and a request that finds a rescan due answers within its budget on large (`tests/view_service.rs`; the daemon test is left, above)
+  - [x] measured on medium with large projected: the longest hold during a settle with each trigger above (commit, hint, created file; lost watch and overflow not drivable)
 - **Impact:** the IDX-09d bound (one slice) holds with a rescan due; no protocol change.
 
 #### IDX-10: Queries: `sym`, `def`, `hover`

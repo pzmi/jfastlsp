@@ -14,14 +14,17 @@
 //!   no test fails, since zero tests passing is not a green test stage. The TypeScript backend runs
 //!   inside the pinned npm package: Quint's default `rust` backend downloads an evaluator at run
 //!   time (fnd §8 rule 5).
-//! - **`formal-verify [MODEL]`**: per model (or the one named), Apalache's bounded verification of
+//! - **`formal-verify [MODEL [PART]]`**: per model (or the one named), Apalache's bounded verification of
 //!   `allInvariants` for `steps` steps, then a Quint simulation of the same invariant ([`SAMPLES`]
 //!   samples of `sim_steps` steps, its seed printed); for a model with a `progress` entry, then
 //!   its liveness simulation and its liveness control ([`Progress`]). Apalache runs on Quint's JSON IR (`quint
 //!   compile --target json --out`, checked whole before use: Quint's stdout to a pipe is cut at
 //!   64 KiB) directly, in a scratch directory outside the repository (removed on success, kept and named on
 //!   failure, for the counterexample): `quint verify` would start Apalache as a gRPC server on a
-//!   TCP port and download it unless told otherwise.
+//!   TCP port and download it unless told otherwise. With a [`Part`], one half alone: Apalache,
+//!   or the simulations (safety and liveness), which need only Node and Quint; `formal.yml` runs
+//!   each in a job of its own, so each has the job's time limit to itself (IDX-09e: the views
+//!   model's two halves together came within a minute of it at CI's estimated doubling).
 //!
 //! Each stage fails closed: a missing `node` or `quint` fails it with the install command before
 //! anything runs. `formal-verify` probes Node, Quint, the JDK and Apalache at their pinned
@@ -285,6 +288,55 @@ pub(crate) fn require(context: &Context, stage: &str, tools: &[&str]) -> Result<
     Err(1)
 }
 
+/// Which half of `formal-verify` runs: both, Apalache's bounded verification alone, or the
+/// simulations alone (the safety one, and the liveness one and its control when the model has a
+/// `progress` entry). Pinned by `tests::should_run_each_half_when_a_part_is_named`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Part {
+    /// Apalache, then the simulations.
+    Both,
+    /// Apalache alone.
+    Apalache,
+    /// The simulations alone.
+    Simulation,
+}
+
+/// The parts a command line may name, each a half of `formal-verify`: `formal.yml`'s `part:` axis
+/// lists exactly these (crates/jfl-conformance/tests/models.rs reads this line).
+pub(crate) const PARTS: [&str; 2] = ["apalache", "simulation"];
+
+impl Part {
+    /// The part a command line names: one of [`PARTS`].
+    pub(crate) fn parse(word: &str) -> Option<Self> {
+        if word == PARTS[0] {
+            Some(Self::Apalache)
+        } else if word == PARTS[1] {
+            Some(Self::Simulation)
+        } else {
+            None
+        }
+    }
+
+    /// Whether Apalache runs.
+    pub(crate) fn apalache(self) -> bool {
+        self != Self::Simulation
+    }
+
+    /// Whether the simulations run.
+    pub(crate) fn simulation(self) -> bool {
+        self != Self::Apalache
+    }
+
+    /// The tools it runs, each probed at its pinned version first.
+    fn tools(self) -> &'static [&'static str] {
+        if self.apalache() {
+            &VERIFY_TOOLS
+        } else {
+            &VERIFY_TOOLS[..2]
+        }
+    }
+}
+
 /// The tools of `tools/versions.toml` that `formal-verify` runs, each probed at its pinned
 /// version before anything runs (the JDK and Apalache are optional in `doctor`, so this is where
 /// a missing or wrong one is caught).
@@ -439,9 +491,9 @@ pub(crate) fn test(context: &Context) -> i32 {
     0
 }
 
-/// `formal-verify [MODEL]`: Apalache and a simulation over each registered model, or the one
-/// named. Returns the exit code.
-pub(crate) fn verify(context: &Context, tools: &[Tool], only: Option<&str>) -> i32 {
+/// `formal-verify [MODEL [PART]]`: Apalache and a simulation over each registered model, or the
+/// one named, or one [`Part`] of it. Returns the exit code.
+pub(crate) fn verify(context: &Context, tools: &[Tool], only: Option<&str>, part: Part) -> i32 {
     let stage = "formal-verify";
     let models = match checked_registry(stage) {
         Ok(models) => models,
@@ -460,7 +512,7 @@ pub(crate) fn verify(context: &Context, tools: &[Tool], only: Option<&str>) -> i
         );
         return 2;
     }
-    if let Err(code) = require_pinned(context, stage, tools, &VERIFY_TOOLS) {
+    if let Err(code) = require_pinned(context, stage, tools, part.tools()) {
         return code;
     }
     let scratch = match unique_dir(&std::env::temp_dir(), "jfastlsp-formal-verify") {
@@ -470,7 +522,7 @@ pub(crate) fn verify(context: &Context, tools: &[Tool], only: Option<&str>) -> i
             return 1;
         }
     };
-    let code = verify_in(context, &chosen, &scratch);
+    let code = verify_in(context, &chosen, &scratch, part);
     if code != 0 {
         eprintln!(
             "{stage}: kept {} (Apalache's counterexample, `violation1.itf.json`, is under it)",
@@ -486,7 +538,7 @@ pub(crate) fn verify(context: &Context, tools: &[Tool], only: Option<&str>) -> i
     code
 }
 
-fn verify_in(context: &Context, models: &[&Model], scratch: &Path) -> i32 {
+fn verify_in(context: &Context, models: &[&Model], scratch: &Path, part: Part) -> i32 {
     let stage = "formal-verify";
     let root = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     for model in models {
@@ -495,64 +547,13 @@ fn verify_in(context: &Context, models: &[&Model], scratch: &Path) -> i32 {
             eprintln!("{stage}: cannot create {}: {e}", dir.display());
             return 1;
         }
-        let file = root.join(&model.file).to_string_lossy().into_owned();
-        let steps = model.steps.to_string();
-        eprintln!("{stage}: {}: Apalache, {steps} steps", model.name);
-        // Quint writes the IR with `--out`: its stdout is cut at 64 KiB when it is a pipe (Node
-        // exits before the pipe drains), which truncated any model larger than the smoke one. The
-        // copy it still prints is captured and dropped.
-        let json = dir.join(format!("{}.qnt.json", model.name));
-        let json_arg = json.to_string_lossy().into_owned();
-        let compile = Call::new(
-            "quint",
-            &[
-                "compile",
-                "--target",
-                "json",
-                "--main",
-                &model.main,
-                "--out",
-                &json_arg,
-                &file,
-            ],
-        );
-        match compile.output(context) {
-            Ok((0, _)) => {}
-            Ok((code, _)) => return code,
-            Err(message) => {
-                eprintln!("{message}");
-                return 1;
-            }
-        }
-        let whole = std::fs::read_to_string(&json).map(|text| json_complete(&text));
-        if !matches!(whole, Ok(true)) {
-            eprintln!(
-                "{stage}: quint compile wrote no whole JSON IR to {} ({whole:?})",
-                json.display()
-            );
-            return 1;
-        }
-        let out = dir.join("apalache-out").to_string_lossy().into_owned();
-        let check = Call::new(
-            "apalache-mc",
-            &[
-                "check",
-                &format!("--out-dir={out}"),
-                &format!("--init={INIT}"),
-                &format!("--next={STEP}"),
-                &format!("--inv={INVARIANT}"),
-                &format!("--length={steps}"),
-                &json.to_string_lossy(),
-            ],
-        )
-        .in_dir(&dir);
-        let code = check.run(context);
-        if code != 0 {
-            eprintln!(
-                "{stage}: {}: Apalache found a violation of {INVARIANT} or failed (exit {code})",
-                model.name
-            );
+        if part.apalache()
+            && let Err(code) = apalache(context, model, &root, &dir)
+        {
             return code;
+        }
+        if !part.simulation() {
+            continue;
         }
         let sim_steps = model.sim_steps.to_string();
         eprintln!(
@@ -572,6 +573,72 @@ fn verify_in(context: &Context, models: &[&Model], scratch: &Path) -> i32 {
         }
     }
     0
+}
+
+/// Apalache's bounded verification of `model` for its `steps` steps, on Quint's JSON IR written
+/// into `dir`.
+fn apalache(context: &Context, model: &Model, root: &Path, dir: &Path) -> Result<(), i32> {
+    let stage = "formal-verify";
+    let file = root.join(&model.file).to_string_lossy().into_owned();
+    let steps = model.steps.to_string();
+    eprintln!("{stage}: {}: Apalache, {steps} steps", model.name);
+    // Quint writes the IR with `--out`: its stdout is cut at 64 KiB when it is a pipe (Node
+    // exits before the pipe drains), which truncated any model larger than the smoke one. The
+    // copy it still prints is captured and dropped.
+    let json = dir.join(format!("{}.qnt.json", model.name));
+    let json_arg = json.to_string_lossy().into_owned();
+    let compile = Call::new(
+        "quint",
+        &[
+            "compile",
+            "--target",
+            "json",
+            "--main",
+            &model.main,
+            "--out",
+            &json_arg,
+            &file,
+        ],
+    );
+    match compile.output(context) {
+        Ok((0, _)) => {}
+        Ok((code, _)) => return Err(code),
+        Err(message) => {
+            eprintln!("{message}");
+            return Err(1);
+        }
+    }
+    let whole = std::fs::read_to_string(&json).map(|text| json_complete(&text));
+    if !matches!(whole, Ok(true)) {
+        eprintln!(
+            "{stage}: quint compile wrote no whole JSON IR to {} ({whole:?})",
+            json.display()
+        );
+        return Err(1);
+    }
+    let out = dir.join("apalache-out").to_string_lossy().into_owned();
+    let check = Call::new(
+        "apalache-mc",
+        &[
+            "check",
+            &format!("--out-dir={out}"),
+            &format!("--init={INIT}"),
+            &format!("--next={STEP}"),
+            &format!("--inv={INVARIANT}"),
+            &format!("--length={steps}"),
+            &json.to_string_lossy(),
+        ],
+    )
+    .in_dir(dir);
+    let code = check.run(context);
+    if code != 0 {
+        eprintln!(
+            "{stage}: {}: Apalache found a violation of {INVARIANT} or failed (exit {code})",
+            model.name
+        );
+        return Err(code);
+    }
+    Ok(())
 }
 
 /// `quint run` of `model` from `init`: `samples` samples of `steps` steps of `step`, checking
@@ -781,6 +848,33 @@ mod tests {
                 samples: 3000,
             }))
         );
+    }
+
+    #[test]
+    fn should_run_each_half_when_a_part_is_named() {
+        // given
+        let words = ["apalache", "simulation", "both", "Apalache", ""];
+
+        // when
+        let parts: Vec<Option<Part>> = words.iter().map(|w| Part::parse(w)).collect();
+
+        // then: each half runs alone, and its tools are only the ones it runs
+        assert_eq!(
+            parts,
+            vec![
+                Some(Part::Apalache),
+                Some(Part::Simulation),
+                None,
+                None,
+                None
+            ]
+        );
+        assert!(Part::Both.apalache() && Part::Both.simulation());
+        assert!(Part::Apalache.apalache() && !Part::Apalache.simulation());
+        assert!(!Part::Simulation.apalache() && Part::Simulation.simulation());
+        assert_eq!(Part::Simulation.tools(), &["node", "quint"]);
+        assert_eq!(Part::Apalache.tools(), &VERIFY_TOOLS);
+        assert!(PARTS.iter().all(|p| Part::parse(p).is_some()));
     }
 
     #[test]

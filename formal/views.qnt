@@ -105,6 +105,7 @@ module views {
   type Summary = { path: str, ver: int }
 
   pure val NO_INDEX: Index = Map()
+  pure val NO_PATHS: Set[str] = Set()
   pure val NO_EVENT: Event = { seq: -1, view: "", path: "", req: "" }
   pure val IDLE_BUILD: Build = {
     active: false, head: 0, gitIndex: 0, index: NO_INDEX, readAt: Map(), pending: Set(),
@@ -324,16 +325,26 @@ module views {
   // Takes the delivered events and, on a rescan (`git diff --name-only` plus `git status`, plan
   // §4.3), every path a stat cannot prove unchanged; names their disk entries. A rescan records
   // HEAD and the index, certifies the view when the watch is up, and serves a waiting sync.
-  action reconcileStart(view: str): bool = {
+  //
+  // A rescan may `leave` delivered paths unread (IDX-09e): they stay in `dirty`, so no answer is
+  // complete until a build takes them, and the daemon's settle takes them a slice at a time
+  // instead of the rescan reading every file still deferred in one build. Only delivered paths
+  // (a path a stat or a listing found changed and no event named is read here), never one a
+  // waiting request needs, and never without a rescan (a part is `reconcilePart`). The scan
+  // still certifies: it started with the watch up, and a left path is known changed.
+  action reconcileStart(view: str, leave: Set[str]): bool = {
     val v = views.get(view)
     val g = v.published
     val changed =
       if (v.rescan) viewPaths(view).filter(p => statChanged(g.index.get(p), file(p))) else Set()
-    val todo = v.dirty.union(changed)
+    val todo = v.dirty.union(changed).exclude(leave)
     all {
       not(v.build.active),
       v.dirty != Set() or v.rescan,
-      views' = views.set(view, { ...v, dirty: Set(), rescan: false, build: {
+      v.rescan or leave == Set(),
+      leave.subseteq(v.dirty),
+      leave.intersect(needed(view)) == Set(),
+      views' = views.set(view, { ...v, dirty: leave, rescan: false, build: {
         active: true,
         head: if (v.rescan) headOf(view) else g.head,
         gitIndex: if (v.rescan) gitIndex(view) else g.gitIndex,
@@ -359,7 +370,8 @@ module views {
   // Takes part of the delivered events as a build of its own (IDX-09d): the daemon settles a view
   // it opened in two steps a slice at a time, so its loop is never held for the whole view. The
   // rest stay delivered and unpublished, so no answer is complete until a build takes them. Never
-  // a rescan, which is whole (it certifies, records HEAD and the index, and serves `sync`); and
+  // in place of a rescan, which reads every changed path but the delivered ones it leaves (it
+  // certifies, records HEAD and the index, and serves `sync`); and
   // every path a waiting request needs is taken, so the generation it waits for holds what its
   // stat saw.
   action reconcilePart(view: str, take: Set[str]): bool = {
@@ -545,7 +557,15 @@ module views {
     }
   }
 
-  def syncable(view: str): bool = syncs.get(view).phase == "waiting" and syncs.get(view).scanned
+  // Its rescan has published, and no delivered path waits for a build (IDX-09e: a rescan may
+  // leave delivered paths for the settle's parts, which the barrier then waits for; a path leaves
+  // `dirty` only into a build, so with none in progress every one it held is published).
+  def syncable(view: str): bool = and {
+    syncs.get(view).phase == "waiting",
+    syncs.get(view).scanned,
+    views.get(view).dirty == Set(),
+    not(views.get(view).build.active),
+  }
 
   action syncDone(view: str): bool = all {
     syncable(view),
@@ -582,8 +602,25 @@ module views {
     lossStep,
   }
 
+  // sync is rarer than a build's steps: a started sync makes a rescan due, which refuses every
+  // part, so as one of six daemon stimuli it kept the simulation from parts (IDX-09e).
+  action syncStep = any {
+    nondet view = VIEWS.oneOf() syncStart(view),
+    nondet view = VIEWS.oneOf() syncDone(view),
+  }
+
   action daemonStep = any {
-    nondet view = VIEWS.oneOf() reconcileStart(view),
+    // A rescan reads everything, or leaves every delivered path no request needs (the daemon
+    // leaves the settle's deferred files, IDX-09e), every delivered path, or one of them. The last
+    // two may hold a needed path, which the guard refuses: so the simulation reaches a rescan
+    // that would leave one while a request waits, the case the guard is for (IDX-09d's lesson).
+    // Without a rescan nothing is left.
+    nondet view = VIEWS.oneOf()
+    nondet leave = (if (views.get(view).rescan) {
+        val dirty = views.get(view).dirty
+        dirty.map(p => Set(p)).union(Set(NO_PATHS, dirty, dirty.exclude(needed(view))))
+      } else Set(NO_PATHS)).oneOf()
+    reconcileStart(view, leave),
     // A part of the view's delivered events: one delivered path alone, or with every path the
     // waiting requests need. Picking among these rather than every subset makes the simulation
     // reach a part while a request waits, the case the `needed` guard is for (IDX-09d's review:
@@ -595,8 +632,7 @@ module views {
     reconcilePart(view, take),
     nondet view = VIEWS.oneOf() nondet path = PATHS.oneOf() summarise(view, path),
     nondet view = VIEWS.oneOf() publish(view),
-    nondet view = VIEWS.oneOf() syncStart(view),
-    nondet view = VIEWS.oneOf() syncDone(view),
+    syncStep,
   }
 
   action requestStep = any {
@@ -713,7 +749,7 @@ module views {
     all { ver("m/A") == 2, queued("m") == Set("m/A"),
           nondet keep = Set(false).oneOf() deliver(keep) },
     all { gen("m") == 1, headOf("m") == 1, views.get("m").dirty == Set("m/A"),
-          nondet view = Set("m").oneOf() reconcileStart(view) },
+          nondet view = Set("m").oneOf() nondet leave = Set(NO_PATHS).oneOf() reconcileStart(view, leave) },
     all { views.get("m").build.active, headOf("m") == 1,
           nondet view = Set("m").oneOf() checkout(view) },
     all { gen("m") == 1, headOf("m") == 2, views.get("m").build.pending == Set("m/A"),
@@ -726,7 +762,7 @@ module views {
           nondet keep = Set(false).oneOf() deliver(keep) },
     all { phase("r1") == "waiting", watcher.events == Set(), gen("m") == 2,
           not(views.get("m").build.active),
-          nondet view = Set("m").oneOf() reconcileStart(view) },
+          nondet view = Set("m").oneOf() nondet leave = Set(NO_PATHS).oneOf() reconcileStart(view, leave) },
     all { views.get("m").build.pending == Set("m/A", "m/B"),
           nondet view = Set("m").oneOf() nondet path = Set("m/A").oneOf() summarise(view, path) },
     all { views.get("m").build.pending == Set("m/B"),
@@ -756,7 +792,7 @@ module views {
     all { not(views.get("m").certain), phase("r1") == "idle",
           nondet req = Set("r1").oneOf() nondet path = Set("m/A").oneOf() requestStart(req, path) },
     all { phase("r1") == "waiting", gen("m") == 1, not(views.get("m").build.active),
-          nondet view = Set("m").oneOf() reconcileStart(view) },
+          nondet view = Set("m").oneOf() nondet leave = Set(NO_PATHS).oneOf() reconcileStart(view, leave) },
     all { views.get("m").build.pending == Set("m/A"),
           nondet view = Set("m").oneOf() nondet path = Set("m/A").oneOf() summarise(view, path) },
     all { gen("m") == 1, views.get("m").build.active, views.get("m").build.pending == Set(),
@@ -788,7 +824,7 @@ module views {
     all { phase("r1") == "waiting", gen("n") == 1, watcher.nextSeq == 5,
           nondet keep = Set(true).oneOf() deliver(keep) },
     all { gen("n") == 1, watcher.nextSeq == 6, not(views.get("n").build.active),
-          nondet view = Set("n").oneOf() reconcileStart(view) },
+          nondet view = Set("n").oneOf() nondet leave = Set(NO_PATHS).oneOf() reconcileStart(view, leave) },
     all { views.get("n").build.pending == Set("n/A"),
           nondet view = Set("n").oneOf() nondet path = Set("n/A").oneOf() summarise(view, path) },
     all { gen("n") == 1, views.get("n").build.active, views.get("n").build.pending == Set(),
@@ -797,7 +833,7 @@ module views {
           nondet keep = Set(false).oneOf() deliver(keep) },
     all { gen("n") == 2, watcher.events == Set(), not(views.get("n").build.active),
           views.get("n").dirty == Set("n/A"),
-          nondet view = Set("n").oneOf() reconcileStart(view) },
+          nondet view = Set("n").oneOf() nondet leave = Set(NO_PATHS).oneOf() reconcileStart(view, leave) },
     all { gen("n") == 2, views.get("n").build.pending == Set("n/A"),
           nondet view = Set("n").oneOf() nondet path = Set("n/A").oneOf() summarise(view, path) },
     all { gen("n") == 2, views.get("n").build.active, views.get("n").build.pending == Set(),
@@ -830,7 +866,7 @@ module views {
     all { syncs.get("m").phase == "idle", not(views.get("m").certain),
           nondet view = Set("m").oneOf() syncStart(view) },
     all { syncs.get("m").phase == "waiting", gen("m") == 1, not(views.get("m").build.active),
-          nondet view = Set("m").oneOf() reconcileStart(view) },
+          nondet view = Set("m").oneOf() nondet leave = Set(NO_PATHS).oneOf() reconcileStart(view, leave) },
     all { views.get("m").build.pending == Set("m/A", "m/B"),
           nondet view = Set("m").oneOf() nondet path = Set("m/A").oneOf() summarise(view, path) },
     all { views.get("m").build.pending == Set("m/B"),
@@ -867,7 +903,7 @@ module views {
     all { ver("n/A") == 2, phase("r1") == "idle",
           nondet req = Set("r1").oneOf() nondet path = Set("n/A").oneOf() requestStart(req, path) },
     all { headOf("n") == 1, not(views.get("n").build.active), gen("n") == 1,
-          nondet view = Set("n").oneOf() reconcileStart(view) },
+          nondet view = Set("n").oneOf() nondet leave = Set(NO_PATHS).oneOf() reconcileStart(view, leave) },
     all { headOf("n") == 1, views.get("n").build.active,
           nondet view = Set("n").oneOf() checkout(view) },
     all { headOf("n") == 2, views.get("n").build.pending == Set("n/A"),
@@ -877,7 +913,7 @@ module views {
     all { gen("n") == 2, first(watcher).seq >= 0,
           nondet keep = Set(false).oneOf() deliver(keep) },
     all { gen("n") == 2, watcher.events == Set(), not(views.get("n").build.active),
-          nondet view = Set("n").oneOf() reconcileStart(view) },
+          nondet view = Set("n").oneOf() nondet leave = Set(NO_PATHS).oneOf() reconcileStart(view, leave) },
     all { views.get("n").build.pending == Set("n/A"), gen("n") == 2,
           nondet view = Set("n").oneOf() nondet path = Set("n/A").oneOf() summarise(view, path) },
     all { gen("n") == 2, views.get("n").build.active, views.get("n").build.pending == Set(),
@@ -906,7 +942,7 @@ module views {
           nondet keep = Set(false).oneOf() deliver(keep) },
     all { requests.get("r1").cookie == "delivered", gen("m") == 1, ver("m/B") == 1,
           not(views.get("m").build.active),
-          nondet view = Set("m").oneOf() reconcileStart(view) },
+          nondet view = Set("m").oneOf() nondet leave = Set(NO_PATHS).oneOf() reconcileStart(view, leave) },
     all { views.get("m").build.active, ver("m/B") == 1,
           nondet path = Set("m/B").oneOf() nondet racy = Set(false).oneOf() write(path, racy) },
     all { views.get("m").build.active, ver("m/B") == 2, ver("m/A") == 2,
@@ -978,6 +1014,66 @@ module views {
           nondet req = Set("r1").oneOf() finish(req) },
   }
 
+  // Rescans during a settle (IDX-09e): two files are delivered, as the settle delivers the files
+  // an open deferred. A commit moves HEAD; a request on `m/A` sees it before the watcher's event
+  // arrives (a linked worktree's commit raises none at all), so its stat sets the rescan. The
+  // rescan reads the request's file and leaves `m/B`, and the request is answered from it,
+  // incomplete. The commit's `.git` event then sets a second rescan (as a `.git` hint, an overflow
+  // or a file created during the settle does), which leaves `m/B` again; a part takes it, and a
+  // request after it is complete.
+  action rescanDuringASettle = any {
+    all { ver("m/A") == 1,
+          nondet path = Set("m/A").oneOf() nondet racy = Set(false).oneOf() write(path, racy) },
+    all { ver("m/A") == 2, ver("m/B") == 1,
+          nondet path = Set("m/B").oneOf() nondet racy = Set(false).oneOf() write(path, racy) },
+    all { ver("m/B") == 2, file("m/B").recent, tick },
+    all { ver("m/B") == 2, not(file("m/B").recent), headOf("m") == 1, queued("m") != Set(),
+          nondet keep = Set(false).oneOf() deliver(keep) },
+    all { headOf("m") == 1, views.get("m").dirty == Set("m/A", "m/B"),
+          nondet view = Set("m").oneOf() moveHead(view) },
+    all { headOf("m") == 2, phase("r1") == "idle",
+          nondet req = Set("r1").oneOf() nondet path = Set("m/A").oneOf() requestStart(req, path) },
+    all { phase("r1") == "waiting", gen("m") == 1, not(views.get("m").build.active),
+          views.get("m").rescan,
+          nondet view = Set("m").oneOf() nondet leave = Set(Set("m/B")).oneOf()
+          reconcileStart(view, leave) },
+    all { gen("m") == 1, views.get("m").build.pending == Set("m/A"),
+          nondet view = Set("m").oneOf() nondet path = Set("m/A").oneOf() summarise(view, path) },
+    all { gen("m") == 1, views.get("m").build.active, views.get("m").build.pending == Set(),
+          nondet view = Set("m").oneOf() publish(view) },
+    all { gen("m") == 2, phase("r1") == "waiting", first(watcher).seq >= 0,
+          nondet keep = Set(false).oneOf() deliver(keep) },
+    all { gen("m") == 2, phase("r1") == "waiting", watcher.events == Set(),
+          requests.get("r1").cookie == "delivered",
+          nondet req = Set("r1").oneOf() requestPin(req) },
+    all { phase("r1") == "pinned",
+          nondet req = Set("r1").oneOf() finish(req) },
+    all { phase("r1") == "done", gen("m") == 2, not(views.get("m").build.active),
+          views.get("m").rescan,
+          nondet view = Set("m").oneOf() nondet leave = Set(Set("m/B")).oneOf()
+          reconcileStart(view, leave) },
+    all { gen("m") == 2, phase("r1") == "done", views.get("m").build.active,
+          views.get("m").build.pending == Set(),
+          nondet view = Set("m").oneOf() publish(view) },
+    all { gen("m") == 3, not(views.get("m").build.active), views.get("m").dirty == Set("m/B"),
+          nondet view = Set("m").oneOf() nondet take = Set(Set("m/B")).oneOf()
+          reconcilePart(view, take) },
+    all { views.get("m").build.pending == Set("m/B"),
+          nondet view = Set("m").oneOf() nondet path = Set("m/B").oneOf() summarise(view, path) },
+    all { gen("m") == 3, views.get("m").build.active, views.get("m").build.pending == Set(),
+          nondet view = Set("m").oneOf() publish(view) },
+    all { gen("m") == 4, phase("r2") == "idle",
+          nondet req = Set("r2").oneOf() nondet path = Set("m/B").oneOf() requestStart(req, path) },
+    all { phase("r2") == "waiting", requests.get("r2").cookie == "queued",
+          nondet keep = Set(false).oneOf() deliver(keep) },
+    all { phase("r2") == "waiting", requests.get("r2").cookie == "delivered",
+          nondet req = Set("r2").oneOf() requestPin(req) },
+    all { phase("r2") == "pinned", requests.get("r2").reads == Set(),
+          nondet req = Set("r2").oneOf() nondet path = Set("m/B").oneOf() read(req, path) },
+    all { phase("r2") == "pinned", requests.get("r2").reads != Set(),
+          nondet req = Set("r2").oneOf() finish(req) },
+  }
+
   // The scenario tests replay each script as named actions, step for step (a test that draws a
   // nondeterministic value runs 10000 times, so the scripts themselves serve only the traces).
 
@@ -985,13 +1081,13 @@ module views {
     init
       .then(write("m/A", false))
       .then(deliver(false))
-      .then(reconcileStart("m"))
+      .then(reconcileStart("m", NO_PATHS))
       .then(checkout("m"))
       .then(summarise("m", "m/A"))
       .then(publish("m"))
       .then(requestStart("r1", "m/B"))
       .then(4.reps(_ => deliver(false)))
-      .then(reconcileStart("m"))
+      .then(reconcileStart("m", NO_PATHS))
       .then(summarise("m", "m/A"))
       .then(summarise("m", "m/B"))
       .then(publish("m"))
@@ -1014,7 +1110,7 @@ module views {
       .then(write("m/A", false))
       .then(dropEvent(0))
       .then(requestStart("r1", "m/A"))
-      .then(reconcileStart("m"))
+      .then(reconcileStart("m", NO_PATHS))
       .then(summarise("m", "m/A"))
       .then(publish("m"))
       .then(deliver(false))
@@ -1037,7 +1133,7 @@ module views {
       .then(write("m/A", false))
       .then(dropEvent(0))
       .then(requestStart("r1", "m/A"))
-      .then(reconcileStart("m"))
+      .then(reconcileStart("m", NO_PATHS))
       .then(summarise("m", "m/A"))
       .expect(and { phase("r1") == "waiting", not(pinnable("r1")), allInvariants })
 
@@ -1046,11 +1142,11 @@ module views {
       .then(write("n/A", false))
       .then(requestStart("r1", "n/A"))
       .then(deliver(true))
-      .then(reconcileStart("n"))
+      .then(reconcileStart("n", NO_PATHS))
       .then(summarise("n", "n/A"))
       .then(publish("n"))
       .then(2.reps(_ => deliver(false)))
-      .then(reconcileStart("n"))
+      .then(reconcileStart("n", NO_PATHS))
       .then(summarise("n", "n/A"))
       .then(publish("n"))
       .then(requestRecookie("r1"))
@@ -1078,7 +1174,7 @@ module views {
       .then(write("m/A", true))
       .then(dropEvent(0))
       .then(syncStart("m"))
-      .then(reconcileStart("m"))
+      .then(reconcileStart("m", NO_PATHS))
       .then(summarise("m", "m/A"))
       .then(summarise("m", "m/B"))
       .then(publish("m"))
@@ -1095,7 +1191,7 @@ module views {
       .then(write("m/A", false))
       .then(write("m/B", false))
       .then(syncStart("m"))
-      .then(reconcileStart("m"))
+      .then(reconcileStart("m", NO_PATHS))
       .then(summarise("m", "m/A"))
       .expect(and { syncs.get("m").phase == "waiting", not(syncable("m")), allInvariants })
 
@@ -1121,12 +1217,12 @@ module views {
     init
       .then(write("n/A", false))
       .then(requestStart("r1", "n/A"))
-      .then(reconcileStart("n"))
+      .then(reconcileStart("n", NO_PATHS))
       .then(checkout("n"))
       .then(summarise("n", "n/A"))
       .then(publish("n"))
       .then(3.reps(_ => deliver(false)))
-      .then(reconcileStart("n"))
+      .then(reconcileStart("n", NO_PATHS))
       .then(summarise("n", "n/A"))
       .then(publish("n"))
       .then(requestRecookie("r1"))
@@ -1163,7 +1259,7 @@ module views {
       .then(write("m/A", false))
       .then(watchRestored("m"))
       .then(requestStart("r1", "m/B"))
-      .then(reconcileStart("m"))
+      .then(reconcileStart("m", NO_PATHS))
       .then(summarise("m", "m/A"))
       .then(publish("m"))
       .then(deliver(false))
@@ -1184,7 +1280,7 @@ module views {
     init
       .then(write("m/A", false))
       .then(deliver(false))
-      .then(reconcileStart("m"))
+      .then(reconcileStart("m", NO_PATHS))
       .then(summarise("m", "m/A"))
       .then(publish("m"))
       .then(write("m/A", true))
@@ -1238,6 +1334,100 @@ module views {
         }
       })
 
+  run rescanDuringASettleTest =
+    init
+      .then(write("m/A", false))
+      .then(write("m/B", false))
+      .then(tick)
+      .then(2.reps(_ => deliver(false)))
+      .then(moveHead("m"))
+      .then(requestStart("r1", "m/A"))
+      .expect(views.get("m").rescan and needed("m") == Set("m/A"))
+      .then(reconcileStart("m", Set("m/B")))
+      .expect(and {
+        views.get("m").build.certifies, views.get("m").build.pending == Set("m/A"),
+        views.get("m").build.head == 2, views.get("m").dirty == Set("m/B"),
+      })
+      .then(summarise("m", "m/A"))
+      .then(publish("m"))
+      .then(2.reps(_ => deliver(false)))
+      .then(requestPin("r1"))
+      .expect({
+        val r = requests.get("r1")
+        and {
+          // the rescan's generation holds what the request's stat saw, and m/B is still dirty
+          r.gen == 2, not(r.complete), r.snap.get("m/A").ver == 2, r.snap.get("m/B").ver == 1,
+          r.snapHead == 2, views.get("m").certain, views.get("m").rescan, allInvariants,
+        }
+      })
+      .then(finish("r1"))
+      .then(reconcileStart("m", Set("m/B")))
+      .expect(views.get("m").build.pending == Set() and views.get("m").dirty == Set("m/B"))
+      .then(publish("m"))
+      .then(reconcilePart("m", Set("m/B")))
+      .then(summarise("m", "m/B"))
+      .then(publish("m"))
+      .then(requestStart("r2", "m/B"))
+      .then(deliver(false))
+      .then(requestPin("r2"))
+      .then(read("r2", "m/B"))
+      .then(finish("r2"))
+      .expect({
+        val r = requests.get("r2")
+        and {
+          r.gen == 4, r.complete, r.snap.get("m/A").ver == 2, r.snap.get("m/B").ver == 2,
+          views.get("m").dirty == Set(), allInvariants,
+        }
+      })
+
+  // A rescan may not leave a path a waiting request needs, nor leave anything without a rescan
+  // due; each refusal has a twin from the same state that is taken.
+  run twoDeliveredAndACommitSeenByARequestOnA =
+    init
+      .then(write("m/A", false))
+      .then(write("m/B", false))
+      .then(tick)
+      .then(2.reps(_ => deliver(false)))
+      .then(moveHead("m"))
+      .then(requestStart("r1", "m/A"))
+
+  run rescanLeavingANeededPathIsRefusedTest =
+    twoDeliveredAndACommitSeenByARequestOnA.then(reconcileStart("m", Set("m/A"))).fail()
+
+  run rescanLeavingAnotherPathIsTakenTest =
+    twoDeliveredAndACommitSeenByARequestOnA
+      .then(reconcileStart("m", Set("m/B")))
+      .expect(views.get("m").dirty == Set("m/B") and allInvariants)
+
+  run twoDelivered =
+    init
+      .then(write("m/A", false))
+      .then(write("m/B", false))
+      .then(2.reps(_ => deliver(false)))
+
+  run leavingWithoutARescanIsRefusedTest =
+    twoDelivered.then(reconcileStart("m", Set("m/B"))).fail()
+
+  run takingEverythingWithoutARescanIsTakenTest =
+    twoDelivered
+      .then(reconcileStart("m", NO_PATHS))
+      .expect(views.get("m").build.pending == Set("m/A", "m/B") and views.get("m").dirty == Set())
+
+  // sync waits for its rescan and for every part after it that takes what the rescan left.
+  run syncWaitsForTheLeftPathsTest =
+    twoDelivered
+      .then(syncStart("m"))
+      .then(reconcileStart("m", Set("m/B")))
+      .then(summarise("m", "m/A"))
+      .then(publish("m"))
+      .expect(and { syncs.get("m").scanned, not(syncable("m")), allInvariants })
+      .then(reconcilePart("m", Set("m/B")))
+      .expect(not(syncable("m")))
+      .then(summarise("m", "m/B"))
+      .then(publish("m"))
+      .then(syncDone("m"))
+      .expect(and { syncs.get("m").phase == "done", gen("m") == 3, allInvariants })
+
   // A part may not leave out a path a waiting request needs, nor run while a rescan is due; each
   // refusal has a twin from the same state that is taken.
   run twoDeliveredAndARequestOnB =
@@ -1267,7 +1457,7 @@ module views {
 
   run rescanTakesWhatAPartWouldTest =
     deliveredWithARescanDue
-      .then(reconcileStart("m"))
+      .then(reconcileStart("m", NO_PATHS))
       .expect(views.get("m").build.certifies and views.get("m").build.pending == Set("m/A"))
 
   // ---- Broken-model controls (ver §6.1): each must violate its named invariant ----
@@ -1467,6 +1657,68 @@ module views {
     }
   }
 
+  // A rescan that leaves paths unread and drops them from `dirty` (IDX-09e's fault): the view
+  // looks settled while a generation holds their old versions.
+  action reconcileStartDroppingLeft(view: str, leave: Set[str]): bool = {
+    val v = views.get(view)
+    val g = v.published
+    val changed =
+      if (v.rescan) viewPaths(view).filter(p => statChanged(g.index.get(p), file(p))) else Set()
+    val todo = v.dirty.union(changed).exclude(leave)
+    all {
+      not(v.build.active),
+      v.dirty != Set() or v.rescan,
+      v.rescan or leave == Set(),
+      leave.subseteq(v.dirty),
+      leave.intersect(needed(view)) == Set(),
+      views' = views.set(view, { ...v, dirty: Set(), rescan: false, build: {
+        active: true,
+        head: if (v.rescan) headOf(view) else g.head,
+        gitIndex: if (v.rescan) gitIndex(view) else g.gitIndex,
+        index: g.index.keys().mapBy(p => if (todo.contains(p)) file(p) else g.index.get(p)),
+        readAt: g.readAt,
+        pending: todo,
+        certifies: v.rescan and v.watched,
+        syncEpoch: if (v.rescan and syncs.get(view).phase == "waiting") syncs.get(view).epoch else -1,
+      }}),
+      tree' = tree, watcher' = watcher, store' = store, requests' = requests, syncs' = syncs,
+    }
+  }
+
+  // A rescan that may leave the file a waiting request's stat saw change.
+  action reconcileStartLeavingNeeded(view: str, leave: Set[str]): bool = {
+    val v = views.get(view)
+    val g = v.published
+    val changed =
+      if (v.rescan) viewPaths(view).filter(p => statChanged(g.index.get(p), file(p))) else Set()
+    val todo = v.dirty.union(changed).exclude(leave)
+    all {
+      not(v.build.active),
+      v.dirty != Set() or v.rescan,
+      v.rescan or leave == Set(),
+      leave.subseteq(v.dirty),
+      views' = views.set(view, { ...v, dirty: leave, rescan: false, build: {
+        active: true,
+        head: if (v.rescan) headOf(view) else g.head,
+        gitIndex: if (v.rescan) gitIndex(view) else g.gitIndex,
+        index: g.index.keys().mapBy(p => if (todo.contains(p)) file(p) else g.index.get(p)),
+        readAt: g.readAt,
+        pending: todo,
+        certifies: v.rescan and v.watched,
+        syncEpoch: if (v.rescan and syncs.get(view).phase == "waiting") syncs.get(view).epoch else -1,
+      }}),
+      tree' = tree, watcher' = watcher, store' = store, requests' = requests, syncs' = syncs,
+    }
+  }
+
+  // Returns from sync once its rescan has published, without waiting for the paths it left.
+  action syncDoneBeforeTheParts(view: str): bool = all {
+    syncs.get(view).phase == "waiting",
+    syncs.get(view).scanned,
+    syncs' = syncs.setBy(view, s => { ...s, phase: "done" }),
+    tree' = tree, watcher' = watcher, views' = views, store' = store, requests' = requests,
+  }
+
   // Returns from sync without waiting for its rescan.
   action syncDoneEarly(view: str): bool = all {
     syncs.get(view).phase == "waiting",
@@ -1478,7 +1730,7 @@ module views {
     init
       .then(write("m/A", false))
       .then(deliver(false))
-      .then(reconcileStart("m"))
+      .then(reconcileStart("m", NO_PATHS))
       .then(publishEarly("m"))
       .expect(not(AtomicPublish))
 
@@ -1486,7 +1738,7 @@ module views {
     init
       .then(write("m/A", false))
       .then(deliver(false))
-      .then(reconcileStart("m"))
+      .then(reconcileStart("m", NO_PATHS))
       .then(summarise("m", "m/A"))
       .then(publishSameGeneration("m"))
       .expect(not(GenerationsIncrease))
@@ -1498,7 +1750,7 @@ module views {
       .then(requestPin("r1"))
       .then(write("m/B", false))
       .then(deliver(false))
-      .then(reconcileStart("m"))
+      .then(reconcileStart("m", NO_PATHS))
       .then(summarise("m", "m/B"))
       .then(publish("m"))
       .then(readNewest("r1", "m/B"))
@@ -1512,7 +1764,7 @@ module views {
       .then(requestPin("r1"))
       .then(write("m/B", false))
       .then(deliver(false))
-      .then(reconcileStart("m"))
+      .then(reconcileStart("m", NO_PATHS))
       .then(summarise("m", "m/B"))
       .then(publish("m"))
       .then(read("r1", "m/B"))
@@ -1532,7 +1784,7 @@ module views {
     init
       .then(write("m/A", false))
       .then(deliver(false))
-      .then(reconcileStart("m"))
+      .then(reconcileStart("m", NO_PATHS))
       .then(summarise("m", "m/A"))
       .then(publish("m"))
       .then(write("m/A", true))
@@ -1574,12 +1826,12 @@ module views {
     init
       .then(write("n/A", false))
       .then(requestStart("r1", "n/A"))
-      .then(reconcileStart("n"))
+      .then(reconcileStart("n", NO_PATHS))
       .then(checkout("n"))
       .then(summarise("n", "n/A"))
       .then(publish("n"))
       .then(3.reps(_ => deliver(false)))
-      .then(reconcileStart("n"))
+      .then(reconcileStart("n", NO_PATHS))
       .then(summarise("n", "n/A"))
       .then(publish("n"))
       .then(requestRecookie("r1"))
@@ -1606,7 +1858,7 @@ module views {
   run trustingALostWatchViolatesCompleteIsHonestTest =
     init
       .then(watchLost("m"))
-      .then(reconcileStart("m"))
+      .then(reconcileStart("m", NO_PATHS))
       .then(publish("m"))
       .then(write("m/A", false))
       .then(requestStart("r1", "m/B"))
@@ -1631,7 +1883,7 @@ module views {
       .then(deliver(false))
       .then(requestStart("r1", "m/B"))
       .then(deliver(false))
-      .then(reconcileStart("m"))
+      .then(reconcileStart("m", NO_PATHS))
       .then(write("m/B", false))
       .then(write("m/A", false))
       .then(summarise("m", "m/A"))
@@ -1652,7 +1904,7 @@ module views {
       .then(deliver(false))
       .then(requestStart("r1", "m/B"))
       .then(deliver(false))
-      .then(reconcileStart("m"))
+      .then(reconcileStart("m", NO_PATHS))
       .then(write("m/B", false))
       .then(write("m/A", false))
       .then(summarise("m", "m/A"))
@@ -1669,14 +1921,14 @@ module views {
       .then(deliver(false))
       .then(requestStart("r1", "m/B"))
       .then(deliver(false))
-      .then(reconcileStart("m"))
+      .then(reconcileStart("m", NO_PATHS))
       .then(write("m/B", false))
       .then(write("m/A", false))
       .then(summarise("m", "m/A"))
       .then(publish("m"))
       .then(requestRecookie("r1"))
       .then(3.reps(_ => deliver(false)))
-      .then(reconcileStart("m"))
+      .then(reconcileStart("m", NO_PATHS))
       .then(summarise("m", "m/A"))
       .then(summarise("m", "m/B"))
       .then(publish("m"))
@@ -1707,4 +1959,54 @@ module views {
       .then(publish("m"))
       .then(requestPin("r1"))
       .expect(not(FreshAfterStat))
+
+  // A rescan during a settle leaves m/B unread and drops it from `dirty`: generation 2 holds
+  // m/B's old version, the view looks settled, and a request after the write is answered
+  // complete from a state its history never held.
+  run rescanDroppingLeftViolatesCompleteIsHonestTest =
+    twoDelivered
+      .then(tick)
+      .then(moveHead("m"))
+      .then(deliver(false))
+      .then(reconcileStartDroppingLeft("m", Set("m/B")))
+      .then(summarise("m", "m/A"))
+      .then(publish("m"))
+      .then(requestStart("r1", "m/A"))
+      .then(deliver(false))
+      .then(requestPin("r1"))
+      .expect(and { requests.get("r1").complete, not(CompleteIsHonest) })
+
+  // The same rescan with the left path kept dirty: the answer is incomplete.
+  run rescanLeavingIsIncompleteTest =
+    twoDelivered
+      .then(tick)
+      .then(moveHead("m"))
+      .then(deliver(false))
+      .then(reconcileStart("m", Set("m/B")))
+      .then(summarise("m", "m/A"))
+      .then(publish("m"))
+      .then(requestStart("r1", "m/A"))
+      .then(deliver(false))
+      .then(requestPin("r1"))
+      .expect(and { not(requests.get("r1").complete), allInvariants })
+
+  // A rescan leaves the file a waiting request's stat saw change: the generation the request
+  // waits for holds the old version.
+  run rescanLeavingNeededViolatesFreshAfterStatTest =
+    twoDeliveredAndACommitSeenByARequestOnA
+      .then(reconcileStartLeavingNeeded("m", Set("m/A")))
+      .then(summarise("m", "m/B"))
+      .then(publish("m"))
+      .then(2.reps(_ => deliver(false)))
+      .then(requestPin("r1"))
+      .expect(not(FreshAfterStat))
+
+  run syncDoneBeforeThePartsViolatesSyncIsBarrierTest =
+    twoDelivered
+      .then(syncStart("m"))
+      .then(reconcileStart("m", Set("m/B")))
+      .then(summarise("m", "m/A"))
+      .then(publish("m"))
+      .then(syncDoneBeforeTheParts("m"))
+      .expect(not(SyncIsBarrier))
 }

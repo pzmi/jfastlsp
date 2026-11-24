@@ -409,11 +409,14 @@ pub enum ViewError {
     /// A rescan is due: a part of the delivered events may not be taken alone.
     #[error("a rescan is due")]
     RescanDue,
+    /// Paths may be left unread only by a rescan.
+    #[error("only a rescan may leave paths unread")]
+    NotARescan,
     /// A path to take is not a delivered event of the view.
     #[error("a path to take is not delivered")]
     NotDirty,
-    /// The part leaves out a path a waiting request needs.
-    #[error("the part leaves out a path a waiting request needs")]
+    /// The build (a part, or what a rescan leaves) leaves out a path a waiting request needs.
+    #[error("the build leaves out a path a waiting request needs")]
     NeededNotTaken,
     /// No build is in progress.
     #[error("no build is in progress")]
@@ -626,9 +629,38 @@ impl<D: FileObserved, G: Observed, K: Clone + Eq + fmt::Debug> ViewRegistry<D, G
         &mut self,
         root: &FileUri,
         listed: Option<&BTreeSet<RelPath>>,
+        stat_file: impl FnMut(&RelPath) -> D,
+        stat_git: impl FnOnce() -> GitSeen<G>,
+    ) -> Result<BTreeSet<RelPath>, ViewError> {
+        self.reconcile_start_leaving(root, listed, &BTreeSet::new(), stat_file, stat_git)
+    }
+
+    /// [`ViewRegistry::reconcile_start`], leaving `leave` unread (the model's `reconcileStart`
+    /// with its `leave`, IDX-09e): on a rescan, delivered paths no waiting request needs stay
+    /// delivered, unread and unstatted, so no answer is complete until a build takes them, and
+    /// the daemon's settle reads them a slice at a time rather than the rescan reading every
+    /// file still deferred in one build. The rescan still records `HEAD` and the index, certifies
+    /// (it started with the watch up, and a left path is known changed) and serves `sync`, whose
+    /// return then waits for the builds that take what it left ([`ViewRegistry::sync_done`]).
+    /// Refused when `leave` is not empty and no rescan is due (`NotARescan`: that is a part,
+    /// [`ViewRegistry::reconcile_part`]), holds a path not delivered (`NotDirty`), or a path a
+    /// waiting request needs (`NeededNotTaken`), whose generation must hold what its stat saw.
+    ///
+    /// Pinned by: `tests/views.rs::should_keep_the_left_paths_dirty_and_certify_when_a_rescan_leaves_them`
+    /// and `tests/views.rs::should_refuse_to_leave_a_needed_path_when_a_rescan_starts`.
+    pub fn reconcile_start_leaving(
+        &mut self,
+        root: &FileUri,
+        listed: Option<&BTreeSet<RelPath>>,
+        leave: &BTreeSet<RelPath>,
         mut stat_file: impl FnMut(&RelPath) -> D,
         stat_git: impl FnOnce() -> GitSeen<G>,
     ) -> Result<BTreeSet<RelPath>, ViewError> {
+        let needed = if leave.is_empty() {
+            BTreeSet::new()
+        } else {
+            self.needed(root)
+        };
         let view = self.view_mut(root)?;
         if view.build.is_some() {
             return Err(ViewError::BuildActive);
@@ -636,13 +668,31 @@ impl<D: FileObserved, G: Observed, K: Clone + Eq + fmt::Debug> ViewRegistry<D, G
         if view.dirty.is_empty() && !view.rescan {
             return Err(ViewError::NothingToReconcile);
         }
+        if !leave.is_empty() {
+            if !view.rescan {
+                return Err(ViewError::NotARescan);
+            }
+            if !leave.is_subset(&view.dirty) {
+                return Err(ViewError::NotDirty);
+            }
+            if !leave.is_disjoint(&needed) {
+                return Err(ViewError::NeededNotTaken);
+            }
+        }
         let published = Arc::clone(&view.published);
         let mut index = published.index.clone();
         let mut todo = core::mem::take(&mut view.dirty);
+        for path in leave {
+            todo.remove(path);
+        }
+        view.dirty.clone_from(leave);
         let rescan = view.rescan;
         let mut seen_now = BTreeMap::new();
         if rescan {
             for (path, entry) in &published.index {
+                if leave.contains(path) {
+                    continue;
+                }
                 let now = stat_file(path);
                 if !entry.seen.proves_unchanged(&now) {
                     todo.insert(path.clone());
@@ -650,7 +700,7 @@ impl<D: FileObserved, G: Observed, K: Clone + Eq + fmt::Debug> ViewRegistry<D, G
                 seen_now.insert(path.clone(), now);
             }
             for path in listed.into_iter().flatten() {
-                if !published.index.contains_key(path) {
+                if !published.index.contains_key(path) && !leave.contains(path) {
                     todo.insert(path.clone());
                 }
             }
@@ -710,10 +760,10 @@ impl<D: FileObserved, G: Observed, K: Clone + Eq + fmt::Debug> ViewRegistry<D, G
 
     /// Starts a build of `take`, a part of the view's delivered events (the model's
     /// `reconcilePart`, IDX-09d): the rest stay delivered, so no answer is complete until a build
-    /// takes them. Refused while a rescan is due (a rescan is whole: it certifies, records `HEAD`
-    /// and the index, and serves `sync`), for a path not delivered, and when the part leaves out a
-    /// path a waiting request needs ([`ViewRegistry::needed`]), whose generation must hold what
-    /// its stat saw. Returns the paths to read, each named by `stat_file`'s entry until read.
+    /// takes them. Refused while a rescan is due (a rescan reads every changed path but the
+    /// delivered ones it leaves: it certifies, records `HEAD` and the index, and serves `sync`),
+    /// for a path not delivered, and when the part leaves out a path a waiting request needs
+    /// ([`ViewRegistry::needed`]), whose generation must hold what its stat saw. Returns the paths to read, each named by `stat_file`'s entry until read.
     ///
     /// Pinned by: `tests/views.rs::should_refuse_a_part_that_leaves_out_a_needed_path_when_a_request_waits`
     /// and `tests/views.rs::should_publish_a_part_and_keep_the_rest_dirty_when_a_part_is_taken`.
@@ -1049,10 +1099,19 @@ impl<D: FileObserved, G: Observed, K: Clone + Eq + fmt::Debug> ViewRegistry<D, G
         Ok(epoch)
     }
 
-    /// The `sync` returns: only once its rescan has published.
+    /// The `sync` returns: only once its rescan has published and no delivered path waits for a
+    /// build (the model's `syncable`, IDX-09e): a rescan may leave delivered paths, which the
+    /// barrier then waits for, and a path leaves the dirty set only into a build, so with none in
+    /// progress every one it held is published.
+    ///
+    /// Pinned by: `tests/views.rs::should_return_from_sync_only_when_the_paths_its_rescan_left_are_published`.
     pub fn sync_done(&mut self, root: &FileUri) -> Result<(), ViewError> {
         let view = self.view_mut(root)?;
-        if view.sync.phase != SyncPhase::Waiting || !view.sync.scanned {
+        if view.sync.phase != SyncPhase::Waiting
+            || !view.sync.scanned
+            || !view.dirty.is_empty()
+            || view.build.is_some()
+        {
             return Err(ViewError::SyncState);
         }
         view.sync.phase = SyncPhase::Done;

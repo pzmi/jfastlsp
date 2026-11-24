@@ -127,7 +127,7 @@ Not in `required`:
 | `scorecard.yml` | push to `main`, weekly, dispatch | OpenSSF Scorecard, SARIF to code scanning, results published |
 | `.github/dependabot.yml` | weekly | cargo and github-actions, minor and patch grouped, a 7-day cooldown |
 | `macos.yml` | nightly, dispatch | `just platform-tests` on `macos-15` (see "Reported checks") |
-| `formal.yml` | weekly, dispatch | `just formal-verify <model>`, one job per model of `formal/models.toml` (Apalache's bounded verification and a Quint simulation; a JVM per model, so outside `check`); `crates/jfl-conformance/tests/models.rs` keeps the matrix equal to the registry (FORMAL-01) |
+| `formal.yml` | weekly, dispatch | `just formal-verify <model> <part>`, one job per model of `formal/models.toml` and part: `apalache` (Apalache's bounded verification; a JVM per model, so outside `check`) and `simulation` (the Quint simulations), each with the job's 60 minutes to itself (IDX-09e); `crates/jfl-conformance/tests/models.rs` keeps the matrix equal to the registry and the parts to xtask's (FORMAL-01) |
 
 Planned: `bench.yml` (the corpus suites on one fixed runner class, history upload, and its
 `bench-gate` job, which blocks `main` from LSP-06, the M1 gate (ADR 0034): red there is fixed like red CI; it is kept out

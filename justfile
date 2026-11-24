@@ -113,8 +113,9 @@ conformance *args:
 
 # Apalache's bounded verification of each registered model's `allInvariants` (or the one named),
 # then a Quint simulation; not a stage of `check` (a JVM per model): `formal.yml` runs it weekly
-# and by hand, one job per model (FORMAL-01, ver §6.3). `just formal-verify smoke`. The JDK and
-# Apalache come from `bash scripts/bootstrap-tools.sh --formal-verify`.
+# and by hand, one job per model and part (FORMAL-01, ver §6.3; IDX-09e). `just formal-verify
+# smoke`, or one half: `just formal-verify views apalache`, `just formal-verify views simulation`.
+# The JDK and Apalache come from `bash scripts/bootstrap-tools.sh --formal-verify`.
 [positional-arguments]
 formal-verify *model:
     bash {{xtask}} formal-verify "$@"

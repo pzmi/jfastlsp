@@ -2,7 +2,8 @@
 //! independently of xtask's pinned-shape reader (tools/xtask/src/formal.rs): every model has a
 //! file under `formal/`, a main module and a positive step bound, every `.qnt` of `formal/` is
 //! registered, each model declares what `formal-verify` runs (`init`, `step`, `allInvariants`),
-//! and `.github/workflows/formal.yml` verifies exactly the registered models, one job each.
+//! and `.github/workflows/formal.yml` verifies exactly the registered models, one job per model
+//! and part: Apalache, and the simulations (IDX-09e), each half of `xtask formal-verify`.
 
 use std::collections::BTreeSet;
 use std::error::Error;
@@ -100,12 +101,18 @@ fn qnt_files(dir: &Path, rel: &str, found: &mut BTreeSet<String>) -> TestResult 
 
 /// The names of formal.yml's `model:` matrix line (`model: [a, b]`), the only one.
 fn matrix(workflow: &str) -> Result<BTreeSet<String>, Box<dyn Error>> {
+    axis(workflow, "model")
+}
+
+/// The values of formal.yml's `<key>:` matrix line (`<key>: [a, b]`), the only one.
+fn axis(workflow: &str, key: &str) -> Result<BTreeSet<String>, Box<dyn Error>> {
+    let prefix = format!("{key}: [");
     let lines: Vec<&str> = workflow
         .lines()
-        .filter_map(|l| l.trim().strip_prefix("model: ["))
+        .filter_map(|l| l.trim().strip_prefix(prefix.as_str()))
         .collect();
     let [line] = lines.as_slice() else {
-        return Err(format!("{} `model: [...]` lines in formal.yml", lines.len()).into());
+        return Err(format!("{} `{key}: [...]` lines in formal.yml", lines.len()).into());
     };
     let inner = line
         .strip_suffix(']')
@@ -203,6 +210,64 @@ fn should_verify_exactly_the_registered_models_when_formal_yml_is_read() -> Test
     // then
     let names: BTreeSet<String> = models.into_iter().map(|m| m.0).collect();
     assert_eq!(jobs, names);
+    Ok(())
+}
+
+/// The parts `xtask formal-verify MODEL PART` takes, read from xtask's own list
+/// (tools/xtask/src/formal.rs, `pub(crate) const PARTS: [&str; N] = ["a", "b"];`, which
+/// `Part::parse` matches): each half of the verification, which formal.yml runs as jobs of their
+/// own so each has the job's time limit to itself (IDX-09e).
+fn xtask_parts() -> Result<BTreeSet<String>, Box<dyn Error>> {
+    let source = std::fs::read_to_string(root().join("tools/xtask/src/formal.rs"))?;
+    let lines: Vec<&str> = source
+        .lines()
+        .filter(|l| l.starts_with("pub(crate) const PARTS: [&str; "))
+        .collect();
+    let [line] = lines.as_slice() else {
+        return Err(format!("{} PARTS lines in xtask's formal.rs", lines.len()).into());
+    };
+    let (_, list) = line.split_once("= [").ok_or("no list in the PARTS line")?;
+    let list = list
+        .strip_suffix("];")
+        .ok_or("the PARTS line does not end in ];")?;
+    Ok(list
+        .split(',')
+        .map(|p| p.trim().trim_matches('"').to_owned())
+        .filter(|p| !p.is_empty())
+        .collect())
+}
+
+/// Whether formal.yml's matrix drops or adds combinations (`exclude:`, `include:`): every model's
+/// every half must run.
+fn reshaped(workflow: &str) -> bool {
+    workflow.lines().any(|l| {
+        let l = l.trim_start();
+        l.starts_with("exclude:") || l.starts_with("include:")
+    })
+}
+
+#[test]
+fn should_run_both_halves_of_every_model_when_formal_yml_is_read() -> TestResult {
+    // given
+    let workflow = std::fs::read_to_string(root().join(".github/workflows/formal.yml"))?;
+    let excluding = workflow.replace(
+        "        part: [apalache, simulation]\n",
+        "        part: [apalache, simulation]\n        exclude:\n          - model: views\n            part: simulation\n",
+    );
+
+    // when
+    let parts = axis(&workflow, "part")?;
+    let without_simulation = axis(&workflow.replace(", simulation]", "]"), "part")?;
+
+    // then: xtask's parts, each passed to `just formal-verify`, the matrix crossed whole (the
+    // controls: one half dropped from the axis, or one model's half excluded, differ)
+    assert_eq!(parts, xtask_parts()?);
+    assert_eq!(parts.len(), 2);
+    assert_ne!(without_simulation, parts);
+    assert!(!reshaped(&workflow));
+    assert_ne!(excluding, workflow);
+    assert!(reshaped(&excluding));
+    assert!(workflow.contains(r#"just formal-verify "$MODEL" "$PART""#));
     Ok(())
 }
 

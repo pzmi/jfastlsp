@@ -14,12 +14,14 @@
 //! - **Between requests** ([`Service::background`]): `settle` once a request opened a view, in
 //!   slices of [`SETTLE_SLICE`] files (the rest of the view read and published a slice at a time,
 //!   IDX-09d), then `write_back` in slices of [`WRITE_SLICE`] summaries, each step run to its
-//!   end, so a frame, a signal or a tick waits at most one slice, **except while a rescan is
-//!   due**: a rescan is whole, so it reads every file still deferred in one build, in the settle's
-//!   step or in the request that finds it due (a file created during the settle, a linked
-//!   worktree's `git add` or commit seen by a request's stat, a lost watch, an overflow, a `.git`
-//!   hint, `sync`): the hold of before, for that build (IDX-09e). Pinned by
-//!   `tests/daemon.rs::should_answer_a_request_between_the_slices_of_a_settle_when_the_view_is_large`.
+//!   end, so a frame, a signal or a tick waits at most one slice. A rescan due during the settle
+//!   (a file created during it, a linked worktree's `git add` or commit seen by a request's
+//!   stat, a lost watch, an overflow, a `.git` hint) leaves the deferred files to the slices
+//!   (IDX-09e): it lists and stats the view and reads what changed elsewhere, in the settle's
+//!   step or in the request that finds it due, never the rest of the view in one build. Pinned by
+//!   `tests/daemon.rs::should_answer_a_request_between_the_slices_of_a_settle_when_the_view_is_large`
+//!   and, for the rescans, `jfl-application`'s
+//!   `tests/view_service.rs::should_leave_the_deferred_files_to_the_settle_when_a_request_finds_a_commit`.
 //! - **An open document that differs from the disk** is answered `ContentModified` rather than
 //!   from the disk, whether it is the document asked about or one any hit (`exact` or `possible`)
 //!   lands in: the index holds the disk's text, so a position in the client's buffer, or a hit's
@@ -74,7 +76,8 @@ pub const STORE_CAP: u64 = 2 << 30;
 
 /// The deferred files one background step of a settle reads and publishes (IDX-09d): about
 /// 100 ms of reads and parses on the bench VM's four threads (`doc/bench/README.md`), so a frame,
-/// SIGTERM or a tick waits at most about that long behind one while no rescan is due. A publish
+/// SIGTERM or a tick waits at most about that long behind one (a rescan during the settle leaves
+/// the deferred files to the slices, IDX-09e). A publish
 /// shares the untouched entries with the generation before, so a slice costs what it reads,
 /// whatever the view's size.
 pub const SETTLE_SLICE: usize = 512;

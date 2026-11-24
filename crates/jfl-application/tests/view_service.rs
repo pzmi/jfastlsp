@@ -767,6 +767,128 @@ fn should_publish_a_generation_per_slice_and_answer_between_them_when_settled_in
 }
 
 #[test]
+fn should_leave_the_deferred_files_to_the_settle_when_a_request_finds_a_commit() {
+    // given: a view whose open deferred `q/C.java` and `q/D.java`, and a commit no watcher sees
+    // (a linked worktree's `HEAD` lives outside its root)
+    let (world, mut service) = two_packages();
+    let first = ask(&mut service, "/w/m/p/A.java");
+    service.finish(first.id).unwrap();
+    world
+        .probe
+        .write(&uri("/w/m/p/A.java"), b"class A {}")
+        .unwrap();
+    world.probe.stage(&uri(MAIN), "p/A.java").unwrap();
+    world.probe.commit(&uri(MAIN)).unwrap();
+
+    // when: a request's stat sees the commit, so it runs the rescan; then the settle's slices
+    let answer = ask(&mut service, "/w/m/p/A.java");
+    service.finish(answer.id).unwrap();
+    let read_by_the_request = indexed(&world);
+    let more = block_on(service.settle(1)).unwrap();
+    let read_by_one_slice = indexed(&world);
+    let more_after = block_on(service.settle(1)).unwrap();
+    let settled = ask(&mut service, "/w/m/p/A.java");
+
+    // then: the rescan published the new HEAD and read no deferred file, so the answer is
+    // incomplete with both still pending; each slice then read one
+    assert_ne!(answer.generation.git, first.generation.git);
+    assert_eq!(read_by_the_request, 2);
+    assert_eq!(summary_of(&answer, "q/C.java"), Some(Summary::Pending));
+    assert_eq!(summary_of(&answer, "q/D.java"), Some(Summary::Pending));
+    assert!(!answer.completeness.is_complete());
+    assert!(more);
+    assert_eq!(read_by_one_slice, 3);
+    assert!(!more_after);
+    assert_eq!(indexed(&world), 4);
+    assert!(
+        settled.completeness.is_complete(),
+        "{:?}",
+        reasons(&settled)
+    );
+}
+
+#[test]
+fn should_read_the_requested_pending_file_and_leave_the_rest_when_a_request_finds_a_commit() {
+    // given: a view whose open deferred `q/C.java` and `q/D.java`, and a commit no watcher sees
+    let (world, mut service) = two_packages();
+    let first = ask(&mut service, "/w/m/p/A.java");
+    service.finish(first.id).unwrap();
+    world
+        .probe
+        .write(&uri("/w/m/p/A.java"), b"class A {}")
+        .unwrap();
+    world.probe.stage(&uri(MAIN), "p/A.java").unwrap();
+    world.probe.commit(&uri(MAIN)).unwrap();
+
+    // when: a request on a file still pending sees the commit and runs the rescan inline; it needs
+    // its own file, so the rescan may not leave it
+    let answer = ask(&mut service, "/w/m/q/C.java");
+
+    // then: the rescan read the requested file and left the other deferred one
+    assert_ne!(answer.generation.git, first.generation.git);
+    assert!(matches!(
+        summary_of(&answer, "q/C.java"),
+        Some(Summary::Indexed { .. })
+    ));
+    assert_eq!(summary_of(&answer, "q/D.java"), Some(Summary::Pending));
+    assert_eq!(indexed(&world), 3);
+    assert!(!answer.completeness.is_complete());
+}
+
+#[test]
+fn should_read_one_slice_per_step_when_a_hint_asks_for_a_rescan_during_the_settle() {
+    // given: a view settling one file a slice, its first slice read
+    let (world, mut service) = two_packages();
+    let first = ask(&mut service, "/w/m/p/A.java");
+    service.finish(first.id).unwrap();
+    assert!(block_on(service.settle(1)).unwrap());
+    let before = indexed(&world);
+
+    // when: a hint that names no Java file (as a `.git` change does) asks for a rescan, and the
+    // settle steps on
+    world.tree.write("m/build.gradle", b"plugins {}").unwrap();
+    let more = block_on(service.settle(1)).unwrap();
+    let read_by_the_rescan = indexed(&world) - before;
+    let more_after = block_on(service.settle(1)).unwrap();
+    let settled = ask(&mut service, "/w/m/p/A.java");
+
+    // then: the step that ran the rescan read no deferred file and left one; the next read it
+    assert_eq!(before, 3);
+    assert!(more);
+    assert_eq!(read_by_the_rescan, 0);
+    assert!(!more_after);
+    assert_eq!(indexed(&world), 4);
+    assert!(
+        settled.completeness.is_complete(),
+        "{:?}",
+        reasons(&settled)
+    );
+}
+
+#[test]
+fn should_read_a_file_created_during_the_settle_and_leave_the_deferred_ones_when_it_is_asked_for() {
+    // given: a view whose open deferred `q/C.java` and `q/D.java`
+    let (world, mut service) = two_packages();
+    let first = ask(&mut service, "/w/m/p/A.java");
+    service.finish(first.id).unwrap();
+
+    // when: a file is created in the view and asked for: a part takes it, finds it unknown to
+    // the generation and asks for a rescan, whose listing admits it
+    world.tree.write("m/q/E.java", b"class E {}").unwrap();
+    let answer = ask(&mut service, "/w/m/q/E.java");
+
+    // then: the request read the new file alone, and the deferred ones wait for the settle
+    assert_eq!(indexed(&world), 3);
+    assert!(matches!(
+        summary_of(&answer, "q/E.java"),
+        Some(Summary::Indexed { .. })
+    ));
+    assert_eq!(summary_of(&answer, "q/C.java"), Some(Summary::Pending));
+    assert_eq!(summary_of(&answer, "q/D.java"), Some(Summary::Pending));
+    assert!(!answer.completeness.is_complete());
+}
+
+#[test]
 fn should_read_only_the_requested_file_when_a_request_finds_it_pending() {
     // given
     let (world, mut service) = two_packages();

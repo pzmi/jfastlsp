@@ -803,7 +803,50 @@ fn should_diverge_at_the_part_when_the_views_control_leaves_out_a_needed_path() 
     assert!(
         divergence
             .to_string()
-            .contains("the part leaves out a path a waiting request needs"),
+            .contains("the build leaves out a path a waiting request needs"),
+        "{divergence}"
+    );
+    Ok(())
+}
+
+/// IDX-09e's regression trace: two rescans during a settle each leave the delivered file a part
+/// takes later; the first leaves it while a request waits on the other.
+const VIEWS_RESCAN: &str = "formal/traces/regression/views-rescan-during-a-settle.itf.json";
+
+#[test]
+fn should_diverge_at_the_rescan_when_the_views_control_leaves_a_needed_path() -> TestResult {
+    // given
+    let text = fs::read_to_string(root().join(VIEWS_RESCAN))?;
+    let context = Context {
+        model: "views",
+        seed: "0x3",
+        trace: VIEWS_RESCAN,
+    };
+
+    // when
+    let conformed = replay::replay(
+        views::driver(),
+        &context,
+        trace::parse(VIEWS_RESCAN, &text)?,
+    );
+    let control = replay::replay(
+        views::control_rescan_leaving_needed(),
+        &context,
+        trace::parse(VIEWS_RESCAN, &text)?,
+    );
+
+    // then: the first rescan, which leaves m/B while the request on m/A waits, is refused by the
+    // registry's guard once the control leaves m/A too
+    assert_eq!(conformed, Ok(25));
+    let Err(Failure::Diverged(divergence)) = control else {
+        return Err(format!("the views control did not diverge: {control:?}").into());
+    };
+    assert_eq!(divergence.step, 8);
+    assert_eq!(divergence.action, "reconcileStart");
+    assert!(
+        divergence
+            .to_string()
+            .contains("the build leaves out a path a waiting request needs"),
         "{divergence}"
     );
     Ok(())

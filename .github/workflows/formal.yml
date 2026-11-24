@@ -1,8 +1,11 @@
 # Apalache's bounded verification and a Quint simulation of every model of formal/models.toml
 # (FORMAL-01, ver §6.3, ADR 0007), and for a model with a `progress` entry its liveness simulation
-# and liveness control (FORMAL-04): one job per model, weekly and by hand. A JVM per model, so it is
-# outside `check` and `Required`; the `formal` job of ci.yml typechecks and tests the models on
-# every push. crates/jfl-conformance/tests/models.rs keeps the matrix equal to the registry. A red
+# and liveness control (FORMAL-04): one job per model and part (Apalache; the simulations), weekly
+# and by hand, so each half has the job's 60 minutes to itself (IDX-09e: the views model's two
+# halves came within a minute of one job's limit at CI's estimated doubling; doc/formal-models.md,
+# Budget). A JVM per model, so it is outside `check` and `Required`; the `formal` job of ci.yml
+# typechecks and tests the models on every push. crates/jfl-conformance/tests/models.rs keeps the
+# matrix equal to the registry and the parts to xtask's. A red
 # run is reported to the owner and fixed as a task; its counterexample becomes a regression trace.
 name: Formal verification
 
@@ -27,13 +30,14 @@ env:
 
 jobs:
   verify:
-    name: Apalache (${{ matrix.model }})
+    name: ${{ matrix.part }} (${{ matrix.model }})
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
         model: [smoke, views, daemon, diagnostics]
+        part: [apalache, simulation]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -43,7 +47,8 @@ jobs:
         with:
           version: 2026.10.10
           sha256: 7d79972e15549b286dcf9e25ef8c4fcef3d9fd7c0332d11cdfbc7d2842c418be # linux-x64
-          install_args: --locked just node npm:@informalsystems/quint java github:apalache-mc/apalache
+          # The JDK and Apalache only where Apalache runs: the simulation half needs Node and Quint.
+          install_args: ${{ matrix.part == 'apalache' && '--locked just node npm:@informalsystems/quint java github:apalache-mc/apalache' || '--locked just node npm:@informalsystems/quint' }}
           cache_save: ${{ github.ref == 'refs/heads/main' }}
           # mise.toml's [env] stays out of the gate's environment (ARCH-ci-lockstep).
           env: false
@@ -57,4 +62,5 @@ jobs:
       - name: Verify the model
         env:
           MODEL: ${{ matrix.model }}
-        run: just formal-verify "$MODEL"
+          PART: ${{ matrix.part }}
+        run: just formal-verify "$MODEL" "$PART"

@@ -1340,7 +1340,24 @@ where
     /// listing (unioned with the tracked files) does not admit leaves the view; without one, a
     /// path the view never held (a request's stat of a new file) is left out and a rescan asked
     /// for, whose listing decides.
+    ///
+    /// The files an open deferred are left to the settle's slices (IDX-09d, IDX-09e): without a
+    /// rescan a part takes only the other delivered files and the ones waiting requests need; a
+    /// rescan delivers the deferred files (as the settle's first slice does) and leaves them
+    /// unread, but for the ones waiting requests need, so it reads what changed elsewhere and
+    /// never the rest of the view in one build.
+    ///
+    /// Pinned by: `tests/view_service.rs::should_leave_the_deferred_files_to_the_settle_when_a_request_finds_a_commit`
+    /// and, for a deferred file a waiting request needs (read, never left),
+    /// `tests/view_service.rs::should_read_the_requested_pending_file_and_leave_the_rest_when_a_request_finds_a_commit`.
     async fn reconcile(&mut self, root: &FileUri) -> Result<bool, ServiceError> {
+        self.reconcile_with(root, false).await
+    }
+
+    /// [`ViewService::reconcile`], or with `whole` one build of everything delivered and, on a
+    /// rescan, everything changed, deferred files included (`sync`, whose barrier waits for them
+    /// all).
+    async fn reconcile_with(&mut self, root: &FileUri, whole: bool) -> Result<bool, ServiceError> {
         let Some(view) = self.registry.view(root) else {
             return Err(ServiceError::View(ViewError::UnknownView));
         };
@@ -1348,8 +1365,30 @@ where
         if !rescan && view.dirty.is_empty() {
             return Ok(false);
         }
+        if rescan && !whole {
+            // The rescan leaves the deferred files delivered: deliver those the settle has not.
+            let missing: Vec<RelPath> = self.views.get(root).map_or_else(Vec::new, |o| {
+                o.deferred
+                    .iter()
+                    .filter(|p| !view.dirty.contains(*p))
+                    .cloned()
+                    .collect()
+            });
+            for path in missing {
+                self.registry.deliver(Event::File {
+                    view: root.clone(),
+                    path,
+                })?;
+            }
+            if let Some(opened) = self.views.get_mut(root) {
+                opened.delivered = true;
+            }
+        }
+        let Some(view) = self.registry.view(root) else {
+            return Err(ServiceError::View(ViewError::UnknownView));
+        };
         let needed = self.registry.needed(root);
-        if !rescan && needed.is_subset(&view.dirty) {
+        if !rescan && !whole && needed.is_subset(&view.dirty) {
             // Without a rescan, the deferred files a settle delivered stay for its slices: a
             // request reads the delivered files that are not deferred, and the ones a waiting
             // request needs (its own), never the rest of the view (IDX-09d). A needed file not
@@ -1384,6 +1423,7 @@ where
         let at = self.clock.now();
         let mut stats: BTreeMap<RelPath, FileSeen> = BTreeMap::new();
         let mut listed = None;
+        let mut leave = BTreeSet::new();
         // Without a rescan only the dirty paths are read, and each read stats its file first; the
         // build's entry for a path waiting to be read is replaced by that stat before any
         // publish, so it needs none here.
@@ -1400,16 +1440,32 @@ where
                     opened.nested = scan.nested;
                 }
             }
+            // The deferred files this rescan leaves: delivered, listed (a file the listing does
+            // not admit leaves the view now), and needed by no waiting request.
+            if !whole && let Some(opened) = self.views.get(root) {
+                leave = opened
+                    .deferred
+                    .iter()
+                    .filter(|p| !needed.contains(*p))
+                    .filter(|p| {
+                        listed
+                            .as_ref()
+                            .is_none_or(|l: &BTreeSet<RelPath>| l.contains(*p))
+                    })
+                    .cloned()
+                    .collect();
+            }
             wanted.extend(indexed);
-            wanted.retain(|path| !stats.contains_key(path));
+            wanted.retain(|path| !stats.contains_key(path) && !leave.contains(path));
             wanted.sort_unstable();
             wanted.dedup();
             let more = self.stat_all(root, wanted, at).await;
             stats.extend(more);
         }
-        let mut todo = self.registry.reconcile_start(
+        let mut todo = self.registry.reconcile_start_leaving(
             root,
             listed.as_ref(),
+            &leave,
             |p| stats.get(p).copied().unwrap_or(UNKNOWN),
             || git,
         )?;
@@ -1589,14 +1645,22 @@ where
         self.drain().await?;
         self.registry.sync_start(&root)?;
         for _ in 0..MAX_ROUNDS {
-            self.reconcile(&root).await?;
+            // Whole: the barrier waits for every file the settle has yet to read, so the rescan
+            // reads them rather than leaving them for slices this call would wait for anyway.
+            self.reconcile_with(&root, true).await?;
             if self.registry.view(&root).is_some_and(|v| v.sync.scanned) {
-                self.registry.sync_done(&root)?;
-                let generation = self
-                    .registry
-                    .view(&root)
-                    .map_or(Generation(0), |v| v.published.generation);
-                return Ok(generation);
+                match self.registry.sync_done(&root) {
+                    Ok(()) => {
+                        let generation = self
+                            .registry
+                            .view(&root)
+                            .map_or(Generation(0), |v| v.published.generation);
+                        return Ok(generation);
+                    }
+                    // A delivered file still waits for a build: the next round takes it.
+                    Err(ViewError::SyncState) => {}
+                    Err(error) => return Err(error.into()),
+                }
             }
             self.drain().await?;
         }
@@ -1651,7 +1715,8 @@ where
     /// calls it once a request that opened a view has its answer, one slice per step between
     /// requests, so its loop is held for one slice at a time; until the last slice publishes,
     /// every answer of the view is incomplete (the deferred files are delivered and unpublished,
-    /// and partly indexed). A rescan due takes every deferred file in its one build.
+    /// and partly indexed). A rescan due runs in the step instead and leaves the deferred files to
+    /// the next steps (IDX-09e, [`ViewService::reconcile`]).
     ///
     /// Pinned by: `tests/view_service.rs::should_answer_partly_indexed_and_then_complete_when_the_open_defers_the_rest`
     /// and `tests/view_service.rs::should_publish_a_generation_per_slice_and_answer_between_them_when_settled_in_slices`.

@@ -99,6 +99,17 @@ invariant = "allInvariants"
 max_steps = 26
 seed = "0x3"
 
+# IDX-09e: rescans during a settle (a request's stat sees a commit, then its `.git` event) leave
+# the delivered file for a part.
+[traces.views-rescan-during-a-settle]
+model = "views"
+main = "views"
+init = "init"
+step = "rescanDuringASettle"
+invariant = "allInvariants"
+max_steps = 24
+seed = "0x3"
+
 # The daemon model's scenarios (FORMAL-04, doc/formal-models.md): scripted steps like the views
 # scenarios, each from an initial state with its pick fixed (`initClean`: no socket file;
 # `initStale`: one left by a crash). Replayed through the daemon driver (IDX-12,

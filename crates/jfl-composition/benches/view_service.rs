@@ -28,6 +28,15 @@
 //!   p95 over the requests, with the whole request's time beside it.
 //! - **Rescan with listing:** `sync`: the listing unioned with `git ls-files`, every indexed file
 //!   re-statted, nothing changed, published. Median of five.
+//! - **Rescans during a settle** (IDX-09e): the checkout's `.java` files copied into a scratch
+//!   repository with a linked agent worktree (`.claude/worktrees/bench`, the target layout, whose
+//!   `HEAD` lives outside its root), opened there with an empty store, one slice settled, then a
+//!   rescan triggered three ways, each on a fresh service: a commit in the worktree, which a
+//!   request's stat sees and runs the rescan inline; a hint naming no `.java` file (a build file
+//!   written, which the shell takes as it takes a `.git` change), which the next request or
+//!   settle step runs; a `.java` file created and asked for, which the request escalates to a
+//!   rescan. For each: the trigger's request, the longest step (what the
+//!   loop is held for), the settle's steps, and the full index without the requests.
 //!
 //! The cookie's deadline here is a future that polls the clock: the bench has no runtime timer.
 //! Here, not in `jfl-application`, because timing needs the clock grant only composition holds
@@ -541,6 +550,164 @@ fn stages(root: &FileUri, files: &[RelPath], scratch: &Path) -> Result<(), Strin
     Ok(())
 }
 
+/// What sets the rescan during a settle (IDX-09e).
+#[derive(Debug, Clone, Copy)]
+enum Trigger {
+    /// A commit in the linked worktree: no watcher event; the next request's stat sees it.
+    Commit,
+    /// A hint naming no `.java` file (a build file written): a settle step or the next request
+    /// runs the rescan.
+    Hint,
+    /// A `.java` file created during the settle and asked for: escalated to a rescan.
+    Created,
+}
+
+/// One trigger's run: a fresh service over `worktree` with an empty store, one slice settled,
+/// the trigger, then the rest of the settle; the line it prints.
+fn rescan_during_a_settle(
+    worktree: &jfl_testkit::fixtures::git::Repo,
+    first: &RelPath,
+    store: &Path,
+    pool: &Pool,
+    config: &ServiceConfig,
+    slice: usize,
+    trigger: Trigger,
+) -> Result<String, String> {
+    let _ = std::fs::remove_dir_all(store);
+    let root = FileUri::from_path(&worktree.root().to_string_lossy()).map_err(|e| e.to_string())?;
+    let file = root.join(first).map_err(|e| e.to_string())?;
+    let mut service = service(store, pool, config.clone())?;
+    let answer = block_on(service.request(&file)).map_err(|e| e.to_string())?;
+    service.finish(answer.id).map_err(|e| e.to_string())?;
+    // The files still pending in the published generation and its number (outside the timing):
+    // a step that publishes and reads none of them ran a rescan.
+    let pending = |service: &Service| {
+        service.registry().view(&root).map_or((0, 0), |v| {
+            let left = v
+                .published
+                .index
+                .values()
+                .filter(|e| matches!(e.summary, Some(Summary::Pending)))
+                .count();
+            (left, v.published.generation.0)
+        })
+    };
+    let mut rescans = Vec::new();
+    let started = Instant::now();
+    let mut steps = Vec::new();
+    let before = pending(&service);
+    let step = Instant::now();
+    let mut more = block_on(service.settle(slice)).map_err(|e| e.to_string())?;
+    steps.push(step.elapsed());
+    let mut after = pending(&service);
+    if after.0 == before.0 && after.1 > before.1 {
+        rescans.push(format!("step 1 {:.0} ms", ms(step.elapsed())));
+    }
+    let asked_file = match trigger {
+        Trigger::Commit => {
+            worktree.git(&["commit", "--quiet", "--allow-empty", "--message", "bench"])?;
+            file.clone()
+        }
+        Trigger::Hint => {
+            worktree.write("build.gradle", b"// bench\n")?;
+            file.clone()
+        }
+        Trigger::Created => {
+            let dir = first.as_str().rsplit_once('/').map_or("", |(d, _)| d);
+            let created = if dir.is_empty() {
+                "JflBenchCreated.java".to_owned()
+            } else {
+                format!("{dir}/JflBenchCreated.java")
+            };
+            worktree.write(&created, b"class JflBenchCreated {}\n")?;
+            root.join(&RelPath::new(&created).map_err(|e| e.to_string())?)
+                .map_err(|e| e.to_string())?
+        }
+    };
+    let asking = Instant::now();
+    let answer = block_on(service.request(&asked_file)).map_err(|e| e.to_string())?;
+    let request = asking.elapsed();
+    let complete = answer.completeness.is_complete();
+    service.finish(answer.id).map_err(|e| e.to_string())?;
+    let by_request = pending(&service);
+    let read_by_request = after.0.saturating_sub(by_request.0);
+    after = by_request;
+    while more {
+        let before = after;
+        let step = Instant::now();
+        more = block_on(service.settle(slice)).map_err(|e| e.to_string())?;
+        let took = step.elapsed();
+        steps.push(took);
+        after = pending(&service);
+        if after.0 == before.0 && after.1 > before.1 {
+            rescans.push(format!("step {} {:.0} ms", steps.len(), ms(took)));
+        }
+    }
+    let settled = started.elapsed().saturating_sub(request);
+    let answer = block_on(service.request(&file)).map_err(|e| e.to_string())?;
+    let settled_complete = answer.completeness.is_complete();
+    service.finish(answer.id).map_err(|e| e.to_string())?;
+    let longest = steps.iter().copied().max().unwrap_or_default().max(request);
+    Ok(format!(
+        "{trigger:?}: the trigger's request {:.0} ms (complete: {complete}, {} generations, read {read_by_request} pending files); settle steps that ran a rescan: [{}]; longest hold {:.0} ms; {} settle steps, p50 {:.0} ms, max {:.0} ms; full index {:.0} ms without the request (then complete: {settled_complete})",
+        ms(request),
+        by_request.1.saturating_sub(before.1),
+        rescans.join(", "),
+        ms(longest),
+        steps.len(),
+        ms(percentile(steps.clone(), 50)),
+        ms(steps.iter().copied().max().unwrap_or_default()),
+        ms(settled)
+    ))
+}
+
+/// The rescans during a settle (IDX-09e), on a scratch repository of the checkout's `.java`
+/// files with a linked agent worktree, made beside `store` and removed after.
+fn rescans_during_a_settle(
+    checkout: &Path,
+    files: &[RelPath],
+    store: &Path,
+    pool: &Pool,
+    config: &ServiceConfig,
+    slice: usize,
+) -> Result<(), String> {
+    let scratch = store.with_extension("rescans");
+    let _ = std::fs::remove_dir_all(&scratch);
+    let mut copied = Vec::with_capacity(files.len());
+    for file in files {
+        let bytes = std::fs::read(checkout.join(file.as_str())).map_err(|e| e.to_string())?;
+        copied.push((file.as_str().to_owned(), bytes));
+    }
+    let borrowed: Vec<(&str, &[u8])> = copied
+        .iter()
+        .map(|(p, b)| (p.as_str(), b.as_slice()))
+        .collect();
+    let made = Instant::now();
+    let main = jfl_testkit::fixtures::git::Repo::init(&scratch.join("main"), &borrowed)?;
+    let worktree = main.add_agent_worktree("bench")?;
+    drop(copied);
+    println!(
+        "  rescans during a settle, on a linked worktree of the {} files (made in {:.1} s):",
+        files.len(),
+        made.elapsed().as_secs_f64()
+    );
+    let first = files.first().ok_or("no .java file")?;
+    for trigger in [Trigger::Commit, Trigger::Hint, Trigger::Created] {
+        let line = rescan_during_a_settle(
+            &worktree,
+            first,
+            &scratch.join("store"),
+            pool,
+            config,
+            slice,
+            trigger,
+        )?;
+        println!("    {line}");
+    }
+    let _ = std::fs::remove_dir_all(&scratch);
+    Ok(())
+}
+
 fn main() -> Result<(), String> {
     let mut input = Vec::new();
     std::io::stdin()
@@ -651,6 +818,7 @@ fn main() -> Result<(), String> {
         ms(percentile(rescans, 50))
     );
     drop(service);
+    rescans_during_a_settle(Path::new(checkout), &files, &store, &pool, &config, slice)?;
     let _ = std::fs::remove_dir_all(&store);
     Ok(())
 }
