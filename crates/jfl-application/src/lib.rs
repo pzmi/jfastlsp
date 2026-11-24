@@ -34,8 +34,8 @@ pub use clock::WallClock;
 pub use hints::{DEFAULT_HINT_CAPACITY, HintQueue, HintSink, hint_queue};
 pub use queries::{
     ClockDeadline, Deadline, DocumentSymbol, DocumentSymbols, FileText, Hover, HoverDeclaration,
-    Pinned, QueryCache, QueryConfig, QueryError, Sources, SymbolFilter, SymbolQuery, Symbols,
-    WorkspaceSymbol,
+    Pinned, QueryCache, QueryConfig, QueryError, ReferenceCounts, ReferencesQuery, Sources,
+    SymbolFilter, SymbolQuery, Symbols, WorkspaceSymbol,
 };
 pub use repo_probe::{
     ChangedFiles, GitFile, GitSnapshot, GitStat, GitStep, HeadState, ObjectId, RepoId, RepoProbe,

@@ -1,7 +1,7 @@
 //! Query goldens (ver §4; IDX-10, completed for M1's 50 cases in LSP-06): a query's answer
-//! rendered through `jfl-protocol`'s wire types (the envelope as `jfl/definition` carries it, the
-//! symbols as `jfl/symbols` does), pretty-printed so a review reads a diff line by line, and
-//! compared byte for byte with a committed file.
+//! rendered through `jfl-protocol`'s wire types (the envelope as `jfl/definition` and
+//! `jfl/references` carry it, the symbols as `jfl/symbols` does), pretty-printed so a review
+//! reads a diff line by line, and compared byte for byte with a committed file.
 //!
 //! **Goldens are never rewritten to get green.** [`check`] fails on any difference; a case with
 //! no golden gets one written and fails too ("review and commit it"), so a new case's golden is
@@ -34,6 +34,24 @@ pub fn definition(
 ) -> Result<String, String> {
     let query = Query {
         op: Operation::Def,
+        uri: DocumentUri::from(uri),
+        line: position.line(),
+        col: position.column(),
+    };
+    pretty(serde_json::to_string_pretty(&WireEnvelope::from_domain(
+        envelope,
+        Some(query),
+    )))
+}
+
+/// The `jfl/references` result of `envelope`, asked at `position` of `uri`.
+pub fn references(
+    envelope: &Envelope,
+    uri: &FileUri,
+    position: Position,
+) -> Result<String, String> {
+    let query = Query {
+        op: Operation::Refs,
         uri: DocumentUri::from(uri),
         line: position.line(),
         col: position.column(),

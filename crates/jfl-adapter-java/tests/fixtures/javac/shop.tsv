@@ -305,6 +305,145 @@ site	src/main/java/com/acme/probe3/QualThis.java	284	289	decl	FIELD	count	src/ma
 site	src/main/java/com/acme/probe3/QualThis.java	333	341	decl	CLASS	QualThis	src/main/java/com/acme/probe3/QualThis.java	122	369
 site	src/main/java/com/acme/probe3/QualThis.java	342	346	outside	FIELD	com.acme.probe3.QualThis#this
 site	src/main/java/com/acme/probe3/QualThis.java	347	348	decl	METHOD	m	src/main/java/com/acme/probe3/QualThis.java	177	193
+file	src/main/java/com/acme/refs/Audit.java	199cc847f639fe7b
+site	src/main/java/com/acme/refs/Audit.java	8	11	package	com
+site	src/main/java/com/acme/refs/Audit.java	12	16	package	com.acme
+site	src/main/java/com/acme/refs/Audit.java	17	21	package	com.acme.refs
+site	src/main/java/com/acme/refs/Audit.java	80	85	decl	CLASS	Tally	src/main/java/com/acme/refs/Tally.java	108	918
+site	src/main/java/com/acme/refs/Audit.java	110	115	decl	CONSTRUCTOR	<init>	src/main/java/com/acme/refs/Tally.java	228	291
+site	src/main/java/com/acme/refs/Audit.java	224	229	decl	CLASS	Tally	src/main/java/com/acme/refs/Tally.java	108	918
+site	src/main/java/com/acme/refs/Audit.java	330	335	decl	CLASS	Tally	src/main/java/com/acme/refs/Tally.java	108	918
+site	src/main/java/com/acme/refs/Audit.java	353	358	local	PARAMETER	tally
+site	src/main/java/com/acme/refs/Audit.java	359	366	decl	METHOD	postAll	src/main/java/com/acme/refs/Tally.java	807	916
+site	src/main/java/com/acme/refs/Audit.java	378	383	local	PARAMETER	tally
+site	src/main/java/com/acme/refs/Audit.java	384	391	decl	METHOD	postAll	src/main/java/com/acme/refs/Tally.java	807	916
+file	src/main/java/com/acme/refs/Clerk.java	a47fede65814b881
+site	src/main/java/com/acme/refs/Clerk.java	8	11	package	com
+site	src/main/java/com/acme/refs/Clerk.java	12	16	package	com.acme
+site	src/main/java/com/acme/refs/Clerk.java	17	21	package	com.acme.refs
+site	src/main/java/com/acme/refs/Clerk.java	31	35	package	java
+site	src/main/java/com/acme/refs/Clerk.java	36	40	package	java.util
+site	src/main/java/com/acme/refs/Clerk.java	41	49	package	java.util.function
+site	src/main/java/com/acme/refs/Clerk.java	50	61	outside	INTERFACE	java.util.function.IntConsumer
+site	src/main/java/com/acme/refs/Clerk.java	70	74	package	java
+site	src/main/java/com/acme/refs/Clerk.java	75	79	package	java.util
+site	src/main/java/com/acme/refs/Clerk.java	80	88	package	java.util.function
+site	src/main/java/com/acme/refs/Clerk.java	89	105	outside	INTERFACE	java.util.function.IntUnaryOperator
+site	src/main/java/com/acme/refs/Clerk.java	114	118	package	java
+site	src/main/java/com/acme/refs/Clerk.java	119	123	package	java.util
+site	src/main/java/com/acme/refs/Clerk.java	124	132	package	java.util.function
+site	src/main/java/com/acme/refs/Clerk.java	133	141	outside	INTERFACE	java.util.function.Supplier
+site	src/main/java/com/acme/refs/Clerk.java	198	202	decl	ANNOTATION_TYPE	Note	src/main/java/com/acme/refs/Note.java	97	165
+site	src/main/java/com/acme/refs/Clerk.java	244	249	decl	CLASS	Tally	src/main/java/com/acme/refs/Tally.java	108	918
+site	src/main/java/com/acme/refs/Clerk.java	262	267	decl	CONSTRUCTOR	<init>	src/main/java/com/acme/refs/Tally.java	228	291
+site	src/main/java/com/acme/refs/Clerk.java	278	282	decl	ANNOTATION_TYPE	Note	src/main/java/com/acme/refs/Note.java	97	165
+site	src/main/java/com/acme/refs/Clerk.java	283	288	decl	METHOD	value	src/main/java/com/acme/refs/Note.java	119	134
+site	src/main/java/com/acme/refs/Clerk.java	299	305	decl	METHOD	weight	src/main/java/com/acme/refs/Note.java	140	163
+site	src/main/java/com/acme/refs/Clerk.java	347	352	decl	FIELD	tally	src/main/java/com/acme/refs/Clerk.java	230	271
+site	src/main/java/com/acme/refs/Clerk.java	353	357	decl	METHOD	post	src/main/java/com/acme/refs/Tally.java	345	469
+site	src/main/java/com/acme/refs/Clerk.java	358	364	local	PARAMETER	amount
+site	src/main/java/com/acme/refs/Clerk.java	375	380	decl	FIELD	tally	src/main/java/com/acme/refs/Clerk.java	230	271
+site	src/main/java/com/acme/refs/Clerk.java	381	385	decl	METHOD	post	src/main/java/com/acme/refs/Tally.java	504	599
+site	src/main/java/com/acme/refs/Clerk.java	386	392	local	PARAMETER	amount
+site	src/main/java/com/acme/refs/Clerk.java	394	400	local	PARAMETER	amount
+site	src/main/java/com/acme/refs/Clerk.java	411	417	outside	CLASS	java.lang.String
+site	src/main/java/com/acme/refs/Clerk.java	500	506	outside	CLASS	java.lang.String
+site	src/main/java/com/acme/refs/Clerk.java	707	718	outside	INTERFACE	java.util.function.IntConsumer
+site	src/main/java/com/acme/refs/Clerk.java	726	731	decl	FIELD	tally	src/main/java/com/acme/refs/Clerk.java	230	271
+site	src/main/java/com/acme/refs/Clerk.java	733	737	decl	METHOD	post	src/main/java/com/acme/refs/Tally.java	345	469
+site	src/main/java/com/acme/refs/Clerk.java	747	763	outside	INTERFACE	java.util.function.IntUnaryOperator
+site	src/main/java/com/acme/refs/Clerk.java	772	777	decl	CLASS	Tally	src/main/java/com/acme/refs/Tally.java	108	918
+site	src/main/java/com/acme/refs/Clerk.java	779	784	decl	METHOD	twice	src/main/java/com/acme/refs/Tally.java	663	724
+site	src/main/java/com/acme/refs/Clerk.java	794	802	outside	INTERFACE	java.util.function.Supplier
+site	src/main/java/com/acme/refs/Clerk.java	803	808	decl	CLASS	Tally	src/main/java/com/acme/refs/Tally.java	108	918
+site	src/main/java/com/acme/refs/Clerk.java	818	823	decl	CONSTRUCTOR	<init>	src/main/java/com/acme/refs/Tally.java	205	222
+site	src/main/java/com/acme/refs/Clerk.java	838	842	local	LOCAL_VARIABLE	each
+site	src/main/java/com/acme/refs/Clerk.java	843	849	outside	METHOD	java.util.function.IntConsumer#accept
+site	src/main/java/com/acme/refs/Clerk.java	850	855	local	LOCAL_VARIABLE	twice
+site	src/main/java/com/acme/refs/Clerk.java	856	866	outside	METHOD	java.util.function.IntUnaryOperator#applyAsInt
+site	src/main/java/com/acme/refs/Clerk.java	867	871	local	LOCAL_VARIABLE	note
+site	src/main/java/com/acme/refs/Clerk.java	872	878	outside	METHOD	java.lang.String#length
+site	src/main/java/com/acme/refs/Clerk.java	883	888	local	LOCAL_VARIABLE	block
+site	src/main/java/com/acme/refs/Clerk.java	889	895	outside	METHOD	java.lang.String#length
+site	src/main/java/com/acme/refs/Clerk.java	900	901	local	LOCAL_VARIABLE	p
+site	src/main/java/com/acme/refs/Clerk.java	913	918	decl	FIELD	tally	src/main/java/com/acme/refs/Clerk.java	230	271
+site	src/main/java/com/acme/refs/Clerk.java	919	924	decl	FIELD	total	src/main/java/com/acme/refs/Tally.java	156	166
+site	src/main/java/com/acme/refs/Clerk.java	927	932	decl	FIELD	tally	src/main/java/com/acme/refs/Clerk.java	230	271
+site	src/main/java/com/acme/refs/Clerk.java	933	938	decl	METHOD	count	src/main/java/com/acme/refs/Tally.java	730	771
+site	src/main/java/com/acme/refs/Clerk.java	943	948	local	LOCAL_VARIABLE	fresh
+site	src/main/java/com/acme/refs/Clerk.java	949	952	outside	METHOD	java.util.function.Supplier#get
+site	src/main/java/com/acme/refs/Clerk.java	955	960	decl	FIELD	total	src/main/java/com/acme/refs/Tally.java	156	166
+file	src/main/java/com/acme/refs/Entry.java	744f2565b5710604
+site	src/main/java/com/acme/refs/Entry.java	8	11	package	com
+site	src/main/java/com/acme/refs/Entry.java	12	16	package	com.acme
+site	src/main/java/com/acme/refs/Entry.java	17	21	package	com.acme.refs
+site	src/main/java/com/acme/refs/Entry.java	106	110	decl	ENUM	Kind	src/main/java/com/acme/refs/Kind.java	101	219
+site	src/main/java/com/acme/refs/Entry.java	165	169	decl	FIELD	kind	src/main/java/com/acme/refs/Entry.java	106	115
+site	src/main/java/com/acme/refs/Entry.java	170	174	decl	FIELD	sign	src/main/java/com/acme/refs/Kind.java	148	163
+site	src/main/java/com/acme/refs/Entry.java	177	183	decl	RECORD_COMPONENT	amount	src/main/java/com/acme/refs/Entry.java	117	127
+site	src/main/java/com/acme/refs/Entry.java	205	210	decl	RECORD	Entry	src/main/java/com/acme/refs/Entry.java	93	284
+site	src/main/java/com/acme/refs/Entry.java	250	255	decl	IMPLICIT_CONSTRUCTOR	Entry	src/main/java/com/acme/refs/Entry.java	93	284
+site	src/main/java/com/acme/refs/Entry.java	256	260	decl	ENUM	Kind	src/main/java/com/acme/refs/Kind.java	101	219
+site	src/main/java/com/acme/refs/Entry.java	261	266	decl	ENUM_CONSTANT	DEBIT	src/main/java/com/acme/refs/Kind.java	117	125
+site	src/main/java/com/acme/refs/Entry.java	268	274	local	PARAMETER	amount
+file	src/main/java/com/acme/refs/Implicit.java	59270dd306029e9
+site	src/main/java/com/acme/refs/Implicit.java	8	11	package	com
+site	src/main/java/com/acme/refs/Implicit.java	12	16	package	com.acme
+site	src/main/java/com/acme/refs/Implicit.java	17	21	package	com.acme.refs
+site	src/main/java/com/acme/refs/Implicit.java	31	35	package	java
+site	src/main/java/com/acme/refs/Implicit.java	36	40	package	java.lang
+site	src/main/java/com/acme/refs/Implicit.java	41	51	package	java.lang.annotation
+site	src/main/java/com/acme/refs/Implicit.java	52	63	outside	ENUM	java.lang.annotation.ElementType
+site	src/main/java/com/acme/refs/Implicit.java	72	76	package	java
+site	src/main/java/com/acme/refs/Implicit.java	77	81	package	java.lang
+site	src/main/java/com/acme/refs/Implicit.java	82	92	package	java.lang.annotation
+site	src/main/java/com/acme/refs/Implicit.java	93	99	outside	ANNOTATION_TYPE	java.lang.annotation.Target
+site	src/main/java/com/acme/refs/Implicit.java	243	249	outside	ANNOTATION_TYPE	java.lang.annotation.Target
+site	src/main/java/com/acme/refs/Implicit.java	250	261	outside	ENUM	java.lang.annotation.ElementType
+site	src/main/java/com/acme/refs/Implicit.java	262	270	outside	ENUM_CONSTANT	java.lang.annotation.ElementType#TYPE_USE
+site	src/main/java/com/acme/refs/Implicit.java	475	479	decl	ANNOTATION_TYPE	Mark	src/main/java/com/acme/refs/Implicit.java	242	294
+site	src/main/java/com/acme/refs/Implicit.java	480	486	decl	CLASS	Marked	src/main/java/com/acme/refs/Implicit.java	381	437
+site	src/main/java/com/acme/refs/Implicit.java	523	528	decl	CONSTRUCTOR	<init>	src/main/java/com/acme/refs/Implicit.java	411	431
+site	src/main/java/com/acme/refs/Implicit.java	737	743	decl	CLASS	Spread	src/main/java/com/acme/refs/Implicit.java	644	700
+site	src/main/java/com/acme/refs/Implicit.java	932	938	decl	CLASS	Secret	src/main/java/com/acme/refs/Implicit.java	840	895
+site	src/main/java/com/acme/refs/Implicit.java	1075	1076	decl	FIELD	y	src/main/java/com/acme/refs/Implicit.java	1022	1027
+site	src/main/java/com/acme/refs/Implicit.java	1114	1120	outside	CLASS	java.lang.Object
+site	src/main/java/com/acme/refs/Implicit.java	1138	1139	local	PARAMETER	o
+site	src/main/java/com/acme/refs/Implicit.java	1151	1153	decl	RECORD	Pt	src/main/java/com/acme/refs/Implicit.java	1005	1093
+site	src/main/java/com/acme/refs/Implicit.java	1190	1191	local	BINDING_VARIABLE	a
+site	src/main/java/com/acme/refs/Implicit.java	1194	1195	local	BINDING_VARIABLE	b
+file	src/main/java/com/acme/refs/Kind.java	f6f52fa6a461e087
+site	src/main/java/com/acme/refs/Kind.java	8	11	package	com
+site	src/main/java/com/acme/refs/Kind.java	12	16	package	com.acme
+site	src/main/java/com/acme/refs/Kind.java	17	21	package	com.acme.refs
+site	src/main/java/com/acme/refs/Kind.java	194	198	outside	FIELD	com.acme.refs.Kind#this
+site	src/main/java/com/acme/refs/Kind.java	199	203	decl	FIELD	sign	src/main/java/com/acme/refs/Kind.java	148	163
+site	src/main/java/com/acme/refs/Kind.java	206	210	local	PARAMETER	sign
+file	src/main/java/com/acme/refs/Note.java	e8b882080eb4c1ee
+site	src/main/java/com/acme/refs/Note.java	8	11	package	com
+site	src/main/java/com/acme/refs/Note.java	12	16	package	com.acme
+site	src/main/java/com/acme/refs/Note.java	17	21	package	com.acme.refs
+site	src/main/java/com/acme/refs/Note.java	119	125	outside	CLASS	java.lang.String
+file	src/main/java/com/acme/refs/Tally.java	750a76fc59d55d0e
+site	src/main/java/com/acme/refs/Tally.java	8	11	package	com
+site	src/main/java/com/acme/refs/Tally.java	12	16	package	com.acme
+site	src/main/java/com/acme/refs/Tally.java	17	21	package	com.acme.refs
+site	src/main/java/com/acme/refs/Tally.java	255	259	decl	CONSTRUCTOR	<init>	src/main/java/com/acme/refs/Tally.java	205	222
+site	src/main/java/com/acme/refs/Tally.java	271	276	decl	FIELD	total	src/main/java/com/acme/refs/Tally.java	156	166
+site	src/main/java/com/acme/refs/Tally.java	279	284	local	PARAMETER	start
+site	src/main/java/com/acme/refs/Tally.java	430	435	decl	FIELD	total	src/main/java/com/acme/refs/Tally.java	156	166
+site	src/main/java/com/acme/refs/Tally.java	439	445	local	PARAMETER	amount
+site	src/main/java/com/acme/refs/Tally.java	455	460	decl	FIELD	count	src/main/java/com/acme/refs/Tally.java	133	151
+site	src/main/java/com/acme/refs/Tally.java	554	558	decl	METHOD	post	src/main/java/com/acme/refs/Tally.java	345	469
+site	src/main/java/com/acme/refs/Tally.java	559	564	local	PARAMETER	first
+site	src/main/java/com/acme/refs/Tally.java	575	579	outside	FIELD	com.acme.refs.Tally#this
+site	src/main/java/com/acme/refs/Tally.java	580	584	decl	METHOD	post	src/main/java/com/acme/refs/Tally.java	345	469
+site	src/main/java/com/acme/refs/Tally.java	585	591	local	PARAMETER	second
+site	src/main/java/com/acme/refs/Tally.java	708	713	local	PARAMETER	value
+site	src/main/java/com/acme/refs/Tally.java	759	764	decl	FIELD	count	src/main/java/com/acme/refs/Tally.java	133	151
+site	src/main/java/com/acme/refs/Tally.java	864	871	local	PARAMETER	amounts
+site	src/main/java/com/acme/refs/Tally.java	887	891	decl	METHOD	post	src/main/java/com/acme/refs/Tally.java	345	469
+site	src/main/java/com/acme/refs/Tally.java	892	898	local	LOCAL_VARIABLE	amount
 file	src/main/java/com/acme/shop/Cart.java	88d2320090399463
 site	src/main/java/com/acme/shop/Cart.java	8	11	package	com
 site	src/main/java/com/acme/shop/Cart.java	12	16	package	com.acme

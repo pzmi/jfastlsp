@@ -2302,12 +2302,93 @@ but follow in lane CLI (M2). Starts after the go decision.
   roots, so `ModuleIndex`'s `missing_generated_roots` is unknown, not 0: when annotation
   processors are detected (a processor path, or a known processor's annotation in a summary) and
   the roots are unknown, report `GeneratedSourcesMissing` rather than claim `complete`.
+- **As built (IDX-11, 2026-11-24):** `queries::references` (`ReferencesQuery`: the position,
+  `exact_only`, `include_declaration`) over the pinned generation, sharing definition's binding
+  (`bind`): the target is the declaration under the cursor, or what a use is proved bound to
+  (`exact`); otherwise every site of the name is `possible` and the answer `TargetUnresolved`.
+  **The superset is by name, never by proof:** every indexed summary's own reference sites of the
+  target's simple name (never the IDX-08 name list), less only what Java rules out without name
+  resolution (`references::compatible`: a call of a type or a field, `new` of a method, a type use
+  of a method; an argument count no parameter list accepts, varargs counted; outside the file of a
+  `private` target and outside the package of a package-private one, JLS 6.6.1), plus each import
+  naming the target in a qualifier (`import a.Outer.Inner;`, `import static a.Type.m;`: the
+  extractor keeps only an import's last segment, and the differential found javac binding the
+  others). A site `resolve::prove` (IDX-10's allowlist) binds to the target is `exact`; every
+  other candidate stays `possible` with its reason, a site proved bound elsewhere included, so the
+  superset does not lean on the proofs; files are read and proved 16 at a time, one parse per file
+  (`SyntaxIndexer::sites_syntax`). **`complete`** starts from the pin (indexed, fresh, watched, no
+  pending change) and is withdrawn with a reason for: an unresolved target; `ImplicitUses` (a
+  method or record component whose type's hierarchy leaves the index or has `Object`'s name, a
+  parameterless or enum constructor, an annotation's `value`); `GeneratedSourcesUnknown` (a file
+  uses a known annotation processor, `resolve::PROCESSOR_PACKAGES`); `TargetDeclaredTwice` (the
+  top-level type's qualified name declared twice: source sets not told apart; `exact` demoted);
+  deadline, `ModuleStale`, `ResultsCapped` (20,000) and `PossibleLeftOut` (`exact_only`); and,
+  for references and definitions alike, `SyntaxErrors` when a file of the view had a syntax error
+  when summarised (the parser's recovery may lose sites): a flag of the summary
+  (`SummaryParts::syntax_errors`, set by the view service from `Indexed.diagnostics`, kept by the
+  store from its format 2: an older entry is a miss, never migrated). Hover
+  on a declaration counts its references (`Hover::references`, `12 exact, 3 possible, complete`)
+  from the scan, reading and proving only the declaration's own file. Four `IncompleteReason`s
+  were added, and `SyntaxErrors` after the review (wire strings, additive). Tests: the javac
+  differential of references (`jfl-adapter-java`'s `tests/definitions/references.rs`: 200
+  declarations of `shop`, 184 javac sites, 66 exact; 1,208 of the generated corpus, 601 sites, 232
+  exact; 183 uses of `shop`, 1,733 sites; none missing, none wrong), the completeness oracle and
+  its planted defect, `shop`'s new
+  `com.acme.refs` fixtures (comments, strings, a text block, method references, `this(…)`,
+  `super(…)`, an enum constructor, an annotation's `value`, a record's accessor, varargs; and after
+  the review `Implicit.java`: `super(…)` on an annotated superclass, a variable-arity and a
+  private constructor reached by implicit `super()`, a record pattern), the
+  javac oracle extended to method references (`T::new` as a constructor, as `new T(…)` is), and
+  component tests of each reason in `tests/queries.rs`. Mutation checks, each made by hand and
+  reverted, each failing a named test: one file ignored by the scan (the differential and the
+  oracle), method references, import qualifiers, varargs arity, any proof taken as `exact`, and
+  each completeness reason ignored (implicit uses, twice, processors, deadline, stale, cap).
+- **Fixed after the review (IDX-11, 2026-11-24):** `super(…)` on a superclass with a type-use
+  annotation (`extends @A B`) had no site (`rightmost_type_name` now reads through
+  `annotated_type`, for `new` and `::new` too); a constructor a zero-argument call reaches through
+  variable arity, or a private one a nested subclass's implicit `super()` calls, and a record
+  component or its accessor (record patterns, JLS 14.30.2) now say `ImplicitUses`; a syntax error
+  in the view withdraws `complete` (above). These implicit uses have no positioned tree, so no
+  oracle sees them: `references::implicit`'s documentation names the component test of each rule.
+- **Decided (orchestrator, 2026-11-24):** `resolve::PROCESSOR_PACKAGES` stays as built,
+  `jakarta.persistence` and `javax.inject` included: conservative and honest until PROJ knows the
+  processor path (every medium answer is then incomplete).
+- **Decided (IDX-11, 2026-11-24):** the IDX-08 limit (`decode_declarations` trusts the head's
+  name list) is accounted for, not resolved: references read each summary's own sites, and at the
+  small and medium tier the generation holds whole summaries (`SummaryStore::get`); the large
+  tier's references path must read the sites from the store too, or check the list against them,
+  before it may claim `complete` (Left). The orchestrator's processor rule above is reported as
+  `GeneratedSourcesUnknown` (how many files use a known processor), not `GeneratedSourcesMissing`,
+  whose count of missing roots would be made up before the project model names any. Hover's
+  reference summary counts unread candidates as
+  `possible` rather than reading every file: reading them took 22–28 ms p50 and 84–117 ms p95 on
+  medium's common names, past the `jfl hover` row; counted, 11.2 and 16.1 ms.
+- **Left after IDX-11:**
+  - the large tier (DEC-03): reference sites from the store through the name postings (plan
+    §5.5), with the name list checked or not used;
+  - the known-processor list is a heuristic towards `complete=false`; PROJ's processor path and
+    generated roots replace it (on medium every answer is incomplete for `jakarta.persistence` and
+    `javax.inject` imports: a decision for the owner whether those stay on the list);
+  - a bytecode oracle for implicit uses: compile the fixtures, read each class file's
+    `invokespecial`, `invokevirtual` and `invokeinterface` targets, and require each call in
+    `exact ∪ possible` of its target or the answer incomplete with a reason covering it (implicit
+    `super()`, record accessors, synthetic calls are claims pinned by component tests until then);
+  - hover's counts read only the declaration's own file, so a candidate file changed after the pin
+    raises no `ModuleStale` there while `refs` would (LSP-03 maps hover's summary);
+  - the multi-module fixture's oracle runs (PROJ-02), module visibility narrowing the scan (M3);
+  - the CLI's `jfl refs` and `--exact-only` (M2), the LSP mapping of references and of hover's
+    summary (LSP-02, LSP-03);
+  - a `possible` site whose receiver's type syntax gives (a field's or parameter's declared type)
+    could be proved by SEM-*; today only the allowlist's constructs are `exact` (3 of 39,371 sites
+    for medium's common names, 46 of 169 for small's rare ones).
 - **Accept:**
-  - [ ] the completeness oracle passes for every module and seed in the gate's budget; a planted defect (ignore one file) makes it fail
-  - [ ] references inside comments and strings never appear (golden cases)
-  - [ ] an unindexed or stale file makes `complete=false` with its reason (component test)
-  - [ ] runs on the bench corpus (small at least, `just bench`) and reports the metrics it affects; its correctness tests also run against the real-corpus cases that apply (BENCH-05)
-- **Impact:** none (internal).
+  - [x] the completeness oracle passes for every module and seed in the gate's budget; a planted defect (ignore one file) makes it fail: `jfl-adapter-java`'s `tests/definitions/references.rs`, `should_find_every_added_use_or_say_incomplete_when_the_oracle_adds_one_to_each_project` (48 seeded trials over each of `shop` and the generated corpus, each one module before M3) and `should_find_a_counterexample_when_the_index_ignores_the_edited_file`; the multi-module fixture is PROJ-02's
+  - [x] references inside comments and strings never appear (golden cases): `tests/queries.rs`'s `refs.method.comments-and-strings` and `refs.field.text-block-and-comment` (Javadoc, line and block comments, a string, a text block)
+  - [x] an unindexed or stale file makes `complete=false` with its reason (component test): `should_answer_incomplete_with_its_reason_when_a_file_is_pending_stale_or_unwatched`
+  - [x] runs on the bench corpus (small at least, `just bench`) and reports the metrics it affects; its correctness tests also run against the real-corpus cases that apply (BENCH-05): `just bench-queries small` and `medium` (`doc/bench/README.md`); BENCH-05 has no cases yet
+  - [x] (orchestrator) javac's references within `exact ∪ possible`, every `exact` javac's, for every declaration of the fixture projects and the generated corpus: `should_hold_every_javac_site_and_only_javac_s_as_exact_when_any_declaration_of_shop_is_asked`, `…_of_the_generated_corpus_is_asked`, `should_hold_every_javac_site_of_the_bound_declaration_when_refs_are_asked_at_a_use`
+- **Impact:** protocol (additive: five `incomplete_because` wordings); cache format (the store's
+  entry format 2: the syntax-error flag); fixtures (`projects/shop`'s `com.acme.refs`, its summaries, `shop.tsv` re-recorded with member references, two query goldens); ports (`SyntaxIndexer::sites_syntax`, `Sources::sites_syntax`, provided methods); tooling (`tools/javac-bindings` records method references).
 
 #### IDX-12: Daemon and IPC: lock, socket, spawn, reconnect (daemon driver)
 - **Depends on:** IDX-03, IDX-09, FORMAL-04. **Model:** deep. **Size:** L. **Parallel with:** IDX-11.

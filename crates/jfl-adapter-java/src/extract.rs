@@ -695,7 +695,10 @@ fn is_constructor_owner(grammar: &Grammar, node: Node<'_>) -> bool {
     kind == k.class_declaration || kind == k.enum_declaration || kind == k.record_declaration
 }
 
-/// The simple name of a type as written: `C` of `a.b.C<T>`.
+/// The simple name of a type as written: `C` of `a.b.C<T>` and of `@A C` (an annotated type,
+/// as in `extends @A C`: a `super(…)` there names `C`, IDX-11's review).
+///
+/// Pinned by: `extract::tests::should_name_the_superclass_when_super_is_called_on_an_annotated_type`.
 fn rightmost_type_name<'t>(grammar: &Grammar, mut node: Node<'t>) -> Option<Node<'t>> {
     let k = &grammar.kinds;
     // Each step goes one level down; a type's nesting is bounded by the file's.
@@ -707,6 +710,12 @@ fn rightmost_type_name<'t>(grammar: &Grammar, mut node: Node<'t>) -> Option<Node
         }
         node = if kind == k.generic_type {
             node.named_child(0)?
+        } else if kind == k.annotated_type {
+            // The annotations come first; the type is the last child that is not a comment.
+            (0..node.named_child_count())
+                .rev()
+                .filter_map(|i| node.named_child(u32::try_from(i).ok()?))
+                .find(|n| !is_comment(grammar, *n))?
         } else if kind == k.scoped_type_identifier || kind == k.scoped_identifier {
             node.named_child(u32::try_from(node.named_child_count().checked_sub(1)?).ok()?)?
         } else {
@@ -1810,6 +1819,31 @@ mod tests {
 
     /// The most the extraction may spend per byte of a file it indexes: linear, with room.
     const LINEAR: usize = 64;
+
+    #[test]
+    fn should_name_the_superclass_when_super_is_called_on_an_annotated_type() {
+        // given: `super(…)` in a class whose superclass carries a type-use annotation, and the
+        // other places a type's simple name is read from (`new`, `::new`) annotated too
+        let text = "class S extends @TA B { S() { super(1); Object o = new @TA B(2); \
+                    java.util.function.IntFunction<B> f = @TA B::new; } }";
+        // when
+        let (result, _) = steps_per_byte(text);
+        // then
+        let indexed = result.unwrap();
+        let summary = &indexed.summary;
+        let creations: Vec<(&str, u32, u32)> = summary
+            .references()
+            .iter()
+            .filter(|r| matches!(r.shape, RefShape::New | RefShape::MethodRef))
+            .map(|r| (summary.str(r.name), r.range.start().get(), r.arity.0.into()))
+            .collect();
+        let at = |needle: &str| u32::try_from(text.find(needle).unwrap()).unwrap();
+        assert!(
+            creations.contains(&("B", at("super(1)"), 1)),
+            "{creations:?}"
+        );
+        assert!(creations.contains(&("B", at("B(2)"), 1)), "{creations:?}");
+    }
 
     #[test]
     fn should_stay_linear_when_a_comment_chain_precedes_a_field_with_many_declarators() {

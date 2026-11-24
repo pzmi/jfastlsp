@@ -17,6 +17,9 @@
 //!   (what each definition pays: the design taken, a parse at query time), and the walk from every
 //!   site of the file beyond its parse (what keeping the facts in the summary would add to the
 //!   index: the design not taken); p50, p95 and the largest file;
+//! - **references** (IDX-11) at method declarations picked by seed among names used at 200 or
+//!   more sites of the view (common) and at 1 to 10 (rare): the query alone, p50 and p95, and
+//!   what the answers held; and hover at the same declarations, which counts their references;
 //! - **workspace symbols**: the first three letters of picked declaration names (prefix), the
 //!   whole names (exact), their humps' initials (`NPE` for `NullPointerException`), and one
 //!   letter (the widest scan), and the prefixes again with a limit of one (the scan with a single
@@ -41,11 +44,12 @@ use jfl_adapter_fs::{FsConfig, FsSourceTree};
 use jfl_adapter_git::{GitConfig, GitRepoProbe};
 use jfl_adapter_java::{Grammar, GrammarSpec, JavaIndexer};
 use jfl_adapter_store::{Blake3, DiskSummaryStore};
-use jfl_application::queries::{definition, hover, workspace_symbols};
+use jfl_application::queries::{definition, hover, references, workspace_symbols};
 use jfl_application::source_tree::MTime;
 use jfl_application::{
     Answer, BlockingPool, ClockDeadline, CountingClock, Interrupted, Pinned, QueryCache,
-    QueryConfig, QueryError, ServiceConfig, Summary, SymbolQuery, ViewService, WallClock,
+    QueryConfig, QueryError, ReferencesQuery, ServiceConfig, Summary, SymbolQuery, ViewService,
+    WallClock,
 };
 use jfl_domain::{
     ByteOffset, ByteRange, Envelope, FileUri, Freshness, LineIndex, PositionEncoding, RelPath,
@@ -389,8 +393,27 @@ fn main() -> Result<(), String> {
     let mut sites: Vec<(RelPath, u32)> = Vec::new();
     let mut by_file: Vec<(RelPath, Vec<ByteRange>)> = Vec::new();
     let mut names: Vec<String> = Vec::new();
+    // Methods by name, and how many reference sites of the view use each name.
+    let mut methods: Vec<(RelPath, u32, String)> = Vec::new();
+    let mut uses: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
     for (path, entry) in &answer.generation.index {
         if let Some(Summary::Indexed { summary, .. }) = &entry.summary {
+            for r in summary.references() {
+                let count = uses.entry(summary.str(r.name).to_owned()).or_default();
+                *count = count.saturating_add(1);
+            }
+            methods.extend(
+                summary
+                    .declarations()
+                    .filter(|(_, d)| d.kind == jfl_domain::DeclKind::Method)
+                    .map(|(_, d)| {
+                        (
+                            path.clone(),
+                            d.name_range.start().get(),
+                            summary.str(d.name).to_owned(),
+                        )
+                    }),
+            );
             sites.extend(
                 summary
                     .references()
@@ -561,7 +584,105 @@ fn main() -> Result<(), String> {
         );
     }
     service.finish(answer.id).map_err(|e| e.to_string())?;
+
+    // References (IDX-11): methods of widely used names and of rare ones, by how many sites of
+    // the view use the name, asked at the declaration; hover there counts them too.
+    let sites_of = |name: &str| uses.get(name).copied().unwrap_or(0);
+    let common: Vec<&(RelPath, u32, String)> = methods
+        .iter()
+        .filter(|m| sites_of(&m.2) >= COMMON_SITES)
+        .collect();
+    let rare: Vec<&(RelPath, u32, String)> = methods
+        .iter()
+        .filter(|m| (1..=RARE_SITES).contains(&sites_of(&m.2)))
+        .collect();
+    for (label, pool) in [("common names", &common), ("rare names", &rare)] {
+        let mut alone = Vec::new();
+        let mut hovers = Vec::new();
+        let (mut exact, mut possible, mut complete, mut asked) =
+            (0_usize, 0_usize, 0_usize, 0_usize);
+        let mut widest = 0_usize;
+        let mut reasons: std::collections::BTreeMap<String, usize> =
+            std::collections::BTreeMap::new();
+        for _ in 0..REFS_QUERIES {
+            let Some((path, offset, name)) = pool.get(picker.below(pool.len())).copied() else {
+                break;
+            };
+            let uri = root.join(path).map_err(|e| e.to_string())?;
+            let bytes = std::fs::read(Path::new(checkout).join(path.as_str()))
+                .map_err(|e| e.to_string())?;
+            let text = String::from_utf8_lossy(jfl_application::syntax_indexer::strip_bom(&bytes))
+                .into_owned();
+            let lines = LineIndex::new(&text).map_err(|e| e.to_string())?;
+            let Ok(position) = lines.position(ByteOffset::new(*offset), encoding) else {
+                continue;
+            };
+            let answer: Answer = block_on(service.request(&uri)).map_err(|e| e.to_string())?;
+            let pinned = Pinned {
+                answer: &answer,
+                head: None,
+                freshness: freshness(),
+            };
+            let sources = service.sources();
+            let started = Instant::now();
+            let deadline = ClockDeadline::new(&clock, config.references_budget);
+            let envelope = block_on(references(
+                &pinned,
+                &sources,
+                ReferencesQuery {
+                    position,
+                    ..ReferencesQuery::default()
+                },
+                encoding,
+                &config,
+                &deadline,
+                &cache,
+            ));
+            alone.push(started.elapsed());
+            if let Ok(envelope) = &envelope {
+                asked = asked.saturating_add(1);
+                exact = exact.saturating_add(envelope.exact().len());
+                possible = possible.saturating_add(envelope.possible().len());
+                complete = complete.saturating_add(usize::from(envelope.complete()));
+                widest = widest.max(sites_of(name));
+                for reason in envelope.incomplete_because() {
+                    let text = reason.to_string();
+                    // The words before a count: one key per kind of reason.
+                    let key = text.split(" (").next().unwrap_or(&text).to_owned();
+                    let n = reasons.entry(key).or_default();
+                    *n = n.saturating_add(1);
+                }
+            }
+            let started = Instant::now();
+            let deadline = ClockDeadline::new(&clock, config.definition_budget);
+            let _ = block_on(hover(
+                &pinned, &sources, position, encoding, &config, &deadline, &cache,
+            ));
+            hovers.push(started.elapsed());
+            service.finish(answer.id).map_err(|e| e.to_string())?;
+        }
+        println!(
+            "  {}; {asked} answered: {exact} exact, {possible} possible, {complete} complete; widest name {widest} sites; {} methods to pick from",
+            line(&format!("references, {label}, query alone"), &alone),
+            pool.len()
+        );
+        println!(
+            "  {}",
+            line(
+                &format!("hover on a declaration, {label} (counts its references)"),
+                &hovers
+            )
+        );
+        println!("  references, {label}, why incomplete: {reasons:?}");
+    }
     drop(service);
     let _ = std::fs::remove_dir_all(&store);
     Ok(())
 }
+
+/// Reference queries of each kind.
+const REFS_QUERIES: usize = 50;
+/// A method name used at this many sites of the view or more is a common one.
+const COMMON_SITES: usize = 200;
+/// One used at this many or fewer is a rare one.
+const RARE_SITES: usize = 10;

@@ -1,0 +1,23 @@
+{
+  "package": "com.acme.refs",
+  "imports": [],
+  "declarations": [
+    {"annotations":[],"at":"4:1-12:2","id":0,"javadoc":"3:1-3:69","kind":"record","modifiers":[],"name":"Entry","name_at":"4:8-4:13","params":[],"parent":null,"permits":[],"signature":"record Entry(Kind kind, int amount)","supertypes":[],"symbol":"com.acme.refs.Entry"},
+    {"annotations":[],"at":"4:14-4:23","id":1,"javadoc":null,"kind":"record_component","modifiers":[],"name":"kind","name_at":"4:19-4:23","params":[],"parent":0,"permits":[],"signature":"Kind kind","supertypes":[],"symbol":"com.acme.refs.Entry#kind"},
+    {"annotations":[],"at":"4:25-4:35","id":2,"javadoc":null,"kind":"record_component","modifiers":[],"name":"amount","name_at":"4:29-4:35","params":[],"parent":0,"permits":[],"signature":"int amount","supertypes":[],"symbol":"com.acme.refs.Entry#amount"},
+    {"annotations":[],"at":"5:5-7:6","id":3,"javadoc":null,"kind":"method","modifiers":[],"name":"signed","name_at":"5:9-5:15","params":[],"parent":0,"permits":[],"signature":"int signed()","supertypes":[],"symbol":"com.acme.refs.Entry#signed()"},
+    {"annotations":[],"at":"9:5-11:6","id":4,"javadoc":null,"kind":"method","modifiers":["static"],"name":"debit","name_at":"9:18-9:23","params":["int"],"parent":0,"permits":[],"signature":"static Entry debit(int amount)","supertypes":[],"symbol":"com.acme.refs.Entry#debit(int)"}
+  ],
+  "references": [
+    {"at":"4:14-4:18","name":"Kind","shape":"type"},
+    {"at":"6:16-6:20","name":"kind","shape":"name"},
+    {"at":"6:21-6:25","name":"sign","shape":"qualified_name"},
+    {"arity":0,"at":"6:28-6:34","name":"amount","shape":"call"},
+    {"at":"9:12-9:17","name":"Entry","shape":"type"},
+    {"arity":2,"at":"10:20-10:25","name":"Entry","shape":"new"},
+    {"at":"10:26-10:30","name":"Kind","shape":"name"},
+    {"at":"10:31-10:36","name":"DEBIT","shape":"qualified_name"}
+  ],
+  "diagnostics": [],
+  "diagnostics_dropped": 0
+}

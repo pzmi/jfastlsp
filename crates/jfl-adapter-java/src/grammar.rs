@@ -129,6 +129,7 @@ names!(
         type_identifier = "type_identifier", true;
         scoped_type_identifier = "scoped_type_identifier", true;
         generic_type = "generic_type", true;
+        annotated_type = "annotated_type", true;
         scoped_identifier = "scoped_identifier", true;
         block_comment = "block_comment", true;
         line_comment = "line_comment", true;
@@ -395,7 +396,7 @@ mod tests {
             kinds.err(),
             fields.err()
         );
-        assert_eq!(KIND_NAMES.len(), 27);
+        assert_eq!(KIND_NAMES.len(), 28);
         assert!(!FIELD_NAMES.is_empty() && !CAPTURE_NAMES.is_empty());
     }
 

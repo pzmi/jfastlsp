@@ -17,6 +17,8 @@
 
 #[cfg(test)]
 mod generator;
+#[cfg(test)]
+mod references;
 
 #[cfg(test)]
 mod given {
@@ -24,10 +26,11 @@ mod given {
     use std::sync::Arc;
 
     use jfl_adapter_java::{Grammar, GrammarSpec, JavaIndexer};
-    use jfl_application::queries::definition;
+    use jfl_application::queries::{definition, references};
+    use jfl_application::syntax_indexer::SyntaxIndexer;
     use jfl_application::{
-        Answer, ClockDeadline, CountingClock, Pinned, QueryCache, QueryConfig, ServiceConfig,
-        ViewService,
+        Answer, ClockDeadline, CountingClock, Pinned, QueryCache, QueryConfig, ReferencesQuery,
+        ServiceConfig, ViewService,
     };
     use jfl_domain::{
         ByteOffset, DeclKind, Envelope, FileSummary, FileUri, Freshness, LineIndex, Position,
@@ -44,14 +47,8 @@ mod given {
     pub(crate) const ROOT: &str = "/w/m";
     pub(crate) const UTF16: PositionEncoding = PositionEncoding::Utf16;
 
-    pub(crate) type Service = ViewService<
-        FakeSourceTree,
-        FakeRepoProbe,
-        JavaIndexer<InlinePool>,
-        MemorySummaryStore,
-        FakeWallClock,
-        FnvHasher,
-    >;
+    pub(crate) type Service<X = JavaIndexer<InlinePool>> =
+        ViewService<FakeSourceTree, FakeRepoProbe, X, MemorySummaryStore, FakeWallClock, FnvHasher>;
 
     pub(crate) fn fixtures() -> PathBuf {
         Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/javac")
@@ -66,13 +63,49 @@ mod given {
     }
 
     /// A project's files, by path under the project, and the view service over a copy of them.
-    pub(crate) struct World {
+    pub(crate) struct World<X: SyntaxIndexer = JavaIndexer<InlinePool>> {
         files: Vec<(String, Vec<u8>)>,
-        service: Service,
+        service: Service<X>,
+    }
+
+    /// The fixture project `shop`'s files.
+    pub(crate) fn shop_files() -> Vec<(String, Vec<u8>)> {
+        golden::corpus("projects/shop")
+            .unwrap()
+            .into_iter()
+            .map(|f| {
+                (
+                    f.path.strip_prefix("projects/shop/").unwrap().to_owned(),
+                    f.bytes,
+                )
+            })
+            .collect()
+    }
+
+    /// The generated corpus's files, as committed.
+    pub(crate) fn generated_files() -> Vec<(String, Vec<u8>)> {
+        golden::files_under(&fixtures().join("generated"), ".java").unwrap()
     }
 
     impl World {
         pub(crate) fn new(files: Vec<(String, Vec<u8>)>) -> Self {
+            World::with_indexer(files, indexer())
+        }
+
+        /// The fixture project `shop`.
+        pub(crate) fn shop() -> Self {
+            Self::new(shop_files())
+        }
+
+        /// The generated corpus as committed.
+        pub(crate) fn generated() -> Self {
+            Self::new(generated_files())
+        }
+    }
+
+    impl<X: SyntaxIndexer> World<X> {
+        /// The view service over `files`, indexed by `x`.
+        pub(crate) fn with_indexer(files: Vec<(String, Vec<u8>)>, x: X) -> Self {
             let tree = FakeSourceTree::new(uri("/w"), 1024);
             let probe = FakeRepoProbe::new();
             for (path, bytes) in &files {
@@ -89,7 +122,7 @@ mod given {
                 Arc::new(CountingClock::starting_at(1)),
             );
             let service = ViewService::new(
-                (tree, probe, indexer(), store),
+                (tree, probe, x, store),
                 FakeWallClock::at(1_800_000_000),
                 FnvHasher::default(),
                 ServiceConfig::new("t1"),
@@ -97,24 +130,8 @@ mod given {
             Self { files, service }
         }
 
-        /// The fixture project `shop`.
-        pub(crate) fn shop() -> Self {
-            let files = golden::corpus("projects/shop")
-                .unwrap()
-                .into_iter()
-                .map(|f| {
-                    (
-                        f.path.strip_prefix("projects/shop/").unwrap().to_owned(),
-                        f.bytes,
-                    )
-                })
-                .collect();
-            Self::new(files)
-        }
-
-        /// The generated corpus as committed.
-        pub(crate) fn generated() -> Self {
-            Self::new(golden::files_under(&fixtures().join("generated"), ".java").unwrap())
+        pub(crate) fn files(&self) -> &[(String, Vec<u8>)] {
+            &self.files
         }
 
         pub(crate) fn text(&self, path: &str) -> &str {
@@ -131,6 +148,36 @@ mod given {
 
         pub(crate) fn ask(&mut self, path: &str) -> Answer {
             block_on(self.service.request(&uri(&format!("{ROOT}/{path}")))).unwrap()
+        }
+
+        /// The references at byte `offset` of `path`.
+        pub(crate) fn refs(&mut self, path: &str, offset: u32, cache: &QueryCache) -> Envelope {
+            let position = position(self.text(path), offset);
+            let answer = self.ask(path);
+            let pinned = Pinned {
+                answer: &answer,
+                head: None,
+                freshness: Freshness {
+                    synced_at: Some(UnixMillis(1_800_000_000_000)),
+                    pending_events: 0,
+                },
+            };
+            let clock = FakeWallClock::at(1_800_000_000);
+            let config = QueryConfig::default();
+            let deadline = ClockDeadline::new(&clock, config.references_budget);
+            block_on(references(
+                &pinned,
+                &self.service.sources(),
+                ReferencesQuery {
+                    position,
+                    ..ReferencesQuery::default()
+                },
+                UTF16,
+                &config,
+                &deadline,
+                cache,
+            ))
+            .unwrap()
         }
 
         /// The definition at byte `offset` of `path`.
@@ -194,7 +241,7 @@ mod given {
     /// A project's recording: each file's digest, and each site's binding by `(path, start, end)`.
     pub(crate) struct Recording {
         digests: Vec<(String, u64)>,
-        sites: std::collections::BTreeMap<(String, u32, u32), Binding>,
+        pub(crate) sites: std::collections::BTreeMap<(String, u32, u32), Binding>,
     }
 
     pub(crate) fn recording(project: &str) -> Recording {
@@ -262,7 +309,11 @@ mod given {
     }
 
     /// The recording is of exactly these files' bytes: a changed fixture needs a new recording.
-    pub(crate) fn assert_fresh(world: &World, recorded: &Recording, project: &str) {
+    pub(crate) fn assert_fresh<X: SyntaxIndexer>(
+        world: &World<X>,
+        recorded: &Recording,
+        project: &str,
+    ) {
         let now: Vec<(String, u64)> = world
             .files
             .iter()

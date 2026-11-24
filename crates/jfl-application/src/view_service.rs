@@ -546,6 +546,14 @@ where
     ) -> impl Future<Output = Option<SiteSyntax>> + Send {
         self.indexer.site_syntax(Arc::clone(text), name)
     }
+
+    fn sites_syntax(
+        &self,
+        text: &Arc<FileText>,
+        names: Vec<ByteRange>,
+    ) -> impl Future<Output = Vec<Option<SiteSyntax>>> + Send {
+        self.indexer.sites_syntax(Arc::clone(text), names)
+    }
 }
 
 /// The view service over the ports: `T` the source tree, `P` the repository probe, `X` the syntax
@@ -750,14 +758,18 @@ where
             );
         }
         match self.indexer.index(read.bytes).await {
-            Ok(indexed) => (
-                seen,
-                Summary::Indexed {
-                    key,
-                    summary: Arc::new(indexed.summary),
-                },
-                true,
-            ),
+            Ok(indexed) => {
+                // The mark travels with the summary into the store (IDX-11): references read it.
+                let broken = !indexed.diagnostics.is_empty() || indexed.diagnostics_dropped > 0;
+                (
+                    seen,
+                    Summary::Indexed {
+                        key,
+                        summary: Arc::new(indexed.summary.with_syntax_errors(broken)),
+                    },
+                    true,
+                )
+            }
             Err(_) => (seen, Summary::Gap, false),
         }
     }

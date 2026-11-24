@@ -20,10 +20,10 @@ pub(crate) const SEED: u64 = 0x1D10_2026_1119_0002;
 pub(crate) const CASES: usize = 32;
 
 /// SplitMix64: a small, well-mixed generator with no dependency.
-struct Rng(u64);
+pub(crate) struct Rng(pub(crate) u64);
 
 impl Rng {
-    fn next(&mut self) -> u64 {
+    pub(crate) fn next(&mut self) -> u64 {
         self.0 = self.0.wrapping_add(0x9E37_79B9_7F4A_7C15);
         let mut z = self.0;
         z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
@@ -32,7 +32,7 @@ impl Rng {
     }
 
     /// A number below `n` (n > 0).
-    fn below(&mut self, n: u64) -> u64 {
+    pub(crate) fn below(&mut self, n: u64) -> u64 {
         self.next().checked_rem(n).unwrap_or(0)
     }
 

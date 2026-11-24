@@ -31,6 +31,7 @@
 //! owner the rules found, never a same-name member of another type. A target is named only with
 //! its location.
 
+mod references;
 mod resolve;
 mod scan;
 mod symbols;
@@ -56,6 +57,7 @@ use crate::views::{FileSeen, Published};
 
 use resolve::{Cursor, FileEntry, Hit, Outcome, Resolver, Snapshot, Unproved};
 
+pub use references::{ReferenceCounts, ReferencesQuery, references};
 pub use symbols::{
     DocumentSymbol, DocumentSymbols, MAX_QUERY_BYTES, SymbolFilter, SymbolQuery, Symbols,
     WorkspaceSymbol, document_symbols, workspace_symbols,
@@ -72,16 +74,23 @@ pub struct QueryConfig {
     pub candidates: usize,
     /// The most workspace symbols listed when the query names no limit.
     pub symbols_limit: usize,
+    /// References' internal deadline (plan §2.7: 2 s).
+    pub references_budget: Duration,
+    /// The most reference sites a references answer lists; past it the answer says
+    /// `ResultsCapped`.
+    pub references_limit: usize,
 }
 
 impl Default for QueryConfig {
-    /// Plan §2.7's deadlines, 64 candidates and 100 symbols.
+    /// Plan §2.7's deadlines, 64 candidates, 100 symbols and 20,000 references.
     fn default() -> Self {
         Self {
             definition_budget: Duration::from_millis(300),
             symbols_budget: Duration::from_secs(2),
             candidates: 64,
             symbols_limit: 100,
+            references_budget: Duration::from_secs(2),
+            references_limit: 20_000,
         }
     }
 }
@@ -155,6 +164,16 @@ pub trait Sources: Sync {
         _name: ByteRange,
     ) -> impl Future<Output = Option<SiteSyntax>> + Send {
         core::future::ready(None)
+    }
+
+    /// [`Sources::site_syntax`] for each of `names` of `text`, in their order, over one parse:
+    /// what [`crate::SyntaxIndexer::sites_syntax`] gives. `None` proves nothing.
+    fn sites_syntax(
+        &self,
+        _text: &Arc<FileText>,
+        names: Vec<ByteRange>,
+    ) -> impl Future<Output = Vec<Option<SiteSyntax>>> + Send {
+        core::future::ready(vec![None; names.len()])
     }
 }
 
@@ -273,6 +292,18 @@ impl QueryCache {
     }
 }
 
+/// `completeness`, withdrawn when a file of the view had a syntax error: the parser's error
+/// recovery may have lost its declarations and sites, which every answer of the queries reads
+/// (before M3 the view is the target's one module).
+///
+/// Pinned by: `jfl-adapter-java`'s `tests/definitions/references.rs::should_say_syntax_errors_when_a_file_of_the_view_does_not_parse`.
+fn syntax_errors(completeness: Completeness, snapshot: &Snapshot) -> Completeness {
+    match snapshot.syntax_error_files() {
+        0 => completeness,
+        files => completeness.and(IncompleteReason::SyntaxErrors { files }),
+    }
+}
+
 /// The location of `range` in a file's text, in `encoding`.
 fn convert(text: &FileText, range: ByteRange, encoding: PositionEncoding) -> Option<Range> {
     text.lines.range(range, encoding).ok()
@@ -363,8 +394,31 @@ pub async fn definition<S: Sources, D: Deadline>(
     )
 }
 
-/// The shared core of definition and hover.
-async fn define<S: Sources, D: Deadline>(
+/// What the name at a position binds to, before an envelope is made of it: shared by definition,
+/// hover and references.
+#[derive(Debug, Clone)]
+struct Bound {
+    snapshot: Arc<Snapshot>,
+    /// The request's file in the snapshot.
+    request_file: u32,
+    /// Its text, read for the pinned key.
+    own: Arc<FileText>,
+    cursor: Cursor,
+    /// The hovered name's range in the request's file.
+    hovered: Option<Range>,
+    /// What it binds to, as [`admit`] lets it through.
+    outcome: Outcome,
+}
+
+/// [`bind`]'s answer: the binding, or no binding and how complete that is (nothing indexed at the
+/// position, or the deadline passed first), with the hovered range when one was found.
+enum Bind {
+    Bound(Bound),
+    Early(Completeness, Option<Range>),
+}
+
+/// Binds the name at `position` of the request's file over the pinned generation.
+async fn bind<S: Sources, D: Deadline>(
     pinned: &Pinned<'_>,
     sources: &S,
     position: Position,
@@ -372,18 +426,9 @@ async fn define<S: Sources, D: Deadline>(
     config: &QueryConfig,
     deadline: &D,
     cache: &QueryCache,
-) -> Result<Found, QueryError> {
+) -> Result<Bind, QueryError> {
     let answer = pinned.answer;
-    let mut completeness = answer.completeness.clone();
-    let parts = |completeness: Completeness| EnvelopeParts {
-        view: pinned.view(),
-        target: None,
-        exact: Vec::new(),
-        possible: Vec::new(),
-        completeness,
-        freshness: pinned.freshness,
-        position_encoding: encoding,
-    };
+    let completeness = answer.completeness.clone();
     let entry = answer
         .generation
         .index
@@ -394,13 +439,10 @@ async fn define<S: Sources, D: Deadline>(
         Some(Summary::Absent) => return Err(QueryError::NotInGeneration),
         // Not read yet, or not indexable: nothing proves what is at the position.
         Some(Summary::Gap | Summary::Pending) | None => {
-            return Ok(Found {
-                envelope: Envelope::new(parts(
-                    completeness.and(IncompleteReason::TargetUnresolved),
-                )),
-                range: None,
-                described: Vec::new(),
-            });
+            return Ok(Bind::Early(
+                completeness.and(IncompleteReason::TargetUnresolved),
+                None,
+            ));
         }
     };
     let own = sources
@@ -415,11 +457,7 @@ async fn define<S: Sources, D: Deadline>(
     }
     .and_then(|r| convert(&own, r, encoding));
     let Some(snapshot) = cache.snapshot(answer, deadline) else {
-        return Ok(Found {
-            envelope: Envelope::new(parts(completeness.deadline())),
-            range: hovered,
-            described: Vec::new(),
-        });
+        return Ok(Bind::Early(completeness.deadline(), hovered));
     };
     let request_file = snapshot
         .file_at(&answer.path)
@@ -451,13 +489,70 @@ async fn define<S: Sources, D: Deadline>(
     };
     if resolver.cut() {
         // Every lookup after the deadline answered "outside": the outcome is no answer.
-        return Ok(Found {
-            envelope: Envelope::new(parts(completeness.deadline())),
-            range: hovered,
-            described: Vec::new(),
-        });
+        return Ok(Bind::Early(completeness.deadline(), hovered));
     }
     let outcome = admit(cursor, outcome, proved);
+    Ok(Bind::Bound(Bound {
+        snapshot,
+        request_file,
+        own,
+        cursor,
+        hovered,
+        outcome,
+    }))
+}
+
+/// The shared core of definition and hover.
+async fn define<S: Sources, D: Deadline>(
+    pinned: &Pinned<'_>,
+    sources: &S,
+    position: Position,
+    encoding: PositionEncoding,
+    config: &QueryConfig,
+    deadline: &D,
+    cache: &QueryCache,
+) -> Result<Found, QueryError> {
+    let bound = bind(pinned, sources, position, encoding, config, deadline, cache).await?;
+    Ok(found(pinned, sources, encoding, config, deadline, bound).await)
+}
+
+/// The definition's envelope of what [`bind`] found.
+async fn found<S: Sources, D: Deadline>(
+    pinned: &Pinned<'_>,
+    sources: &S,
+    encoding: PositionEncoding,
+    config: &QueryConfig,
+    deadline: &D,
+    bound: Bind,
+) -> Found {
+    let answer = pinned.answer;
+    let parts = |completeness: Completeness| EnvelopeParts {
+        view: pinned.view(),
+        target: None,
+        exact: Vec::new(),
+        possible: Vec::new(),
+        completeness,
+        freshness: pinned.freshness,
+        position_encoding: encoding,
+    };
+    let Bound {
+        snapshot,
+        request_file,
+        own,
+        cursor: _,
+        hovered,
+        outcome,
+    } = match bound {
+        Bind::Bound(bound) => bound,
+        Bind::Early(completeness, range) => {
+            return Found {
+                envelope: Envelope::new(parts(completeness)),
+                range,
+                described: Vec::new(),
+            };
+        }
+    };
+    let mut completeness = syntax_errors(answer.completeness.clone(), &snapshot);
     // What the outcome lists, and how it is read.
     let mut target: Option<(Hit, TargetStatus)> = None;
     let mut exact: Vec<Hit> = Vec::new();
@@ -590,7 +685,7 @@ async fn define<S: Sources, D: Deadline>(
         completeness = completeness.and(IncompleteReason::TargetUnresolved);
     }
     let described = describe(&snapshot, &described, &read);
-    Ok(Found {
+    Found {
         envelope: Envelope::new(EnvelopeParts {
             target,
             exact,
@@ -599,7 +694,7 @@ async fn define<S: Sources, D: Deadline>(
         }),
         range: hovered,
         described,
-    })
+    }
 }
 
 /// Whether `site` has a shape `resolve::prove`'s allowlist can prove: a bare name or call, a type,
@@ -681,6 +776,9 @@ pub struct Hover {
     pub declarations: Vec<HoverDeclaration>,
     /// The module of the declarations (before M3, the worktree, `:`).
     pub module: ModuleName,
+    /// For a declaration under the cursor, its reference summary (plan §2.2: `12 exact, 3
+    /// possible, complete`), counted within the hover's deadline; `None` at a use.
+    pub references: Option<ReferenceCounts>,
 }
 
 impl Hover {
@@ -729,12 +827,40 @@ pub async fn hover<S: Sources, D: Deadline>(
     deadline: &D,
     cache: &QueryCache,
 ) -> Result<Hover, QueryError> {
-    let found = define(pinned, sources, position, encoding, config, deadline, cache).await?;
+    let bound = bind(pinned, sources, position, encoding, config, deadline, cache).await?;
+    // A declaration's reference summary (plan §2.2), within the hover's own deadline.
+    let references = match &bound {
+        Bind::Bound(bound) if matches!(bound.cursor, Cursor::Declaration(_)) => {
+            // Counted from the scan, with only the declaration's own file read and proved: a
+            // hover must not read every file a widely used name appears in (plan §1.7's hover
+            // row; `just bench-queries`).
+            let collected = references::collect(
+                pinned,
+                sources,
+                encoding,
+                config,
+                references::Asked {
+                    query: ReferencesQuery {
+                        position,
+                        ..ReferencesQuery::default()
+                    },
+                    counts_only: true,
+                },
+                deadline,
+                bound,
+            )
+            .await;
+            Some(ReferenceCounts::of_collected(&collected))
+        }
+        _ => None,
+    };
+    let found = found(pinned, sources, encoding, config, deadline, bound).await;
     Ok(Hover {
         envelope: found.envelope,
         range: found.range,
         declarations: found.described,
         module: ModuleName::worktree(),
+        references,
     })
 }
 

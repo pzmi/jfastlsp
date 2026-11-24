@@ -220,6 +220,17 @@ pub trait SyntaxIndexer: Send + Sync + 'static {
     ) -> impl Future<Output = Option<SiteSyntax>> + Send {
         core::future::ready(None)
     }
+
+    /// [`SyntaxIndexer::site_syntax`] for each of `names` of one file, in their order, over one
+    /// parse (references prove many sites of a file, IDX-11). The provided implementation gives
+    /// no facts, never looser than a real one.
+    fn sites_syntax(
+        &self,
+        _text: Arc<FileText>,
+        names: Vec<ByteRange>,
+    ) -> impl Future<Output = Vec<Option<SiteSyntax>>> + Send {
+        core::future::ready(vec![None; names.len()])
+    }
 }
 
 /// `bytes` without a leading byte-order mark.

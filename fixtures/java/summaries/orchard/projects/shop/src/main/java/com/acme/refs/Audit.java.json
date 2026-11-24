@@ -1,0 +1,21 @@
+{
+  "package": "com.acme.refs",
+  "imports": [],
+  "declarations": [
+    {"annotations":[],"at":"4:1-8:2","id":0,"javadoc":"3:1-3:36","kind":"class","modifiers":[],"name":"Audit","name_at":"4:7-4:12","params":[],"parent":null,"permits":[],"signature":"class Audit extends Tally","supertypes":["Tally"],"symbol":"com.acme.refs.Audit"},
+    {"annotations":[],"at":"5:5-7:6","id":1,"javadoc":null,"kind":"constructor","modifiers":[],"name":"Audit","name_at":"5:5-5:10","params":[],"parent":0,"permits":[],"signature":"Audit()","supertypes":[],"symbol":"com.acme.refs.Audit#<init>()"},
+    {"annotations":[],"at":"11:1-11:28","id":2,"javadoc":"10:1-10:76","kind":"class","modifiers":[],"name":"Spot","name_at":"11:7-11:11","params":[],"parent":null,"permits":[],"signature":"class Spot extends Tally","supertypes":["Tally"],"symbol":"com.acme.refs.Spot"},
+    {"annotations":[],"at":"14:1-19:2","id":3,"javadoc":"13:1-13:69","kind":"class","modifiers":[],"name":"Batch","name_at":"14:7-14:12","params":[],"parent":null,"permits":[],"signature":"class Batch","supertypes":[],"symbol":"com.acme.refs.Batch"},
+    {"annotations":[],"at":"15:5-18:6","id":4,"javadoc":null,"kind":"method","modifiers":[],"name":"run","name_at":"15:10-15:13","params":["Tally"],"parent":3,"permits":[],"signature":"void run(Tally tally)","supertypes":[],"symbol":"com.acme.refs.Batch#run(Tally)"}
+  ],
+  "references": [
+    {"at":"4:21-4:26","name":"Tally","shape":"type"},
+    {"arity":1,"at":"6:9-6:14","name":"Tally","shape":"new"},
+    {"at":"11:20-11:25","name":"Tally","shape":"type"},
+    {"at":"15:14-15:19","name":"Tally","shape":"type"},
+    {"arity":0,"at":"16:15-16:22","name":"postAll","shape":"qualified_call"},
+    {"arity":3,"at":"17:15-17:22","name":"postAll","shape":"qualified_call"}
+  ],
+  "diagnostics": [],
+  "diagnostics_dropped": 0
+}

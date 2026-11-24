@@ -1,0 +1,86 @@
+{
+  "schema_version": {
+    "major": 1,
+    "minor": 0
+  },
+  "position_encoding": "utf-16",
+  "query": {
+    "op": "refs",
+    "uri": "file:///w/m/src/main/java/com/acme/refs/Tally.java",
+    "line": 16,
+    "col": 17
+  },
+  "view": {
+    "worktree": "file:///w/m",
+    "head": null,
+    "generation": 1
+  },
+  "target": {
+    "symbol": "com.acme.refs.Tally#post(int)",
+    "status": "exact"
+  },
+  "exact": [],
+  "possible": [
+    {
+      "uri": "file:///w/m/src/main/java/com/acme/refs/Clerk.java",
+      "range": [
+        13,
+        14,
+        13,
+        18
+      ],
+      "reason": "receiver_type_unknown",
+      "why": "receiver type unknown"
+    },
+    {
+      "uri": "file:///w/m/src/main/java/com/acme/refs/Clerk.java",
+      "range": [
+        22,
+        34,
+        22,
+        38
+      ],
+      "reason": "method_reference",
+      "why": "method reference, matched by name"
+    },
+    {
+      "uri": "file:///w/m/src/main/java/com/acme/refs/Tally.java",
+      "range": [
+        24,
+        8,
+        24,
+        12
+      ],
+      "reason": "name_and_arity",
+      "why": "matched by name and arity (not proved)"
+    },
+    {
+      "uri": "file:///w/m/src/main/java/com/acme/refs/Tally.java",
+      "range": [
+        25,
+        13,
+        25,
+        17
+      ],
+      "reason": "name_and_arity",
+      "why": "matched by name and arity (not proved)"
+    },
+    {
+      "uri": "file:///w/m/src/main/java/com/acme/refs/Tally.java",
+      "range": [
+        40,
+        12,
+        40,
+        16
+      ],
+      "reason": "name_and_arity",
+      "why": "matched by name and arity (not proved)"
+    }
+  ],
+  "complete": true,
+  "incomplete_because": [],
+  "freshness": {
+    "synced_at": 1800000000000,
+    "pending_events": 0
+  }
+}

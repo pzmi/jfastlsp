@@ -41,7 +41,7 @@ b5b234fd2900d366fa2830f46d7db1cd57f496135f462008b290e1d859fac25c  crates/jfl-ada
 f4bcdfd6c1ed0a72ea41356faf35effe9eb4a88e371d358918a342d0b6944d66  crates/jfl-adapter-java/tests/fixtures/javac/generated/src/main/java/gen/other/Item.java
 4066f111bfba12f73e6afe610438483888ec95bd7db8d14d23e9f34fff2f1f7f  crates/jfl-adapter-java/tests/fixtures/javac/generated/src/main/java/gen/other/PBase1.java
 067c5084f50a749cdd1ff1fe6a399e6b8b13052eb7c1089747aaf099cc63b207  crates/jfl-adapter-java/tests/fixtures/javac/generated/src/main/java/gen/other/PBase2.java
-6edd12fb8ef5a598b9909340b5c4b50d8cef223235fe9c5a9f996a286f0f00f4  crates/jfl-adapter-java/tests/fixtures/javac/shop.tsv
+deedbc7367ed642766ebbb1da84f502a569a274661ae6c0eff5e1327270f80b2  crates/jfl-adapter-java/tests/fixtures/javac/shop.tsv
 9c951569ba7294a18b25fe4c6831302dec89e9ec70602f03bae02d102cabc154  crates/jfl-application/tests/fixtures/queries/def.anonymous-class.json
 0aca89de5037aea644e732beb798fb1f4a0ba15cd8ac8be8b7e47407ac9ee297  crates/jfl-application/tests/fixtures/queries/def.bounded-ambiguity.json
 88dbd0541eaaf6657d1df09d21fb06037e297a3585cb1d7a1506c5363e7a400f  crates/jfl-application/tests/fixtures/queries/def.deadline.json
@@ -78,6 +78,8 @@ a2282f325039a0438f611e0f7d4c7fc39935dcf068ecbdc49a54747750434a7e  crates/jfl-app
 ed47730391ed4b5fa639e838feedd13097d5119d2106709579db1eee9dd1f3e7  crates/jfl-application/tests/fixtures/queries/def.same-package-supertype.json
 76fd2c9dd3923cddc45273c3814ca072692b9c4169f9659d4d6a56817ca5ab95  crates/jfl-application/tests/fixtures/queries/def.static-call.json
 ebc39edc06ceea0ed1de137f38e9e1baafdd161d7508966dbf790de3168d9cae  crates/jfl-application/tests/fixtures/queries/def.supertype-not-indexed.json
+202eccadd14f7b52b3925359e3f1d08ff054bbbf579267984af96388b7d662e8  crates/jfl-application/tests/fixtures/queries/refs.field.text-block-and-comment.json
+0f7b6578d16870c13cef2a3caeed1278170035c9f18b1a0f868270988df038af  crates/jfl-application/tests/fixtures/queries/refs.method.comments-and-strings.json
 e77af1c88abd2cc20667ed24d03072ad615b16f276f07ccb5cba4bd6a30ca799  crates/jfl-application/tests/fixtures/queries/sym.billing-capped.json
 ccabe4082c6aefed835145ba5d61eb45986c295cd75cf886d7a6a4fb3aa0df1b  crates/jfl-application/tests/fixtures/queries/sym.billing.json
 00ca78d8ab7b4823b1fef1fe25fb3fe67fd6ae136662fdeb029b4ad9e573d907  crates/jfl-protocol/tests/fixtures/compat/envelope.major-2-same-shape.json
@@ -161,6 +163,13 @@ a106b20460d984d28aa37a4fc8e9696017c8e95b08d012c3ece54ebdc85736b6  fixtures/java/
 ce30c9bff3e93969cf20c40fab63a9d0a592416f57f07601de090e08a498d53b  fixtures/java/projects/shop/src/main/java/com/acme/probe2/Shelf.java
 4815b7f2f08853de764034c571696e992139e2bbb31ea49649c9ed0361504f8c  fixtures/java/projects/shop/src/main/java/com/acme/probe2/Tagged.java
 ecded1a00728f44d3bb4e3ced1c02807843055585936995cb8f2b4d9077f3412  fixtures/java/projects/shop/src/main/java/com/acme/probe3/QualThis.java
+7d78b82a78ce3708da8f70a567960aac60cb5c8d5cab351ab94caa49f4a1aebe  fixtures/java/projects/shop/src/main/java/com/acme/refs/Audit.java
+73aa70494209dfcee11b62239b22c0e482e56997105b379aadb4252fb229d6c3  fixtures/java/projects/shop/src/main/java/com/acme/refs/Clerk.java
+5a0e3bd3df08daf85b573219a46d85ab4cc91ae0d6dd93ffc2306a4076a063ec  fixtures/java/projects/shop/src/main/java/com/acme/refs/Entry.java
+3a8f46c6a5cf602d5b83a868a5a049ad5417471ecdc082266a8e45d6677d0c68  fixtures/java/projects/shop/src/main/java/com/acme/refs/Implicit.java
+cbf868d72928f47dccf43319fc18c310bf1b32959dd35959c0af50f8a7cda6b8  fixtures/java/projects/shop/src/main/java/com/acme/refs/Kind.java
+c2195c3b4d2ebcb5d7700ac64d5ac2ba6328211b052e7bc63753e9034c0bf1ed  fixtures/java/projects/shop/src/main/java/com/acme/refs/Note.java
+9bc263bfcfc287bb48f04ae8363480528e64d44146ca8f251292b92128a300ce  fixtures/java/projects/shop/src/main/java/com/acme/refs/Tally.java
 aee2e437ef9838d6364fd0844294aba6bf62a85f563a22b3047e8d93f0668893  fixtures/java/projects/shop/src/main/java/com/acme/shop/Cart.java
 b3af1dab4c189102fb18b662fc418e4497da325118264886e3828ce74e35db0c  fixtures/java/projects/shop/src/main/java/com/acme/shop/Checkout.java
 cae53494967b4e4f99b7d560efa61b3e466a4972e48f6aaa984ae2926ae70acd  fixtures/java/projects/shop/src/main/java/com/acme/shop/Discount.java
@@ -212,6 +221,13 @@ ccfe544eba1465cac4247b0b6b40eb9d1eba4dc95d647372e5cf7d38fecd09bb  fixtures/java/
 35f5d429ac1b010ad3d4a18c64feaae856888861316da9b07742bf3f131316e0  fixtures/java/summaries/orchard/projects/shop/src/main/java/com/acme/probe2/Shelf.java.json
 4320db742d583ad35709e730f251bc92497aafe1ef53ac6317ab2fc0d6c4142a  fixtures/java/summaries/orchard/projects/shop/src/main/java/com/acme/probe2/Tagged.java.json
 128b5bc96a638da83e212c6623450d1287e6358540968215739f13ad0539fae3  fixtures/java/summaries/orchard/projects/shop/src/main/java/com/acme/probe3/QualThis.java.json
+c1e25040a7a15cb161833caef329737ee7026983d4ed4ab5e7b066fd049d7c4b  fixtures/java/summaries/orchard/projects/shop/src/main/java/com/acme/refs/Audit.java.json
+01ed4e0b9ce28eff090deb816a1f8064e17831451a4f6be40396cbcbd709ee63  fixtures/java/summaries/orchard/projects/shop/src/main/java/com/acme/refs/Clerk.java.json
+e92c9814eb412b721502804024ce63de5d4d8015b216c258e158781538cd19e1  fixtures/java/summaries/orchard/projects/shop/src/main/java/com/acme/refs/Entry.java.json
+a92efcbcaf6d419a301c33b7bf0ee6dd55fec628f7e803665c74a81f90473bb4  fixtures/java/summaries/orchard/projects/shop/src/main/java/com/acme/refs/Implicit.java.json
+2c1d08535f8d0ae474325c6cf58567d69e74af6d8be4a3134771310c39b62cae  fixtures/java/summaries/orchard/projects/shop/src/main/java/com/acme/refs/Kind.java.json
+73b2660e33df5a913a453d14f59888476a9189caf079c8bc57f7275a13357a21  fixtures/java/summaries/orchard/projects/shop/src/main/java/com/acme/refs/Note.java.json
+a494792bf8f91d2db4a97c14221e9b57c9be3f2707a6bd68794cd116d8f3a4bb  fixtures/java/summaries/orchard/projects/shop/src/main/java/com/acme/refs/Tally.java.json
 5a34046be77bec8436a499f3fe7338c066b225090496e851438f532d1191a950  fixtures/java/summaries/orchard/projects/shop/src/main/java/com/acme/shop/Cart.java.json
 c199cd05bc4009419e8e05e046996cd9cbfa9477cf036c4e87b23338197bab56  fixtures/java/summaries/orchard/projects/shop/src/main/java/com/acme/shop/Checkout.java.json
 d0e403dd12037033ea71c5f588361e2a06942f176e57aa0bcd7747a485739eff  fixtures/java/summaries/orchard/projects/shop/src/main/java/com/acme/shop/Discount.java.json

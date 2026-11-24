@@ -1,0 +1,28 @@
+{
+  "package": "com.acme.refs",
+  "imports": [],
+  "declarations": [
+    {"annotations":[],"at":"4:1-44:2","id":0,"javadoc":"3:1-3:84","kind":"class","modifiers":["public"],"name":"Tally","name_at":"4:14-4:19","params":[],"parent":null,"permits":[],"signature":"public class Tally","supertypes":[],"symbol":"com.acme.refs.Tally"},
+    {"annotations":[],"at":"5:5-5:23","id":1,"javadoc":null,"kind":"field","modifiers":["private"],"name":"count","name_at":"5:17-5:22","params":[],"parent":0,"permits":[],"signature":"private int count","supertypes":[],"symbol":"com.acme.refs.Tally#count"},
+    {"annotations":[],"at":"6:5-6:15","id":2,"javadoc":null,"kind":"field","modifiers":[],"name":"total","name_at":"6:9-6:14","params":[],"parent":0,"permits":[],"signature":"int total","supertypes":[],"symbol":"com.acme.refs.Tally#total"},
+    {"annotations":[],"at":"9:5-9:22","id":3,"javadoc":"8:5-8:33","kind":"constructor","modifiers":["public"],"name":"Tally","name_at":"9:12-9:17","params":[],"parent":0,"permits":[],"signature":"public Tally()","supertypes":[],"symbol":"com.acme.refs.Tally#<init>()"},
+    {"annotations":[],"at":"11:5-14:6","id":4,"javadoc":null,"kind":"constructor","modifiers":[],"name":"Tally","name_at":"11:5-11:10","params":["int"],"parent":0,"permits":[],"signature":"Tally(int start)","supertypes":[],"symbol":"com.acme.refs.Tally#<init>(int)"},
+    {"annotations":[],"at":"17:5-21:6","id":5,"javadoc":"16:5-16:48","kind":"method","modifiers":["public"],"name":"post","name_at":"17:17-17:21","params":["int"],"parent":0,"permits":[],"signature":"public void post(int amount)","supertypes":[],"symbol":"com.acme.refs.Tally#post(int)"},
+    {"annotations":[],"at":"24:5-27:6","id":6,"javadoc":"23:5-23:29","kind":"method","modifiers":["public"],"name":"post","name_at":"24:17-24:21","params":["int","int"],"parent":0,"permits":[],"signature":"public void post(int first, int second)","supertypes":[],"symbol":"com.acme.refs.Tally#post(int,int)"},
+    {"annotations":[],"at":"30:5-32:6","id":7,"javadoc":null,"kind":"method","modifiers":["static"],"name":"twice","name_at":"30:16-30:21","params":["int"],"parent":0,"permits":[],"signature":"static int twice(int value)","supertypes":[],"symbol":"com.acme.refs.Tally#twice(int)"},
+    {"annotations":[],"at":"34:5-36:6","id":8,"javadoc":null,"kind":"method","modifiers":[],"name":"count","name_at":"34:9-34:14","params":[],"parent":0,"permits":[],"signature":"int count()","supertypes":[],"symbol":"com.acme.refs.Tally#count()"},
+    {"annotations":[],"at":"39:5-43:6","id":9,"javadoc":"38:5-38:30","kind":"method","modifiers":["varargs"],"name":"postAll","name_at":"39:10-39:17","params":["int[]"],"parent":0,"permits":[],"signature":"void postAll(int... amounts)","supertypes":[],"symbol":"com.acme.refs.Tally#postAll(int[])"}
+  ],
+  "references": [
+    {"arity":0,"at":"12:9-12:13","name":"Tally","shape":"new"},
+    {"at":"13:9-13:14","name":"total","shape":"name"},
+    {"at":"19:9-19:14","name":"total","shape":"name"},
+    {"at":"20:9-20:14","name":"count","shape":"name"},
+    {"arity":1,"at":"25:9-25:13","name":"post","shape":"call"},
+    {"arity":1,"at":"26:14-26:18","name":"post","shape":"qualified_call"},
+    {"at":"35:16-35:21","name":"count","shape":"name"},
+    {"arity":1,"at":"41:13-41:17","name":"post","shape":"call"}
+  ],
+  "diagnostics": [],
+  "diagnostics_dropped": 0
+}

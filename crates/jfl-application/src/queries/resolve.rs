@@ -161,6 +161,50 @@ pub(crate) struct Snapshot {
     children: Vec<Vec<(DeclId, DeclId)>>,
     /// Per file, whether its types may hold members its summary lacks ([`generates_members`]).
     generated: Vec<bool>,
+    /// How many files use a known annotation processor ([`uses_processor`]).
+    processors: u32,
+    /// How many files had a syntax error when summarised ([`FileSummary::syntax_errors`]).
+    broken: u32,
+}
+
+/// The packages of the annotation processors references know of (IDX-11, the card's Decided
+/// rule): a file that imports from one, or names one of its annotations qualified, may have
+/// sources generated beside it (a mapper's implementation, a builder, a JPA metamodel, a
+/// dependency-injection factory) that use its declarations and are not in the view before the
+/// project model names the generated roots (M3). A heuristic towards incompleteness: a
+/// processor it does not know is not seen, which PROJ's processor path closes.
+pub(crate) const PROCESSOR_PACKAGES: [&str; 14] = [
+    "lombok",
+    "org.mapstruct",
+    "org.immutables",
+    "com.google.auto",
+    "dagger",
+    "javax.inject",
+    "jakarta.inject",
+    "io.micronaut",
+    "javax.persistence",
+    "jakarta.persistence",
+    "org.hibernate.annotations",
+    "com.querydsl",
+    "io.soabase.recordbuilder",
+    "org.inferred.freebuilder",
+];
+
+/// Whether `summary` uses a known annotation processor ([`PROCESSOR_PACKAGES`]): an import from
+/// one of its packages, or an annotation named qualified in one.
+///
+/// Pinned by: `resolve::tests::should_see_a_processor_when_a_file_imports_or_names_one`.
+pub(crate) fn uses_processor(summary: &FileSummary) -> bool {
+    let known = |name: &str| {
+        PROCESSOR_PACKAGES.iter().any(|p| {
+            name.strip_prefix(p)
+                .is_some_and(|rest| rest.is_empty() || rest.starts_with('.'))
+        })
+    };
+    summary.imports().iter().any(|i| known(summary.str(i.name)))
+        || summary
+            .declarations()
+            .any(|(_, d)| summary.list(d.annotations).any(known))
 }
 
 /// Whether the types of a file may hold members its source does not declare: Lombok rewrites the
@@ -445,6 +489,8 @@ impl Snapshot {
             .iter()
             .map(|f| generates_members(&f.summary))
             .collect();
+        let processors = files.iter().filter(|f| uses_processor(&f.summary)).count();
+        let broken = files.iter().filter(|f| f.summary.syntax_errors()).count();
         Self {
             files,
             types,
@@ -452,7 +498,53 @@ impl Snapshot {
             table,
             children,
             generated,
+            processors: u32::try_from(processors).unwrap_or(u32::MAX),
+            broken: u32::try_from(broken).unwrap_or(u32::MAX),
         }
+    }
+
+    /// How many files had a syntax error when summarised: their sites may be lost, so no answer
+    /// that needs every site of the view is complete while one is (the queries' completeness).
+    pub(crate) const fn syntax_error_files(&self) -> u32 {
+        self.broken
+    }
+
+    /// The files, in path order.
+    pub(crate) fn files(&self) -> &[FileEntry] {
+        &self.files
+    }
+
+    /// How many files use a known annotation processor ([`uses_processor`]).
+    pub(crate) const fn processor_files(&self) -> u32 {
+        self.processors
+    }
+
+    /// Whether the top-level type around `hit` has a qualified name another type declaration of
+    /// the view has too (a second source set, a copy): which one a file sees is not known.
+    ///
+    /// Pinned by: `resolve::tests::should_say_declared_twice_when_two_files_declare_one_qualified_name`.
+    pub(crate) fn declared_twice(&self, hit: Hit) -> bool {
+        let Some(f) = self.file(hit.file) else {
+            return true;
+        };
+        let mut top = hit.decl;
+        for _ in 0..=MAX_DEPTH.saturating_mul(8) {
+            match f.summary.declaration(top).and_then(|d| d.parent) {
+                Some(parent) => top = parent,
+                None => break,
+            }
+        }
+        let Some(d) = f.summary.declaration(top) else {
+            return true;
+        };
+        let top = Hit {
+            file: hit.file,
+            decl: top,
+        };
+        let qualified = self.qualified(top);
+        self.types_named(f.summary.str(d.name))
+            .iter()
+            .any(|&other| other != top && self.qualified(other) == qualified)
     }
 
     /// Every declaration of the view by simple name, each name once.
@@ -1800,5 +1892,46 @@ mod tests {
             constructors,
             Outcome::Unproved(vec![logged], Unproved::Supertype)
         );
+    }
+
+    #[test]
+    fn should_see_a_processor_when_a_file_imports_or_names_one() {
+        // given: an import of a known processor's package, one of a package that only starts
+        // like one, and an on-demand import of a known package
+        let files = [
+            file("p/A.java", Some("p"), &["org.mapstruct.Mapper"], &["A"]),
+            file("p/B.java", Some("p"), &["lombokish.Thing"], &["B"]),
+            file("p/C.java", Some("p"), &["jakarta.persistence"], &["C"]),
+            file("p/D.java", Some("p"), &[], &["D"]),
+        ];
+        // when
+        let seen: Vec<bool> = files.iter().map(|f| uses_processor(&f.summary)).collect();
+        let snapshot = Snapshot::new(files.to_vec());
+        // then
+        assert_eq!(seen, [true, false, true, false]);
+        assert_eq!(snapshot.processor_files(), 2);
+    }
+
+    #[test]
+    fn should_say_declared_twice_when_two_files_declare_one_qualified_name() {
+        // given: `p.A` in two files (two source sets), `p.B` once, with a member type
+        let snapshot = Snapshot::new(vec![
+            file("main/p/A.java", Some("p"), &[], &["A"]),
+            file("main/p/B.java", Some("p"), &[], &["B", "B$In"]),
+            file("test/p/A.java", Some("p"), &[], &["A"]),
+        ]);
+        let hit = |file, decl| Hit {
+            file,
+            decl: DeclId(decl),
+        };
+        // when
+        let twice = [
+            snapshot.declared_twice(hit(0, 0)),
+            snapshot.declared_twice(hit(1, 0)),
+            snapshot.declared_twice(hit(1, 1)),
+            snapshot.declared_twice(hit(2, 0)),
+        ];
+        // then
+        assert_eq!(twice, [true, false, false, true]);
     }
 }

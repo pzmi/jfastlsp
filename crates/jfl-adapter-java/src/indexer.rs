@@ -49,6 +49,20 @@ fn site_on_thread(grammar: &Grammar, text: &str, name: ByteRange) -> Option<Site
     })
 }
 
+/// [`site_on_thread`] for each of `names`, over one parse; no facts for a file past
+/// [`scopes::MAX_FACTS_BYTES`], as for one site.
+fn sites_on_thread(grammar: &Grammar, text: &str, names: &[ByteRange]) -> Vec<Option<SiteSyntax>> {
+    if text.len() > scopes::MAX_FACTS_BYTES {
+        return vec![None; names.len()];
+    }
+    WORKER.with(|cell| match cell.try_borrow_mut() {
+        Ok(mut slot) => {
+            scopes::sites_syntax(grammar, slot.get_or_insert_with(Worker::new), text, names)
+        }
+        Err(_) => scopes::sites_syntax(grammar, &mut Worker::new(), text, names),
+    })
+}
+
 /// The tree-sitter `SyntaxIndexer`: parsing runs on the injected [`BlockingPool`] (fnd §4.4).
 #[derive(Debug, Clone)]
 pub struct JavaIndexer<P> {
@@ -131,5 +145,18 @@ impl<P: BlockingPool> SyntaxIndexer for JavaIndexer<P> {
             .pool
             .run(move || site_on_thread(&grammar, &text.text, name));
         async move { job.await.ok().flatten() }
+    }
+
+    fn sites_syntax(
+        &self,
+        text: Arc<FileText>,
+        names: Vec<ByteRange>,
+    ) -> impl Future<Output = Vec<Option<SiteSyntax>>> + Send {
+        let grammar = Arc::clone(&self.grammar);
+        let count = names.len();
+        let job = self
+            .pool
+            .run(move || sites_on_thread(&grammar, &text.text, &names));
+        async move { job.await.unwrap_or_else(|_| vec![None; count]) }
     }
 }

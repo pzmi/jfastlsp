@@ -1,5 +1,6 @@
 //! The entry format (format version [`FORMAT_VERSION`]): a fixed header, then the head (every
-//! part of the summary but its reference sites, and the distinct names those sites use), then the
+//! part of the summary but its reference sites, the distinct names those sites use, and since
+//! format 2 whether the file had a syntax error), then the
 //! reference sites, each section a postcard record (ADR 0025).
 //!
 //! ```text
@@ -38,7 +39,7 @@ use serde::{Deserialize, Serialize};
 
 /// The format version written in every header. Bumped whenever the same summary would encode
 /// differently or an old reader would misread a new entry; an entry of another version is a miss.
-pub const FORMAT_VERSION: u32 = 1;
+pub const FORMAT_VERSION: u32 = 2;
 
 /// The header's magic bytes.
 pub const MAGIC: [u8; 4] = *b"JFLS";
@@ -100,6 +101,8 @@ struct Head<'a> {
     declarations: Vec<DeclarationRecord>,
     type_names: Vec<u32>,
     names: Vec<u32>,
+    /// [`SummaryParts::syntax_errors`] (format 2, IDX-11).
+    syntax_errors: bool,
 }
 
 const STATIC: u8 = 1;
@@ -253,6 +256,7 @@ pub fn encode(key: &SyntaxKey, summary: &FileSummary) -> Result<Vec<u8>, Corrupt
         declarations: parts.declarations.iter().map(declaration_record).collect(),
         type_names: parts.type_names.iter().map(|t| t.0).collect(),
         names: names.iter().map(|n| n.0).collect(),
+        syntax_errors: parts.syntax_errors,
     };
     let mut previous = 0_i64;
     let references: Vec<ReferenceRecord> = parts
@@ -358,6 +362,7 @@ fn head_parts(head: &[u8]) -> Result<(SummaryParts, Box<[StrId]>), Corrupt> {
             .collect::<Result<_, _>>()?,
         type_names: head.type_names.iter().copied().map(StrId).collect(),
         references: Box::new([]),
+        syntax_errors: head.syntax_errors,
     };
     Ok((parts, head.names.into_iter().map(StrId).collect()))
 }
@@ -489,11 +494,28 @@ mod tests {
     }
 
     #[test]
+    fn should_keep_the_syntax_error_mark_when_an_entry_round_trips() {
+        // given: a summary of a file with a syntax error
+        let marked = summary().with_syntax_errors(true);
+        // when
+        let entry = encode(&key(1), &marked).unwrap();
+        // then
+        let back = decode(&key(1), &entry).unwrap();
+        assert!(back.syntax_errors());
+        assert_eq!(back, marked);
+        assert!(
+            !decode(&key(1), &encode(&key(1), &summary()).unwrap())
+                .unwrap()
+                .syntax_errors()
+        );
+    }
+
+    #[test]
     fn should_refuse_an_entry_when_its_header_or_bytes_disagree() {
         // given
         let entry = encode(&key(1), &summary()).unwrap();
         let mut version = entry.clone();
-        version[4] = 2;
+        version[4] = 1;
         let mut flipped = entry.clone();
         if let Some(last) = flipped.last_mut() {
             *last ^= 1;
@@ -518,7 +540,7 @@ mod tests {
                 Some(Corrupt::Key),
                 Some(Corrupt::Length),
                 Some(Corrupt::Length),
-                Some(Corrupt::Version(2)),
+                Some(Corrupt::Version(1)),
                 Some(Corrupt::Digest),
                 Some(Corrupt::Magic),
                 Some(Corrupt::Length),

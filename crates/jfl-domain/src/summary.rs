@@ -314,6 +314,11 @@ pub struct SummaryParts {
     pub type_names: Box<[StrId]>,
     /// The reference sites, in source order.
     pub references: Box<[ReferenceSite]>,
+    /// Whether the file had a syntax error when it was summarised: the parser's error recovery
+    /// may have lost declarations and reference sites, so an answer that needs every site of the
+    /// file (references' `complete`, IDX-11) cannot rely on this summary. Kept with the summary,
+    /// so a summary read back from the store carries it too.
+    pub syntax_errors: bool,
 }
 
 /// Why a summary or a part of one is refused. The values carry indices, never source text.
@@ -520,6 +525,7 @@ impl SummaryBuilder {
                 declarations: self.declarations.into_boxed_slice(),
                 type_names: self.type_names.into_boxed_slice(),
                 references: self.references.into_boxed_slice(),
+                syntax_errors: false,
             },
         }
     }
@@ -588,6 +594,21 @@ impl FileSummary {
             check_list(declaration.annotations)?;
         }
         Ok(Self { parts })
+    }
+
+    /// Whether the file had a syntax error when it was summarised ([`SummaryParts::syntax_errors`]).
+    #[must_use]
+    pub const fn syntax_errors(&self) -> bool {
+        self.parts.syntax_errors
+    }
+
+    /// This summary, marked as made from a file with a syntax error (or not).
+    ///
+    /// Pinned by: `summary::tests::should_keep_the_syntax_error_mark_when_parts_round_trip`.
+    #[must_use]
+    pub fn with_syntax_errors(mut self, syntax_errors: bool) -> Self {
+        self.parts.syntax_errors = syntax_errors;
+        self
     }
 
     /// The parts, to persist.
@@ -1311,5 +1332,18 @@ mod tests {
 
     impl Modifiers {
         const ALL_FOR_TEST: Self = Self(Self::KNOWN);
+    }
+
+    #[test]
+    fn should_keep_the_syntax_error_mark_when_parts_round_trip() {
+        // given
+        let marked = SummaryBuilder::new().finish().with_syntax_errors(true);
+        // when
+        let back = FileSummary::from_parts(marked.parts().clone()).unwrap();
+        let without = back.without_references();
+        // then
+        assert!(back.syntax_errors());
+        assert!(without.syntax_errors());
+        assert!(!SummaryBuilder::new().finish().syntax_errors());
     }
 }

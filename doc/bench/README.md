@@ -20,7 +20,7 @@ just bench-domain small            # jfl-domain's position conversions in proces
 just bench-domain-envelope         # jfl-domain's envelope assembly, completeness, summary build and API digests (divan, synthetic)
 just bench-protocol                # jfl-protocol's encode, frame decode and envelope decode of a 1k- and 10k-location response (divan, synthetic)
 just bench-fs small [cold]         # jfl-adapter-fs's walk (paths, paths and stat; 1 and 4 threads; warm, and cold only when asked: it drops the page cache) and a watch's start (divan), after checking the listing is git ls-files' set
-just bench-queries medium          # jfl-application's definition, hover and workspace symbols over the view service on the corpus (IDX-10)
+just bench-queries medium          # jfl-application's definition, hover, references and workspace symbols over the view service on the corpus (IDX-10, IDX-11)
 just bench-lsp                     # jfl-adapter-lsp's round trip of one request through a session in memory, and a 1k- and 10k-location answer on the typed path and through a JSON value (divan, synthetic)
 ```
 
@@ -456,6 +456,21 @@ Against plan §1.7 (the rows measured end to end through a carrier from M1; thes
 - **`jfl def` / `jfl hover`, warm (medium), p50 < 20 ms, p95 < 50 ms:** the request and the query take 1.35 ms p50 and 8.1 ms p95 with slice 2's parse (0.55 and 2.7 ms without it). The first query after a publish adds the tables' build, 74–82 ms on medium, which alone is over the p95: an incremental build from the previous generation is a named item on the card, due before the M1 freshness and definition rows are gated.
 - **`jfl sym` prefix query, warm (large), p95 < 50 ms:** 12.1 ms p95 on medium for a default answer of 100 symbols, about half of it the reads of the listed symbols' files; the scan grows with the distinct names (96k identifiers on medium), so large (3.6 times the files) projects to about 25–35 ms. Not measured on large here (the corpus is not cached in this sandbox).
 - **`fst` was weighed for the symbol scan** (ADR 0025) in a one-off measurement outside the repository on the medium corpus's 96,046 distinct identifiers: a set built in 91–122 ms (plus 7–16 ms to sort the names first), against prefix queries of 0.13 ms where a linear prefix-and-subsequence scan takes 3.6 ms. The names are rebuilt with every generation, so the build would land on the first query after each publish, and the camel-hump search the card asks for is not a prefix or a Levenshtein automaton: not taken (the card's `Decided`).
+
+#### References (IDX-11, the last part of `just bench-queries`)
+
+Fifty method declarations picked by the same seed among names that 200 or more reference sites of the view use (common) and fifty among names 1 to 10 sites use (rare); at each, the references query alone (the request already pinned) and hover, which counts the declaration's references. A references answer scans every indexed summary's sites for the name (a few milliseconds on medium, the floor of a rare name), reads the text of each candidate's file (checked against the generation's key), and parses the provable ones' files for the proof of `exact`; hover counts from the scan and reads only the declaration's own file.
+
+Measured 2026-11-24 on the same 4 vCPU VM, with another lane possibly building beside it; the median of three runs of each corpus with the code as committed (earlier runs while it settled: medium references common 18.8–28.3 ms p50 and 76–115 ms p95 over four, small 5.6–6.4 and 27–37 ms over three; hover on a declaration read every candidate's file then, 22–28 and 84–117 ms on medium's common names, past the `jfl hover` row, so it now counts from the scan):
+
+| corpus | references, common names (p50, p95, max) | references, rare names (p50, p95) | hover on a declaration, common (p50, p95) | hover on a declaration, rare (p50, p95) |
+|:--|--:|--:|--:|--:|
+| small junit-framework | 6.5, 41.9, 87.7 ms | 1.24, 5.6 ms | 1.46, 4.4 ms | 1.07, 3.6 ms |
+| medium spring-framework | 24.1, 104.6, 118.9 ms | 6.0, 13.4 ms | 11.2, 16.1 ms | 5.7, 9.9 ms |
+
+What they answered (the same picks every run): on small, the common names' 50 answers held 3 exact and 9,915 possible sites (the widest name 2,137 sites), 40 complete, 10 incomplete because the method may be used without its name (a supertype outside the index, `Object`'s names); the rare names 46 exact, 123 possible, 39 complete. On medium none is complete: every answer says `annotation processors may generate sources` (spring-framework imports `jakarta.persistence` and `javax.inject`, on the card's list of known processors), and 28 of the common and 24 of the rare also `the target may be used without its name`; 3 exact and 39,371 possible for the common names (widest 8,265 sites), 6 and 138 for the rare. Definition and hover at reference sites are unchanged against main on the same day (definition alone 1.16, 9.9 ms against main's 1.22–1.36, 8.7–9.8 ms; both above IDX-10's 2026-11-23 figures, the VM's day).
+
+Against plan §1.7's **`jfl refs`, warm, a widely used method (medium), p50 < 100 ms, p95 < 300 ms** (deadline 2 s): 24.1 ms p50 and 104.6 ms p95 in process, before a carrier's framing and IPC; the `rg` floor is 0.04 s for a whole-tree scan. The large tier (elasticsearch) was not measured: its corpus is not cached in this sandbox, and its references path (sites from the store through the name postings, plan §5.5) is not built yet (the card's Left).
 
 ### The daemon's IPC (IDX-12, `just bench-daemon`)
 

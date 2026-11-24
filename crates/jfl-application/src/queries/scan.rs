@@ -9,7 +9,7 @@
 //! the scope is open, which costs precision (the answer falls to `possible`) and never
 //! correctness. Pinned by `scan::tests`.
 
-use jfl_domain::DeclKind;
+use jfl_domain::{ByteOffset, ByteRange, DeclKind};
 
 /// The byte at `i`, if any.
 fn byte(bytes: &[u8], i: usize) -> Option<u8> {
@@ -742,6 +742,49 @@ pub(crate) fn javadoc_words(comment: &str) -> String {
     words
 }
 
+/// The byte ranges of the identifiers spelled `name` within `range` of `text`, comments skipped:
+/// an import's segments. An identifier written with Unicode escapes is not found.
+///
+/// Pinned by: `scan::tests::should_find_each_segment_and_skip_comments_when_an_import_is_read`.
+pub(crate) fn identifiers(text: &str, range: ByteRange, name: &str) -> Vec<ByteRange> {
+    let bytes = text.as_bytes();
+    let (Ok(mut at), Ok(end)) = (
+        usize::try_from(range.start().get()),
+        usize::try_from(range.end().get()),
+    ) else {
+        return Vec::new();
+    };
+    let end = end.min(bytes.len());
+    let mut out = Vec::new();
+    while at < end {
+        let rest = bytes.get(at..end).unwrap_or(&[]);
+        if rest.starts_with(b"//") {
+            at = rest
+                .iter()
+                .position(|&b| b == b'\n')
+                .map_or(end, |n| at.saturating_add(n));
+        } else if rest.starts_with(b"/*") {
+            at = rest
+                .windows(2)
+                .skip(2)
+                .position(|w| w == b"*/")
+                .map_or(end, |n| at.saturating_add(n).saturating_add(4));
+        } else if byte(bytes, at).is_some_and(is_ident_byte) {
+            let to = ident_end(bytes, at).min(end);
+            if bytes.get(at..to) == Some(name.as_bytes())
+                && let (Ok(s), Ok(e)) = (u32::try_from(at), u32::try_from(to))
+                && let Ok(found) = ByteRange::new(ByteOffset::new(s), ByteOffset::new(e))
+            {
+                out.push(found);
+            }
+            at = to.max(at.saturating_add(1));
+        } else {
+            at = at.saturating_add(1);
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -970,5 +1013,20 @@ mod tests {
         // then
         assert!(found);
         assert!(!followed_by_method_ref(text, at(text, "f =") + 1));
+    }
+
+    #[test]
+    fn should_find_each_segment_and_skip_comments_when_an_import_is_read() {
+        // given: an import naming `Outer` twice, once in a comment
+        let text = "import static a.Outer /* Outer */ . Outer2.Outer.m; // Outer\nclass Outer {}";
+        let end = u32::try_from(text.find('\n').unwrap()).unwrap();
+        let range = ByteRange::new(ByteOffset::new(0), ByteOffset::new(end)).unwrap();
+        // when
+        let found: Vec<(u32, u32)> = identifiers(text, range, "Outer")
+            .into_iter()
+            .map(|r| (r.start().get(), r.end().get()))
+            .collect();
+        // then
+        assert_eq!(found, [(16, 21), (43, 48)]);
     }
 }

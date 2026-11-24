@@ -1,0 +1,16 @@
+{
+  "package": "com.acme.refs",
+  "imports": [],
+  "declarations": [
+    {"annotations":[],"at":"4:1-13:2","id":0,"javadoc":"3:1-3:77","kind":"enum","modifiers":[],"name":"Kind","name_at":"4:6-4:10","params":[],"parent":null,"permits":[],"signature":"enum Kind","supertypes":[],"symbol":"com.acme.refs.Kind"},
+    {"annotations":[],"at":"5:5-5:13","id":1,"javadoc":null,"kind":"enum_constant","modifiers":[],"name":"DEBIT","name_at":"5:5-5:10","params":[],"parent":0,"permits":[],"signature":"DEBIT","supertypes":[],"symbol":"com.acme.refs.Kind#DEBIT"},
+    {"annotations":[],"at":"6:5-6:15","id":2,"javadoc":null,"kind":"enum_constant","modifiers":[],"name":"CREDIT","name_at":"6:5-6:11","params":[],"parent":0,"permits":[],"signature":"CREDIT","supertypes":[],"symbol":"com.acme.refs.Kind#CREDIT"},
+    {"annotations":[],"at":"8:5-8:20","id":3,"javadoc":null,"kind":"field","modifiers":["final"],"name":"sign","name_at":"8:15-8:19","params":[],"parent":0,"permits":[],"signature":"final int sign","supertypes":[],"symbol":"com.acme.refs.Kind#sign"},
+    {"annotations":[],"at":"10:5-12:6","id":4,"javadoc":null,"kind":"constructor","modifiers":[],"name":"Kind","name_at":"10:5-10:9","params":["int"],"parent":0,"permits":[],"signature":"Kind(int sign)","supertypes":[],"symbol":"com.acme.refs.Kind#<init>(int)"}
+  ],
+  "references": [
+    {"at":"11:14-11:18","name":"sign","shape":"qualified_name"}
+  ],
+  "diagnostics": [],
+  "diagnostics_dropped": 0
+}

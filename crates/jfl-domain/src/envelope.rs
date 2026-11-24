@@ -378,6 +378,32 @@ pub enum IncompleteReason {
         /// How many are listed.
         limit: u32,
     },
+    /// The target may be used where its name is not written, so no scan by name finds every
+    /// use (references, IDX-11): a method a type outside the index may declare too (a library
+    /// supertype's, `Object`'s: implicit calls and callers outside the view), a constructor
+    /// called implicitly (by a subclass's constructor, an enum constant), an annotation's
+    /// `value` element.
+    ImplicitUses,
+    /// Annotation processors may generate sources here (`files` files use a known one) and no
+    /// project model names their roots yet (before M3), so what they generate is not indexed.
+    GeneratedSourcesUnknown {
+        /// How many files use one.
+        files: u32,
+    },
+    /// The target's type is declared more than once in the view (two source sets, or a copy):
+    /// the view does not tell apart which one each file sees (before the project model).
+    TargetDeclaredTwice,
+    /// `possible` was left out on request (`--exact-only`), and it held candidates.
+    PossibleLeftOut {
+        /// How many.
+        count: u32,
+    },
+    /// Files the target's module sees had a syntax error when they were summarised: the parser's
+    /// error recovery may have lost their declarations and reference sites (IDX-11).
+    SyntaxErrors {
+        /// How many files.
+        files: u32,
+    },
 }
 
 /// The plan's wording: `module :payments not indexed`, `deadline`.
@@ -420,6 +446,18 @@ impl fmt::Display for IncompleteReason {
             Self::TargetUnresolved => f.write_str("target not resolved from syntax"),
             Self::TargetNotIndexed => f.write_str("target declared outside the indexed sources"),
             Self::ResultsCapped { limit } => write!(f, "results capped at {limit}"),
+            Self::ImplicitUses => f.write_str("the target may be used without its name"),
+            Self::GeneratedSourcesUnknown { files } => write!(
+                f,
+                "annotation processors may generate sources ({files} files use one)"
+            ),
+            Self::TargetDeclaredTwice => {
+                f.write_str("the target's type is declared more than once in the view")
+            }
+            Self::PossibleLeftOut { count } => {
+                write!(f, "{count} possible references left out (exact only)")
+            }
+            Self::SyntaxErrors { files } => write!(f, "{files} files have syntax errors"),
         }
     }
 }
@@ -1232,6 +1270,11 @@ mod tests {
             IncompleteReason::TargetUnresolved,
             IncompleteReason::TargetNotIndexed,
             IncompleteReason::ResultsCapped { limit: 100 },
+            IncompleteReason::ImplicitUses,
+            IncompleteReason::GeneratedSourcesUnknown { files: 2 },
+            IncompleteReason::TargetDeclaredTwice,
+            IncompleteReason::PossibleLeftOut { count: 3 },
+            IncompleteReason::SyntaxErrors { files: 4 },
         ];
         // when
         let words: Vec<String> = reasons.iter().map(ToString::to_string).collect();
@@ -1242,6 +1285,11 @@ mod tests {
                 "target not resolved from syntax",
                 "target declared outside the indexed sources",
                 "results capped at 100",
+                "the target may be used without its name",
+                "annotation processors may generate sources (2 files use one)",
+                "the target's type is declared more than once in the view",
+                "3 possible references left out (exact only)",
+                "4 files have syntax errors",
             ]
         );
         assert_eq!(

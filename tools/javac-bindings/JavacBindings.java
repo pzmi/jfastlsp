@@ -25,6 +25,7 @@
 import com.sun.source.tree.AnnotatedTypeTree;
 import com.sun.source.tree.CompilationUnitTree;
 import com.sun.source.tree.IdentifierTree;
+import com.sun.source.tree.MemberReferenceTree;
 import com.sun.source.tree.MemberSelectTree;
 import com.sun.source.tree.NewClassTree;
 import com.sun.source.tree.ParameterizedTypeTree;
@@ -159,7 +160,8 @@ public final class JavacBindings {
     return hash;
   }
 
-  /** Records the binding of every identifier, member select and instance creation. */
+  /** Records the binding of every identifier, member select, instance creation and method
+   * reference. */
   static final class Scanner extends TreePathScanner<Void, Void> {
     private final Trees trees;
     private final Elements elements;
@@ -224,6 +226,41 @@ public final class JavacBindings {
               : named instanceof MemberSelectTree m ? m.getIdentifier().toString() : null;
       if (name != null && end >= 0) {
         record(end - name.length(), name, trees.getElement(getCurrentPath()), true);
+      }
+      return result;
+    }
+
+    @Override
+    public Void visitMemberReference(MemberReferenceTree tree, Void unused) {
+      Void result = super.visitMemberReference(tree, unused);
+      Element element = trees.getElement(getCurrentPath());
+      if (tree.getMode() == MemberReferenceTree.ReferenceMode.NEW) {
+        // `T::new`: like `new T(…)`, the site is T's simple name, bound to a constructor.
+        Tree named = tree.getQualifierExpression();
+        while (true) {
+          if (named instanceof ParameterizedTypeTree p) {
+            named = p.getType();
+          } else if (named instanceof AnnotatedTypeTree a) {
+            named = a.getUnderlyingType();
+          } else {
+            break;
+          }
+        }
+        int end = (int) positions.getEndPosition(unit, named);
+        String name =
+            named instanceof IdentifierTree i
+                ? i.getName().toString()
+                : named instanceof MemberSelectTree m ? m.getIdentifier().toString() : null;
+        if (name != null && end >= 0) {
+          record(end - name.length(), name, element, true);
+        }
+      } else {
+        // `expr::name`: the name ends the reference.
+        int end = (int) positions.getEndPosition(unit, tree);
+        String name = tree.getName().toString();
+        if (end >= 0) {
+          record(end - name.length(), name, element, false);
+        }
       }
       return result;
     }

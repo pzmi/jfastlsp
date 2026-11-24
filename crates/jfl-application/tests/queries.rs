@@ -8,11 +8,13 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
-use jfl_application::queries::{definition, document_symbols, hover, workspace_symbols};
+use jfl_application::queries::{
+    definition, document_symbols, hover, references, workspace_symbols,
+};
 use jfl_application::syntax_indexer::GrammarId;
 use jfl_application::{
     Answer, ClockDeadline, CountingClock, Pinned, QueryCache, QueryConfig, QueryError,
-    ServiceConfig, SymbolFilter, SymbolQuery, ViewService,
+    ReferencesQuery, ServiceConfig, SymbolFilter, SymbolQuery, ViewService,
 };
 use jfl_domain::{
     DeclKind, Envelope, FileUri, Freshness, IncompleteReason, LineIndex, Position,
@@ -182,6 +184,56 @@ mod given {
             &deadline,
             &QueryCache::new(),
         ))
+    }
+
+    /// The references at `position` of `answer`'s file, with `query`'s options.
+    pub(crate) fn refs_with(
+        service: &Service,
+        answer: &Answer,
+        position: Position,
+        config: &QueryConfig,
+        query: ReferencesQuery,
+    ) -> Result<Envelope, QueryError> {
+        let clock = still();
+        let deadline = ClockDeadline::new(&clock, config.references_budget);
+        block_on(references(
+            &pinned(answer),
+            &service.sources(),
+            ReferencesQuery { position, ..query },
+            UTF16,
+            config,
+            &deadline,
+            &QueryCache::new(),
+        ))
+    }
+
+    /// The references at `position` of `answer`'s file.
+    pub(crate) fn refs(
+        service: &Service,
+        answer: &Answer,
+        position: Position,
+    ) -> Result<Envelope, QueryError> {
+        refs_with(
+            service,
+            answer,
+            position,
+            &QueryConfig::default(),
+            ReferencesQuery::default(),
+        )
+    }
+
+    /// The `(file name, line)` of every location of `envelope`, exact and possible.
+    pub(crate) fn all_places(envelope: &Envelope) -> Vec<(String, u32)> {
+        let mut out = places(envelope.exact());
+        out.extend(possible_places(envelope));
+        out.sort();
+        out
+    }
+
+    /// Checks the references `envelope`, asked at `position` of `file`, against the golden `name`.
+    pub(crate) fn golden_refs(name: &str, file: &str, position: Position, envelope: &Envelope) {
+        let text = query_golden::references(envelope, &uri(&source(file)), position).unwrap();
+        query_golden::check(&goldens(), name, &text).unwrap();
     }
 
     /// The `(file name, line)` of each location, 0-based lines.
@@ -1370,4 +1422,511 @@ fn should_say_incomplete_when_a_symbol_query_is_over_the_limit() {
         symbols.completeness.reasons(),
         [IncompleteReason::TargetUnresolved]
     );
+}
+
+/// The 0-based line of the `nth` occurrence of `needle` in `file` of `world`.
+fn line_of(world: &World, file: &str, needle: &str, nth: usize) -> u32 {
+    world.at(file, needle, nth, 0).line()
+}
+
+fn place(file: &str, line: u32) -> (String, u32) {
+    (file.rsplit('/').next().unwrap_or(file).to_owned(), line)
+}
+
+#[test]
+fn should_list_every_call_and_no_mention_in_a_comment_or_string_when_a_method_s_references_are_asked()
+ {
+    // given: `Tally.post(int)`, named in Javadoc, comments, a string and a text block, called
+    // with one argument four times and with two once
+    let world = World::new();
+    let mut service = world.service();
+    let tally = ask(&mut service, "refs/Tally.java");
+    let at = world.at("refs/Tally.java", "post(int amount)", 0, 1);
+    // when
+    let envelope = refs(&service, &tally, at).unwrap();
+    // then: the calls of arity one and the method reference, nothing else
+    assert_eq!(
+        all_places(&envelope),
+        [
+            place(
+                "Clerk.java",
+                line_of(&world, "refs/Clerk.java", "tally.post(amount);", 0)
+            ),
+            place(
+                "Clerk.java",
+                line_of(&world, "refs/Clerk.java", "tally::post", 0)
+            ),
+            place(
+                "Tally.java",
+                line_of(&world, "refs/Tally.java", "post(first)", 0)
+            ),
+            place(
+                "Tally.java",
+                line_of(&world, "refs/Tally.java", "this.post(second)", 0)
+            ),
+            place(
+                "Tally.java",
+                line_of(&world, "refs/Tally.java", "post(amount);", 0)
+            ),
+        ]
+    );
+    assert!(envelope.complete(), "{:?}", envelope.incomplete_because());
+    assert_eq!(
+        target(&envelope),
+        Some((
+            "com.acme.refs.Tally#post(int)".to_owned(),
+            TargetStatus::Exact
+        ))
+    );
+    golden_refs(
+        "refs.method.comments-and-strings",
+        "refs/Tally.java",
+        at,
+        &envelope,
+    );
+}
+
+#[test]
+fn should_list_field_uses_and_no_text_block_or_comment_when_a_field_s_references_are_asked() {
+    // given: `Tally.total`, also spelled in a text block and a comment of `Clerk`
+    let world = World::new();
+    let mut service = world.service();
+    let tally = ask(&mut service, "refs/Tally.java");
+    let at = world.at("refs/Tally.java", "total;", 0, 1);
+    // when
+    let envelope = refs(&service, &tally, at).unwrap();
+    // then: not `Cart`'s field of that name, in another package (`total` is package-private)
+    let assigned = line_of(&world, "refs/Clerk.java", "tally.total =", 0);
+    assert_eq!(
+        all_places(&envelope),
+        [
+            place("Clerk.java", assigned),
+            place("Clerk.java", assigned),
+            place(
+                "Tally.java",
+                line_of(&world, "refs/Tally.java", "total = start", 0)
+            ),
+            place(
+                "Tally.java",
+                line_of(&world, "refs/Tally.java", "total += amount", 0)
+            ),
+        ]
+    );
+    assert!(envelope.complete(), "{:?}", envelope.incomplete_because());
+    golden_refs(
+        "refs.field.text-block-and-comment",
+        "refs/Tally.java",
+        at,
+        &envelope,
+    );
+}
+
+#[test]
+fn should_keep_a_private_field_s_references_to_its_file_when_another_file_uses_the_name() {
+    // given: the private field `count` and a method `count()` called from `Clerk`
+    let world = World::new();
+    let mut service = world.service();
+    let tally = ask(&mut service, "refs/Tally.java");
+    let at = world.at("refs/Tally.java", "count;", 0, 1);
+    // when
+    let envelope = refs(&service, &tally, at).unwrap();
+    // then
+    assert_eq!(
+        all_places(&envelope),
+        [
+            place(
+                "Tally.java",
+                line_of(&world, "refs/Tally.java", "count++", 0)
+            ),
+            place(
+                "Tally.java",
+                line_of(&world, "refs/Tally.java", "return count;", 0)
+            ),
+        ]
+    );
+    assert!(envelope.complete(), "{:?}", envelope.incomplete_because());
+}
+
+#[test]
+fn should_list_this_super_and_method_references_when_a_constructor_s_references_are_asked() {
+    // given: `Tally(int)` (called by `new` and `super(5)`) and `Tally()` (by `this()`,
+    // `Tally::new`, and implicitly by `Spot`'s constructor)
+    let world = World::new();
+    let mut service = world.service();
+    let tally = ask(&mut service, "refs/Tally.java");
+    let with_start = world.at("refs/Tally.java", "Tally(int start)", 0, 1);
+    let empty = world.at("refs/Tally.java", "Tally() {}", 0, 1);
+    // when
+    let one = refs(&service, &tally, with_start).unwrap();
+    let none = refs(&service, &tally, empty).unwrap();
+    // then: `Tally::new` may name either constructor (a method reference passes no count)
+    assert_eq!(
+        all_places(&one),
+        [
+            place(
+                "Audit.java",
+                line_of(&world, "refs/Audit.java", "super(5)", 0)
+            ),
+            place(
+                "Clerk.java",
+                line_of(&world, "refs/Clerk.java", "new Tally(1)", 0)
+            ),
+            place(
+                "Clerk.java",
+                line_of(&world, "refs/Clerk.java", "Tally::new", 0)
+            ),
+        ]
+    );
+    assert!(one.complete(), "{:?}", one.incomplete_because());
+    assert_eq!(
+        all_places(&none),
+        [
+            place(
+                "Clerk.java",
+                line_of(&world, "refs/Clerk.java", "Tally::new", 0)
+            ),
+            place(
+                "Tally.java",
+                line_of(&world, "refs/Tally.java", "this();", 0)
+            ),
+        ]
+    );
+    assert_eq!(none.incomplete_because(), [IncompleteReason::ImplicitUses]);
+}
+
+#[test]
+fn should_say_implicit_uses_when_a_method_may_be_called_without_its_name() {
+    // given: a method of a class whose superclass is outside the index, an enum's constructor,
+    // an annotation's `value` and another of its elements
+    let world = World::new();
+    let mut service = world.service();
+    let ledger = ask(&mut service, "shop/Ledger.java");
+    let kind = ask(&mut service, "refs/Kind.java");
+    let note = ask(&mut service, "refs/Note.java");
+    // when
+    let sum = refs(
+        &service,
+        &ledger,
+        world.at("shop/Ledger.java", "sum()", 0, 1),
+    )
+    .unwrap();
+    let constructor = refs(
+        &service,
+        &kind,
+        world.at("refs/Kind.java", "Kind(int", 0, 1),
+    )
+    .unwrap();
+    let value = refs(&service, &note, world.at("refs/Note.java", "value()", 0, 1)).unwrap();
+    let weight = refs(
+        &service,
+        &note,
+        world.at("refs/Note.java", "weight()", 0, 1),
+    )
+    .unwrap();
+    // then
+    for envelope in [&sum, &constructor, &value] {
+        assert_eq!(
+            envelope.incomplete_because(),
+            [IncompleteReason::ImplicitUses]
+        );
+    }
+    assert_eq!(
+        all_places(&sum),
+        [place(
+            "Ledger.java",
+            line_of(&world, "shop/Ledger.java", "return sum()", 0)
+        )]
+    );
+    assert_eq!(
+        all_places(&weight),
+        [place(
+            "Clerk.java",
+            line_of(&world, "refs/Clerk.java", "weight = 2", 0)
+        )]
+    );
+    assert!(weight.complete(), "{:?}", weight.incomplete_because());
+}
+
+#[test]
+fn should_list_every_site_of_the_name_and_say_unresolved_when_the_target_is_not_proved() {
+    // given: a use whose binding the canned indexer's summaries cannot prove
+    let world = World::new();
+    let mut service = world.service();
+    let clerk = ask(&mut service, "refs/Clerk.java");
+    let at = world.at("refs/Clerk.java", "post(amount, amount)", 0, 1);
+    // when
+    let envelope = refs(&service, &clerk, at).unwrap();
+    // then: every `post` site of the view, whatever its arity, and no target
+    assert!(envelope.target().is_none());
+    assert!(envelope.exact().is_empty());
+    assert_eq!(envelope.possible().len(), 6);
+    assert_eq!(
+        envelope.incomplete_because(),
+        [IncompleteReason::TargetUnresolved]
+    );
+}
+
+#[test]
+fn should_answer_incomplete_with_its_reason_when_a_file_is_pending_stale_or_unwatched() {
+    // given: a view that defers files at its open, a file rewritten after the pin, and a view on
+    // a filesystem that cannot be watched
+    let world = World::new();
+    let mut config = ServiceConfig::new("t1");
+    config.open_whole = 1;
+    let mut deferred = world.service_with(config);
+    let partly = ask(&mut deferred, "refs/Tally.java");
+    let mut service = world.service();
+    let tally = ask(&mut service, "refs/Tally.java");
+    let at = world.at("refs/Tally.java", "post(int amount)", 0, 1);
+    let changed = format!("// moved\n{}", world.text("refs/Clerk.java"));
+    // when
+    let pending = refs(&deferred, &partly, at).unwrap();
+    world
+        .tree
+        .write(&format!("m/{SRC}/refs/Clerk.java"), changed.as_bytes())
+        .unwrap();
+    let stale = refs(&service, &tally, at).unwrap();
+    world
+        .tree
+        .set_filesystem(jfl_application::source_tree::FsKind::Network);
+    let mut unwatched_service = world.service();
+    let unwatched_answer = ask(&mut unwatched_service, "refs/Tally.java");
+    let unwatched = refs(&unwatched_service, &unwatched_answer, at).unwrap();
+    // then
+    assert!(
+        pending
+            .incomplete_because()
+            .iter()
+            .any(|r| matches!(r, IncompleteReason::ModulePartlyIndexed { .. })),
+        "{:?}",
+        pending.incomplete_because()
+    );
+    assert_eq!(
+        stale.incomplete_because(),
+        [IncompleteReason::ModuleStale {
+            module: jfl_domain::ModuleName::worktree(),
+            stale: 1,
+        }]
+    );
+    assert_eq!(
+        all_places(&stale),
+        [
+            place(
+                "Tally.java",
+                line_of(&world, "refs/Tally.java", "post(first)", 0)
+            ),
+            place(
+                "Tally.java",
+                line_of(&world, "refs/Tally.java", "this.post(second)", 0)
+            ),
+            place(
+                "Tally.java",
+                line_of(&world, "refs/Tally.java", "post(amount);", 0)
+            ),
+        ]
+    );
+    assert!(
+        unwatched
+            .incomplete_because()
+            .contains(&IncompleteReason::NotWatched)
+    );
+}
+
+#[test]
+fn should_say_what_was_left_out_when_possible_is_dropped_or_capped() {
+    // given
+    let world = World::new();
+    let mut service = world.service();
+    let tally = ask(&mut service, "refs/Tally.java");
+    let at = world.at("refs/Tally.java", "post(int amount)", 0, 1);
+    let capped_config = QueryConfig {
+        references_limit: 2,
+        ..QueryConfig::default()
+    };
+    // when
+    let exact_only = refs_with(
+        &service,
+        &tally,
+        at,
+        &QueryConfig::default(),
+        ReferencesQuery {
+            exact_only: true,
+            ..ReferencesQuery::default()
+        },
+    )
+    .unwrap();
+    let with_declaration = refs_with(
+        &service,
+        &tally,
+        at,
+        &QueryConfig::default(),
+        ReferencesQuery {
+            include_declaration: true,
+            ..ReferencesQuery::default()
+        },
+    )
+    .unwrap();
+    let capped = refs_with(
+        &service,
+        &tally,
+        at,
+        &capped_config,
+        ReferencesQuery::default(),
+    )
+    .unwrap();
+    // then
+    assert!(exact_only.possible().is_empty());
+    assert_eq!(
+        exact_only.incomplete_because(),
+        [IncompleteReason::PossibleLeftOut { count: 5 }]
+    );
+    assert_eq!(
+        places(with_declaration.exact()),
+        [place("Tally.java", at.line())]
+    );
+    assert!(with_declaration.complete());
+    assert_eq!(capped.possible().len(), 2);
+    assert_eq!(
+        capped.incomplete_because(),
+        [IncompleteReason::ResultsCapped { limit: 2 }]
+    );
+}
+
+#[test]
+fn should_answer_incomplete_with_deadline_when_references_pass_it() {
+    // given: a clock that passes the 2 s deadline within a few readings
+    let world = World::new();
+    let mut service = world.service();
+    let tally = ask(&mut service, "refs/Tally.java");
+    let at = world.at("refs/Tally.java", "post(int amount)", 0, 1);
+    let clock = FakeWallClock::stepping(1_800_000_000, Duration::from_secs(3));
+    let config = QueryConfig::default();
+    // when
+    let envelope = block_on(references(
+        &pinned(&tally),
+        &service.sources(),
+        ReferencesQuery {
+            position: at,
+            ..ReferencesQuery::default()
+        },
+        UTF16,
+        &config,
+        &ClockDeadline::new(&clock, config.references_budget),
+        &QueryCache::new(),
+    ))
+    .unwrap();
+    // then
+    assert!(
+        envelope
+            .incomplete_because()
+            .contains(&IncompleteReason::Deadline)
+    );
+}
+
+#[test]
+fn should_count_a_declaration_s_references_when_hovering_its_name() {
+    // given
+    let world = World::new();
+    let mut service = world.service();
+    let tally = ask(&mut service, "refs/Tally.java");
+    let clock = still();
+    let config = QueryConfig::default();
+    let deadline = ClockDeadline::new(&clock, config.definition_budget);
+    let hover_at = |position| {
+        block_on(hover(
+            &pinned(&tally),
+            &service.sources(),
+            position,
+            UTF16,
+            &config,
+            &deadline,
+            &QueryCache::new(),
+        ))
+        .unwrap()
+    };
+    // when
+    let declaration = hover_at(world.at("refs/Tally.java", "post(int amount)", 0, 1));
+    let use_site = hover_at(world.at("refs/Tally.java", "post(first)", 0, 1));
+    // then
+    let counts = declaration.references.unwrap();
+    assert_eq!(counts.to_string(), "0 exact, 5 possible, complete");
+    assert!(use_site.references.is_none());
+}
+
+#[test]
+fn should_keep_a_package_private_member_s_references_to_its_package_when_another_package_uses_the_name()
+ {
+    // given: `Tally.count()` is package-private, and `Retry` (another package) declares and
+    // calls a `count()` of its own
+    let world = World::new();
+    let mut service = world.service();
+    let tally = ask(&mut service, "refs/Tally.java");
+    let at = world.at("refs/Tally.java", "count() {", 0, 1);
+    // when
+    let envelope = refs(&service, &tally, at).unwrap();
+    // then
+    assert_eq!(
+        all_places(&envelope),
+        [place(
+            "Clerk.java",
+            line_of(&world, "refs/Clerk.java", "tally.count()", 0)
+        )]
+    );
+    assert!(envelope.complete(), "{:?}", envelope.incomplete_because());
+}
+
+#[test]
+fn should_say_implicit_uses_when_an_implicit_super_may_call_the_constructor() {
+    // given: a variable-arity constructor and a private one, each called only by a subclass's
+    // implicit `super()`, and a constructor called by `super(1)` on an annotated superclass
+    let world = World::new();
+    let mut service = world.service();
+    let implicit = ask(&mut service, "refs/Implicit.java");
+    let file = "refs/Implicit.java";
+    // when
+    let varargs = refs(
+        &service,
+        &implicit,
+        world.at(file, "Spread(int... xs)", 0, 1),
+    )
+    .unwrap();
+    let private = refs(&service, &implicit, world.at(file, "Secret() {}", 0, 1)).unwrap();
+    let annotated = refs(
+        &service,
+        &implicit,
+        world.at(file, "Marked(int start)", 0, 1),
+    )
+    .unwrap();
+    // then
+    for envelope in [&varargs, &private] {
+        assert_eq!(
+            envelope.incomplete_because(),
+            [IncompleteReason::ImplicitUses]
+        );
+    }
+    assert_eq!(
+        all_places(&annotated),
+        [place("Implicit.java", line_of(&world, file, "super(1)", 0))]
+    );
+    assert!(annotated.complete(), "{:?}", annotated.incomplete_because());
+}
+
+#[test]
+fn should_say_implicit_uses_when_a_record_pattern_may_call_the_accessor() {
+    // given: a record's component, and its explicit accessor; `instanceof Pt(int a, int b)`
+    // calls both accessors without naming them
+    let world = World::new();
+    let mut service = world.service();
+    let implicit = ask(&mut service, "refs/Implicit.java");
+    let file = "refs/Implicit.java";
+    // when
+    let component = refs(&service, &implicit, world.at(file, "int x,", 0, 4)).unwrap();
+    let accessor = refs(&service, &implicit, world.at(file, "int y()", 0, 4)).unwrap();
+    // then
+    for envelope in [&component, &accessor] {
+        assert_eq!(
+            envelope.incomplete_because(),
+            [IncompleteReason::ImplicitUses]
+        );
+    }
 }
