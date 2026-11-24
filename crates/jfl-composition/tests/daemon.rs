@@ -751,3 +751,73 @@ fn should_answer_a_definition_from_the_views_with_an_honest_envelope_when_a_clie
         matches!(past.outcome, Outcome::Error(e) if e.code == jfl_protocol::rpc::ErrorCode::PositionOutOfRange)
     );
 }
+
+#[test]
+fn should_answer_a_request_between_the_slices_of_a_settle_when_the_view_is_large() {
+    // given: a worktree of more files than an open reads whole: the request's own package (two
+    // files) and 1,100 files elsewhere, which the open defers and the settle reads in slices of
+    // `SETTLE_SLICE` (512): three slices, so three generations after the open's
+    use jfl_composition::daemon::views::SETTLE_SLICE;
+    use jfl_protocol::messages::{Definition, PositionParams};
+    let daemons = Daemons::new();
+    let root = daemons.root().join("wt");
+    let main = b"package a;\nclass Main { Other other; }\n".to_vec();
+    let other = b"package a;\nclass Other {}\n".to_vec();
+    let mut files: Vec<(String, Vec<u8>)> = vec![
+        ("a/Main.java".to_owned(), main),
+        ("a/Other.java".to_owned(), other),
+    ];
+    for n in 0..1100 {
+        files.push((
+            format!("b/p{}/C{n}.java", n % 10),
+            format!("package b;\nclass C{n} {{}}\n").into_bytes(),
+        ));
+    }
+    let borrowed: Vec<(&str, &[u8])> = files
+        .iter()
+        .map(|(p, b)| (p.as_str(), b.as_slice()))
+        .collect();
+    jfl_testkit::fixtures::git::Repo::init(&root, &borrowed).unwrap();
+    let at = PositionParams {
+        uri: DocumentUri::from(
+            jfl_domain::FileUri::from_path(&root.join("a/Main.java").to_string_lossy()).unwrap(),
+        ),
+        line: 1,
+        col: 6,
+        position_encoding: jfl_domain::PositionEncoding::Utf16,
+        clamp: false,
+    };
+    let mut proxy = daemons.proxy("slices", None);
+    let mut ask = || match proxy
+        .call::<Definition>(at.clone(), BUDGET)
+        .unwrap()
+        .outcome
+    {
+        Outcome::Result(found) => (found.view.generation, found.completeness.complete()),
+        Outcome::Error(e) => panic!("not answered: {e:?}"),
+    };
+
+    // when: the first request (on a declaration's own name: exact, so only the view can make it
+    // incomplete) opens the view; the next ones are asked until one is complete
+    let (opened, first_complete) = ask();
+    let mut seen = Vec::new();
+    let waited = wait_until(Duration::from_secs(60), "a complete answer", || {
+        let answer = ask();
+        seen.push(answer);
+        answer.1
+    });
+    seen.dedup();
+    waited.map_err(|e| format!("{e:?}: {seen:?}")).unwrap();
+
+    // then: every answer before the last slice was incomplete, and the view was complete at the
+    // third generation after the open's: one per slice
+    let slices = u64::try_from(1100_usize.div_ceil(SETTLE_SLICE)).unwrap();
+    assert_eq!(slices, 3);
+    assert!(!first_complete);
+    let (last, _) = seen.last().copied().unwrap();
+    assert_eq!(last, opened + slices, "{seen:?}");
+    assert!(
+        seen.iter().all(|(g, complete)| *complete == (*g == last)),
+        "{seen:?}"
+    );
+}

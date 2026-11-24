@@ -89,6 +89,16 @@ invariant = "allInvariants"
 max_steps = 10
 seed = "0x3"
 
+# IDX-09d: the view settled in slices (`reconcilePart`), a request answered between them.
+[traces.views-settle-in-slices]
+model = "views"
+main = "views"
+init = "init"
+step = "settleInSlices"
+invariant = "allInvariants"
+max_steps = 26
+seed = "0x3"
+
 # The daemon model's scenarios (FORMAL-04, doc/formal-models.md): scripted steps like the views
 # scenarios, each from an initial state with its pick fixed (`initClean`: no socket file;
 # `initStale`: one left by a crash). Replayed through the daemon driver (IDX-12,

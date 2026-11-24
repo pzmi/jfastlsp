@@ -347,6 +347,42 @@ module views {
     }
   }
 
+  // The paths the waiting requests of `view` need: each one's file, while the generation it waits
+  // for is not published (its stat saw the file change, so the build that publishes that
+  // generation must read it).
+  def needed(view: str): Set[str] =
+    REQS.filter(id => {
+      val r = requests.get(id)
+      r.phase == "waiting" and r.view == view and r.needGen > gen(view)
+    }).map(id => requests.get(id).path)
+
+  // Takes part of the delivered events as a build of its own (IDX-09d): the daemon settles a view
+  // it opened in two steps a slice at a time, so its loop is never held for the whole view. The
+  // rest stay delivered and unpublished, so no answer is complete until a build takes them. Never
+  // a rescan, which is whole (it certifies, records HEAD and the index, and serves `sync`); and
+  // every path a waiting request needs is taken, so the generation it waits for holds what its
+  // stat saw.
+  action reconcilePart(view: str, take: Set[str]): bool = {
+    val v = views.get(view)
+    val g = v.published
+    all {
+      not(v.build.active),
+      not(v.rescan),
+      take != Set(),
+      take.subseteq(v.dirty),
+      needed(view).subseteq(take),
+      views' = views.set(view, { ...v, dirty: v.dirty.exclude(take), build: {
+        active: true, head: g.head, gitIndex: g.gitIndex,
+        index: g.index.keys().mapBy(p => if (take.contains(p)) file(p) else g.index.get(p)),
+        readAt: g.readAt,
+        pending: take,
+        certifies: false,
+        syncEpoch: -1,
+      }}),
+      tree' = tree, watcher' = watcher, store' = store, requests' = requests, syncs' = syncs,
+    }
+  }
+
   // Re-reads one pending path, summarises it (racy when the file was written this tick) and
   // stores the summary.
   action summarise(view: str, path: str): bool = {
@@ -548,6 +584,15 @@ module views {
 
   action daemonStep = any {
     nondet view = VIEWS.oneOf() reconcileStart(view),
+    // A part of the view's delivered events: one delivered path alone, or with every path the
+    // waiting requests need. Picking among these rather than every subset makes the simulation
+    // reach a part while a request waits, the case the `needed` guard is for (IDX-09d's review:
+    // with every subset, 20000 samples of 30 steps never reached it, and the broken control
+    // `reconcilePartIgnoringRequests` went unseen).
+    nondet view = VIEWS.oneOf()
+    nondet take = views.get(view).dirty.map(p => Set(Set(p), needed(view).union(Set(p))))
+      .flatten().union(Set(Set())).oneOf()
+    reconcilePart(view, take),
     nondet view = VIEWS.oneOf() nondet path = PATHS.oneOf() summarise(view, path),
     nondet view = VIEWS.oneOf() publish(view),
     nondet view = VIEWS.oneOf() syncStart(view),
@@ -874,6 +919,65 @@ module views {
           nondet req = Set("r1").oneOf() requestPin(req) },
   }
 
+  // A view settled in slices (IDX-09d): two files are delivered; a part takes one and publishes;
+  // a request on that file is answered between the slices from the new generation, incomplete
+  // while the other waits. The first file changes again; a request on the second waits, so the
+  // next part must take it beside the first; after its second cookie the answer is complete.
+  action settleInSlices = any {
+    all { ver("m/A") == 1,
+          nondet path = Set("m/A").oneOf() nondet racy = Set(false).oneOf() write(path, racy) },
+    all { ver("m/A") == 2, ver("m/B") == 1,
+          nondet path = Set("m/B").oneOf() nondet racy = Set(false).oneOf() write(path, racy) },
+    all { ver("m/B") == 2, file("m/B").recent, tick },
+    all { ver("m/B") == 2, not(file("m/B").recent), queued("m") != Set(), phase("r2") == "idle",
+          nondet keep = Set(false).oneOf() deliver(keep) },
+    all { queued("m") == Set(), gen("m") == 1, not(views.get("m").build.active),
+          views.get("m").dirty == Set("m/A", "m/B"),
+          nondet view = Set("m").oneOf() nondet take = Set(Set("m/A")).oneOf() reconcilePart(view, take) },
+    all { gen("m") == 1, views.get("m").build.pending == Set("m/A"),
+          nondet view = Set("m").oneOf() nondet path = Set("m/A").oneOf() summarise(view, path) },
+    all { gen("m") == 1, views.get("m").build.active, views.get("m").build.pending == Set(),
+          nondet view = Set("m").oneOf() publish(view) },
+    all { gen("m") == 2, phase("r2") == "idle", not(views.get("m").build.active),
+          nondet req = Set("r2").oneOf() nondet path = Set("m/A").oneOf() requestStart(req, path) },
+    all { requests.get("r2").cookie == "queued",
+          nondet keep = Set(false).oneOf() deliver(keep) },
+    all { phase("r2") == "waiting", requests.get("r2").cookie == "delivered",
+          nondet req = Set("r2").oneOf() requestPin(req) },
+    all { phase("r2") == "pinned",
+          nondet req = Set("r2").oneOf() finish(req) },
+    all { phase("r2") == "done", ver("m/A") == 2,
+          nondet path = Set("m/A").oneOf() nondet racy = Set(false).oneOf() write(path, racy) },
+    all { ver("m/A") == 3, file("m/A").recent, tick },
+    all { phase("r2") == "done", ver("m/A") == 3, not(file("m/A").recent), queued("m") != Set(),
+          nondet keep = Set(false).oneOf() deliver(keep) },
+    all { phase("r2") == "done", phase("r1") == "idle", queued("m") == Set(),
+          views.get("m").dirty == Set("m/A", "m/B"),
+          nondet req = Set("r1").oneOf() nondet path = Set("m/B").oneOf() requestStart(req, path) },
+    all { requests.get("r1").cookie == "queued",
+          nondet keep = Set(false).oneOf() deliver(keep) },
+    all { phase("r1") == "waiting", requests.get("r1").cookie == "delivered", gen("m") == 2,
+          not(views.get("m").build.active), views.get("m").dirty == Set("m/A", "m/B"),
+          nondet view = Set("m").oneOf() nondet take = Set(Set("m/A", "m/B")).oneOf()
+          reconcilePart(view, take) },
+    all { views.get("m").build.pending == Set("m/A", "m/B"),
+          nondet view = Set("m").oneOf() nondet path = Set("m/A").oneOf() summarise(view, path) },
+    all { views.get("m").build.pending == Set("m/B"),
+          nondet view = Set("m").oneOf() nondet path = Set("m/B").oneOf() summarise(view, path) },
+    all { gen("m") == 2, views.get("m").build.active, views.get("m").build.pending == Set(),
+          nondet view = Set("m").oneOf() publish(view) },
+    all { gen("m") == 3, phase("r1") == "waiting", requests.get("r1").cookie == "delivered",
+          requests.get("r1").cookies == 1,
+          nondet req = Set("r1").oneOf() requestRecookie(req) },
+    all { gen("m") == 3, phase("r1") == "waiting", requests.get("r1").cookie == "delivered",
+          requests.get("r1").cookies == 2,
+          nondet req = Set("r1").oneOf() requestPin(req) },
+    all { phase("r1") == "pinned", requests.get("r1").reads == Set(),
+          nondet req = Set("r1").oneOf() nondet path = Set("m/B").oneOf() read(req, path) },
+    all { phase("r1") == "pinned", requests.get("r1").reads != Set(),
+          nondet req = Set("r1").oneOf() finish(req) },
+  }
+
   // The scenario tests replay each script as named actions, step for step (a test that draws a
   // nondeterministic value runs 10000 times, so the scripts themselves serve only the traces).
 
@@ -1091,6 +1195,81 @@ module views {
         requests.get("r1").needGen == 3, not(pinnable("r1")), allInvariants,
       })
 
+  run settleInSlicesTest =
+    init
+      .then(write("m/A", false))
+      .then(write("m/B", false))
+      .then(tick)
+      .then(2.reps(_ => deliver(false)))
+      .then(reconcilePart("m", Set("m/A")))
+      .then(summarise("m", "m/A"))
+      .then(publish("m"))
+      .then(requestStart("r2", "m/A"))
+      .then(deliver(false))
+      .then(requestPin("r2"))
+      .expect({
+        val r = requests.get("r2")
+        and {
+          r.gen == 2, not(r.complete), r.snap.get("m/A").ver == 2,
+          views.get("m").dirty == Set("m/B"), allInvariants,
+        }
+      })
+      .then(finish("r2"))
+      .then(write("m/A", false))
+      .then(tick)
+      .then(deliver(false))
+      .then(requestStart("r1", "m/B"))
+      .then(deliver(false))
+      .expect(needed("m") == Set("m/B") and views.get("m").dirty == Set("m/A", "m/B"))
+      .then(reconcilePart("m", Set("m/A", "m/B")))
+      .then(summarise("m", "m/A"))
+      .then(summarise("m", "m/B"))
+      .then(publish("m"))
+      .then(requestRecookie("r1"))
+      .then(deliver(false))
+      .then(requestPin("r1"))
+      .then(read("r1", "m/B"))
+      .then(finish("r1"))
+      .expect({
+        val r = requests.get("r1")
+        and {
+          r.gen == 3, r.complete, r.snap.get("m/A").ver == 3, r.snap.get("m/B").ver == 2,
+          views.get("m").dirty == Set(), allInvariants,
+        }
+      })
+
+  // A part may not leave out a path a waiting request needs, nor run while a rescan is due; each
+  // refusal has a twin from the same state that is taken.
+  run twoDeliveredAndARequestOnB =
+    init
+      .then(write("m/A", false))
+      .then(write("m/B", false))
+      .then(tick)
+      .then(2.reps(_ => deliver(false)))
+      .then(requestStart("r1", "m/B"))
+
+  run partLeavingOutANeededPathIsRefusedTest =
+    twoDeliveredAndARequestOnB.then(reconcilePart("m", Set("m/A"))).fail()
+
+  run partTakingTheNeededPathIsTakenTest =
+    twoDeliveredAndARequestOnB
+      .then(reconcilePart("m", Set("m/A", "m/B")))
+      .expect(views.get("m").build.pending == Set("m/A", "m/B") and allInvariants)
+
+  run deliveredWithARescanDue =
+    init
+      .then(write("m/A", false))
+      .then(moveHead("m"))
+      .then(2.reps(_ => deliver(false)))
+
+  run partDuringARescanIsRefusedTest =
+    deliveredWithARescanDue.then(reconcilePart("m", Set("m/A"))).fail()
+
+  run rescanTakesWhatAPartWouldTest =
+    deliveredWithARescanDue
+      .then(reconcileStart("m"))
+      .expect(views.get("m").build.certifies and views.get("m").build.pending == Set("m/A"))
+
   // ---- Broken-model controls (ver §6.1): each must violate its named invariant ----
 
   // Publishes before every summary the build names is stored.
@@ -1267,6 +1446,24 @@ module views {
       views' = views.setBy(view, v => { ...v, rescan: true, certain: false,
         build: { ...v.build, certifies: false } }),
       tree' = tree, store' = store, requests' = requests, syncs' = syncs,
+    }
+  }
+
+  // Takes part of the delivered events without the paths the waiting requests need.
+  action reconcilePartIgnoringRequests(view: str, take: Set[str]): bool = {
+    val v = views.get(view)
+    val g = v.published
+    all {
+      not(v.build.active),
+      not(v.rescan),
+      take != Set(),
+      take.subseteq(v.dirty),
+      views' = views.set(view, { ...v, dirty: v.dirty.exclude(take), build: {
+        active: true, head: g.head, gitIndex: g.gitIndex,
+        index: g.index.keys().mapBy(p => if (take.contains(p)) file(p) else g.index.get(p)),
+        readAt: g.readAt, pending: take, certifies: false, syncEpoch: -1,
+      }}),
+      tree' = tree, watcher' = watcher, store' = store, requests' = requests, syncs' = syncs,
     }
   }
 
@@ -1494,4 +1691,20 @@ module views {
       .then(syncStart("m"))
       .then(syncDoneEarly("m"))
       .expect(not(SyncIsBarrier))
+
+  // A slice that leaves out the file a waiting request's stat saw change publishes the generation
+  // the request waits for without it: the request pins an older version than its stat saw.
+  run partIgnoringRequestsViolatesFreshAfterStatTest =
+    init
+      .then(write("m/A", false))
+      .then(write("m/B", false))
+      .then(tick)
+      .then(2.reps(_ => deliver(false)))
+      .then(requestStart("r1", "m/B"))
+      .then(deliver(false))
+      .then(reconcilePartIgnoringRequests("m", Set("m/A")))
+      .then(summarise("m", "m/A"))
+      .then(publish("m"))
+      .then(requestPin("r1"))
+      .expect(not(FreshAfterStat))
 }

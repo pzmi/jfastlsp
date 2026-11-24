@@ -536,3 +536,103 @@ fn should_refuse_publish_when_a_named_summary_is_not_stored() -> TestResult {
     );
     Ok(())
 }
+
+/// Both files of [`opened`] changed (`A` to key 3, `B` to key 4) and delivered.
+fn both_delivered() -> Result<(Registry, Store, FileSeen, FileSeen), String> {
+    let (mut registry, store) = opened()?;
+    for path in ["A.java", "B.java"] {
+        registry
+            .deliver(Event::File {
+                view: root()?,
+                path: rel(path)?,
+            })
+            .map_err(err)?;
+    }
+    Ok((registry, store, seen(11, 1, 200), seen(21, 2, 200)))
+}
+
+#[test]
+fn should_publish_a_part_and_keep_the_rest_dirty_when_a_part_is_taken() -> TestResult {
+    // given: both files delivered
+    let (mut registry, mut store, a2, _) = both_delivered()?;
+
+    // when: a part takes A alone and publishes
+    let take = BTreeSet::from([rel("A.java")?]);
+    let pending = registry
+        .reconcile_part(&root()?, &take, |_| a2)
+        .map_err(err)?;
+    store.0.insert(3);
+    registry
+        .summarised(&root()?, &rel("A.java")?, a2, 3, Stamp(1))
+        .map_err(err)?;
+    let published = registry.publish(&root()?, &store).map_err(err)?;
+    let r1 = RequestId(1);
+    registry
+        .request_start(r1, &file("A.java")?, &a2, &git(1), Stamp(2))
+        .map_err(err)?;
+    registry
+        .deliver(Event::Cookie {
+            id: r1,
+            at: Stamp(2),
+        })
+        .map_err(err)?;
+    let pin = registry.request_pin(r1, &git(1)).map_err(err)?.clone();
+
+    // then: generation 2 holds the new A and the old B; B is still delivered, so the answer at
+    // generation 2 is incomplete, though A's own stat proved it fresh
+    assert_eq!(pending, take);
+    assert_eq!(published.0, 2);
+    assert_eq!(pin.generation.generation.0, 2);
+    let summaries: Vec<Option<u32>> = pin.generation.index.values().map(|e| e.summary).collect();
+    assert_eq!(summaries, vec![Some(3), Some(2)]);
+    let view = registry.view(&root()?).ok_or("no view")?;
+    assert_eq!(view.dirty, BTreeSet::from([rel("B.java")?]));
+    assert!(!pin.completeness.is_complete());
+    Ok(())
+}
+
+#[test]
+fn should_refuse_a_part_that_leaves_out_a_needed_path_when_a_request_waits() -> TestResult {
+    // given: both files delivered, and a request on B whose stat saw it change
+    let (mut registry, _store, a2, b2) = both_delivered()?;
+    let r1 = RequestId(1);
+    registry
+        .request_start(r1, &file("B.java")?, &b2, &git(1), Stamp(0))
+        .map_err(err)?;
+
+    // when: a part takes A alone, then A and B
+    let without = registry.reconcile_part(&root()?, &BTreeSet::from([rel("A.java")?]), |_| a2);
+    let needed = registry.needed(&root()?);
+    let with = registry.reconcile_part(
+        &root()?,
+        &BTreeSet::from([rel("A.java")?, rel("B.java")?]),
+        |p| if p.as_str() == "A.java" { a2 } else { b2 },
+    );
+
+    // then: B is needed; the part without it is refused, the one with it taken
+    assert_eq!(needed, BTreeSet::from([rel("B.java")?]));
+    assert_eq!(without, Err(ViewError::NeededNotTaken));
+    assert_eq!(with.map(|t| t.len()), Ok(2));
+    Ok(())
+}
+
+#[test]
+fn should_refuse_a_part_when_a_rescan_is_due_or_a_path_is_not_delivered() -> TestResult {
+    // given: both files delivered
+    let (mut registry, _store, a2, _) = both_delivered()?;
+    let unknown = BTreeSet::from([rel("C.java")?]);
+
+    // when: a part names an undelivered path, then a rescan is asked for
+    let not_dirty = registry.reconcile_part(&root()?, &unknown, |_| a2);
+    let empty = registry.reconcile_part(&root()?, &BTreeSet::new(), |_| a2);
+    registry
+        .deliver(Event::Git { view: root()? })
+        .map_err(err)?;
+    let rescan = registry.reconcile_part(&root()?, &BTreeSet::from([rel("A.java")?]), |_| a2);
+
+    // then
+    assert_eq!(not_dirty, Err(ViewError::NotDirty));
+    assert_eq!(empty, Err(ViewError::NothingToReconcile));
+    assert_eq!(rescan, Err(ViewError::RescanDue));
+    Ok(())
+}

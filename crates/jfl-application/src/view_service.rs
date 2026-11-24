@@ -104,8 +104,8 @@ use crate::source_tree::{
 use crate::summary_store::SummaryStore;
 use crate::syntax_indexer::{MAX_SOURCE_BYTES, SiteSyntax, SyntaxIndexer, strip_bom};
 use crate::views::{
-    Cookie, Event, FileSeen, GitSeen, Observed, Published, RequestId, Stamp, Stored, ViewError,
-    ViewRegistry,
+    Cookie, Entry, Event, FileSeen, GitSeen, Observed, Published, RequestId, Stamp, Stored,
+    ViewError, ViewRegistry,
 };
 
 /// A file's summary as a generation holds it.
@@ -331,6 +331,13 @@ struct Opened<W> {
     nested: Vec<RelPath>,
     /// The published generation's gaps: (generation, files counted, files indexed).
     counts: (Generation, u32, u32),
+    /// [`tally`] of the published generation's entries, which a part's publish adjusts by the
+    /// paths it read rather than walking the view (IDX-09d).
+    tally: (usize, usize),
+    /// The files the open left [`Summary::Pending`] and no build has read yet, in order.
+    deferred: BTreeSet<RelPath>,
+    /// Whether the settle has delivered them.
+    delivered: bool,
 }
 
 /// What a scan found: the paths the view admits, the stats the listing took, its gaps, and the
@@ -609,20 +616,43 @@ fn under(path: &RelPath, dir: &RelPath) -> bool {
 /// The files of `published` (present ones and gaps, plus `scan_gaps` the scan could not see) and
 /// how many of them have a summary: fewer is `ModulePartlyIndexed`.
 fn count(published: &Published<FileSeen, GitObserved, Summary>, scan_gaps: u64) -> (u32, u32) {
+    let (entries, indexed) = published
+        .index
+        .values()
+        .fold((0, 0), |sum, e| add(sum, tally(e)));
+    counted((entries, indexed), scan_gaps)
+}
+
+/// What one entry adds to [`count`]: whether it is a file counted (present, or a gap) and
+/// whether it is indexed.
+fn tally(entry: &Entry<FileSeen, Summary>) -> (usize, usize) {
+    let gap = matches!(entry.summary, Some(Summary::Gap | Summary::Pending) | None);
+    let indexed = matches!(entry.summary, Some(Summary::Indexed { .. }));
+    (
+        usize::from(entry.seen.stat.is_some() || gap),
+        usize::from(indexed),
+    )
+}
+
+const fn add(a: (usize, usize), b: (usize, usize)) -> (usize, usize) {
+    (a.0.saturating_add(b.0), a.1.saturating_add(b.1))
+}
+
+/// [`count`] from a tally of the entries and the scan's gaps.
+fn counted((entries, indexed): (usize, usize), scan_gaps: u64) -> (u32, u32) {
     let to_u32 = |n: usize| u32::try_from(n).unwrap_or(u32::MAX);
-    let gap = |s: &Option<Summary>| matches!(s, Some(Summary::Gap | Summary::Pending) | None);
-    let entries = published
-        .index
-        .values()
-        .filter(|e| e.seen.stat.is_some() || gap(&e.summary))
-        .count();
-    let indexed = published
-        .index
-        .values()
-        .filter(|e| matches!(e.summary, Some(Summary::Indexed { .. })))
-        .count();
     let scan_gaps = usize::try_from(scan_gaps).unwrap_or(usize::MAX);
     (to_u32(entries.saturating_add(scan_gaps)), to_u32(indexed))
+}
+
+/// The files of `published` an open left [`Summary::Pending`].
+fn deferred_in(published: &Published<FileSeen, GitObserved, Summary>) -> BTreeSet<RelPath> {
+    published
+        .index
+        .iter()
+        .filter(|(_, e)| matches!(e.summary, Some(Summary::Pending)))
+        .map(|(path, _)| path.clone())
+        .collect()
 }
 
 /// A stat value no earlier stat can prove unchanged: what an unknown file is compared with.
@@ -965,14 +995,57 @@ where
         .collect()
     }
 
-    /// Recounts the published generation of `root` ([`count`]).
+    /// Recounts the published generation of `root` ([`count`]) and its deferred files, walking
+    /// the view: after an open or a whole build.
     fn recount(&mut self, root: &FileUri) {
         let Some(view) = self.registry.view(root) else {
             return;
         };
         let published = &view.published;
         if let Some(opened) = self.views.get_mut(root) {
-            let (files, indexed) = count(published, opened.scan_gaps);
+            opened.tally = published
+                .index
+                .values()
+                .fold((0, 0), |sum, e| add(sum, tally(e)));
+            let (files, indexed) = counted(opened.tally, opened.scan_gaps);
+            opened.counts = (published.generation, files, indexed);
+            opened.deferred = deferred_in(published);
+        }
+    }
+
+    /// Recounts after a part read `paths` over `before` (the generation it replaced): only those
+    /// paths' entries change, so the count and the deferred files are adjusted by them.
+    fn recount_part(
+        &mut self,
+        root: &FileUri,
+        before: &Published<FileSeen, GitObserved, Summary>,
+        paths: &BTreeSet<RelPath>,
+    ) {
+        let Some(view) = self.registry.view(root) else {
+            return;
+        };
+        let published = &view.published;
+        if let Some(opened) = self.views.get_mut(root) {
+            let (mut entries, mut indexed) = opened.tally;
+            for path in paths {
+                if let Some(old) = before.index.get(path) {
+                    let (e, i) = tally(old);
+                    entries = entries.saturating_sub(e);
+                    indexed = indexed.saturating_sub(i);
+                }
+                if let Some(new) = published.index.get(path) {
+                    (entries, indexed) = add((entries, indexed), tally(new));
+                }
+                if !published
+                    .index
+                    .get(path)
+                    .is_some_and(|e| matches!(e.summary, Some(Summary::Pending)))
+                {
+                    opened.deferred.remove(path);
+                }
+            }
+            opened.tally = (entries, indexed);
+            let (files, indexed) = counted(opened.tally, opened.scan_gaps);
             opened.counts = (published.generation, files, indexed);
         }
     }
@@ -1079,6 +1152,9 @@ where
                 scan_gaps: scan.gaps,
                 nested: scan.nested,
                 counts: (Generation(0), 0, 0),
+                tally: (0, 0),
+                deferred: BTreeSet::new(),
+                delivered: false,
             },
         );
         self.recount(&root);
@@ -1271,6 +1347,29 @@ where
         let rescan = view.rescan;
         if !rescan && view.dirty.is_empty() {
             return Ok(false);
+        }
+        let needed = self.registry.needed(root);
+        if !rescan && needed.is_subset(&view.dirty) {
+            // Without a rescan, the deferred files a settle delivered stay for its slices: a
+            // request reads the delivered files that are not deferred, and the ones a waiting
+            // request needs (its own), never the rest of the view (IDX-09d). A needed file not
+            // delivered (no part may then be taken) falls back to the whole build below.
+            let deferred = self.views.get(root).map(|o| &o.deferred);
+            // While a settle runs, every deferred file is delivered: when the delivered files
+            // are no more than them, none is a request's to take (a walk of the view spared).
+            let only_deferred =
+                deferred.is_some_and(|d| view.dirty.len() <= d.len() && view.dirty.is_subset(d));
+            let mut take: BTreeSet<RelPath> = if only_deferred {
+                BTreeSet::new()
+            } else {
+                view.dirty
+                    .iter()
+                    .filter(|p| !deferred.is_some_and(|d| d.contains(*p)))
+                    .cloned()
+                    .collect()
+            };
+            take.extend(needed);
+            return self.reconcile_part(root, take).await;
         }
         let dirty: Vec<RelPath> = view.dirty.iter().cloned().collect();
         let indexed: Vec<RelPath> = if rescan {
@@ -1504,38 +1603,107 @@ where
         Err(ServiceError::NoProgress)
     }
 
-    /// Reads every file an open left [`Summary::Pending`] in each open view, as one build of
-    /// file events (the model's `deliver`, `reconcileStart`, `summarise` and `publish`), and
-    /// publishes it. Whether any view had one. The daemon calls it as soon as the request that
-    /// opened a view has its answer; until then that view answers partly indexed.
+    /// Reads and publishes `take`, a part of `root`'s delivered events (the model's
+    /// `reconcilePart`: no rescan due, every path a waiting request needs taken): the rest stay
+    /// delivered. Nothing to take is no build. A path to read under a nested root leaves the
+    /// build; one the published generation never held asks for a rescan, as in
+    /// [`ViewService::reconcile`].
+    async fn reconcile_part(
+        &mut self,
+        root: &FileUri,
+        mut take: BTreeSet<RelPath>,
+    ) -> Result<bool, ServiceError> {
+        if let Some(view) = self.registry.view(root) {
+            take.retain(|p| view.dirty.contains(p));
+        }
+        if take.is_empty() {
+            return Ok(false);
+        }
+        let before = self
+            .registry
+            .view(root)
+            .map(|v| Arc::clone(&v.published))
+            .ok_or(ViewError::UnknownView)?;
+        let mut todo = self.registry.reconcile_part(root, &take, |_| UNKNOWN)?;
+        let (excluded, escalate) = self.inadmissible(root, None, &todo);
+        for path in &excluded {
+            self.registry.exclude(root, path)?;
+            todo.remove(path);
+        }
+        let files = todo.into_iter().map(|path| (path, None)).collect();
+        for file in self.summarise_all(root, files).await {
+            let stamp = self.tick();
+            self.registry
+                .summarised(root, &file.path, file.seen, file.summary, stamp)?;
+        }
+        self.registry.publish(root, &Held)?;
+        self.recount_part(root, &before, &take);
+        if escalate {
+            self.registry.deliver(Event::Git { view: root.clone() })?;
+        }
+        Ok(true)
+    }
+
+    /// One slice of the settle (IDX-09d): reads at most `slice` of the files an open left
+    /// [`Summary::Pending`] in the first open view that has one, as one build of file events (the
+    /// model's `deliver` for every deferred file, then `reconcilePart`, `summarise` and
+    /// `publish`), and publishes it. Whether a deferred file remains in any view. The daemon
+    /// calls it once a request that opened a view has its answer, one slice per step between
+    /// requests, so its loop is held for one slice at a time; until the last slice publishes,
+    /// every answer of the view is incomplete (the deferred files are delivered and unpublished,
+    /// and partly indexed). A rescan due takes every deferred file in its one build.
     ///
-    /// Pinned by: `tests/view_service.rs::should_answer_partly_indexed_and_then_complete_when_the_open_defers_the_rest`.
-    pub async fn settle(&mut self) -> Result<bool, ServiceError> {
+    /// Pinned by: `tests/view_service.rs::should_answer_partly_indexed_and_then_complete_when_the_open_defers_the_rest`
+    /// and `tests/view_service.rs::should_publish_a_generation_per_slice_and_answer_between_them_when_settled_in_slices`.
+    pub async fn settle(&mut self, slice: usize) -> Result<bool, ServiceError> {
         self.drain().await?;
-        let mut any = false;
         let roots: Vec<FileUri> = self.views.keys().cloned().collect();
         for root in roots {
-            let pending: Vec<RelPath> = self.registry.view(&root).map_or_else(Vec::new, |v| {
-                v.published
-                    .index
-                    .iter()
-                    .filter(|(_, e)| matches!(e.summary, Some(Summary::Pending)))
-                    .map(|(path, _)| path.clone())
-                    .collect()
-            });
-            if pending.is_empty() {
+            let Some(opened) = self.views.get(&root) else {
+                continue;
+            };
+            if opened.deferred.is_empty() {
                 continue;
             }
-            any = true;
-            for path in pending {
+            // The first slice delivers every deferred file; later ones deliver what of their
+            // part is not delivered (nothing, unless a build took a file it did not read).
+            let undelivered: Vec<RelPath> = if opened.delivered {
+                Vec::new()
+            } else {
+                opened.deferred.iter().cloned().collect()
+            };
+            let take: BTreeSet<RelPath> =
+                opened.deferred.iter().take(slice.max(1)).cloned().collect();
+            let dirty = self.registry.view(&root).map(|v| &v.dirty);
+            let missing: Vec<RelPath> = take
+                .iter()
+                .filter(|p| !dirty.is_some_and(|d| d.contains(*p)))
+                .cloned()
+                .collect();
+            for path in undelivered.into_iter().chain(missing) {
                 self.registry.deliver(Event::File {
                     view: root.clone(),
                     path,
                 })?;
             }
-            self.reconcile(&root).await?;
+            if let Some(opened) = self.views.get_mut(&root) {
+                opened.delivered = true;
+            }
+            let needed = self.registry.needed(&root);
+            let part = self
+                .registry
+                .view(&root)
+                .is_some_and(|v| !v.rescan && needed.is_subset(&v.dirty));
+            if part {
+                let mut take = take;
+                take.extend(needed);
+                self.reconcile_part(&root, take).await?;
+            } else {
+                self.reconcile(&root).await?;
+            }
+            return Ok(self.views.values().any(|o| !o.deferred.is_empty()));
         }
-        Ok(any)
+        Ok(false)
     }
 
     /// Writes at most `budget` of the summaries the indexer made to the store, [`WRITERS`] at a

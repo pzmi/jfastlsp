@@ -691,7 +691,7 @@ fn should_answer_partly_indexed_and_then_complete_when_the_open_defers_the_rest(
     // when
     let first = ask(&mut service, "/w/m/p/A.java");
     service.finish(first.id).unwrap();
-    let settled = block_on(service.settle()).unwrap();
+    let more = block_on(service.settle(usize::MAX)).unwrap();
     let after = ask(&mut service, "/w/m/p/A.java");
 
     // then
@@ -710,14 +710,60 @@ fn should_answer_partly_indexed_and_then_complete_when_the_open_defers_the_rest(
         summary_of(&first, "p/B.java"),
         Some(Summary::Indexed { .. })
     ));
-    assert!(settled);
+    assert!(!more);
     assert_eq!(indexed(&world), 4);
     assert!(after.completeness.is_complete(), "{:?}", reasons(&after));
     assert!(matches!(
         summary_of(&after, "q/D.java"),
         Some(Summary::Indexed { .. })
     ));
-    assert!(!block_on(service.settle()).unwrap());
+    assert!(!block_on(service.settle(usize::MAX)).unwrap());
+}
+
+#[test]
+fn should_publish_a_generation_per_slice_and_answer_between_them_when_settled_in_slices() {
+    // given: a view whose open deferred `q/C.java` and `q/D.java`
+    let (world, mut service) = two_packages();
+    let first = ask(&mut service, "/w/m/p/A.java");
+    service.finish(first.id).unwrap();
+    let opened = first.generation.generation;
+
+    // when: one slice of one file, a request on an indexed file, a request on the file still
+    // deferred, and the next slice
+    let more = block_on(service.settle(1)).unwrap();
+    let between = ask(&mut service, "/w/m/p/A.java");
+    service.finish(between.id).unwrap();
+    let read_after_one = indexed(&world);
+    let deferred = ask(&mut service, "/w/m/q/D.java");
+    service.finish(deferred.id).unwrap();
+    let more_after = block_on(service.settle(1)).unwrap();
+    let after = ask(&mut service, "/w/m/p/A.java");
+
+    // then: the slice published C alone, and the answer between the slices came from it,
+    // incomplete while D waited; the request on D read D alone, which left the settle nothing
+    assert!(more);
+    assert_eq!(read_after_one, 3);
+    assert_eq!(between.generation.generation.0, opened.0 + 1);
+    assert!(matches!(
+        summary_of(&between, "q/C.java"),
+        Some(Summary::Indexed { .. })
+    ));
+    assert_eq!(summary_of(&between, "q/D.java"), Some(Summary::Pending));
+    assert!(!between.completeness.is_complete());
+    assert!(
+        reasons(&between)
+            .iter()
+            .any(|r| matches!(r, IncompleteReason::PendingChanges { .. })),
+        "{:?}",
+        reasons(&between)
+    );
+    assert!(matches!(
+        summary_of(&deferred, "q/D.java"),
+        Some(Summary::Indexed { .. })
+    ));
+    assert!(!more_after);
+    assert_eq!(indexed(&world), 4);
+    assert!(after.completeness.is_complete(), "{:?}", reasons(&after));
 }
 
 #[test]
@@ -752,7 +798,7 @@ fn should_settle_from_the_disk_when_a_pending_file_changes_before_settle() {
         .unwrap();
 
     // when
-    block_on(service.settle()).unwrap();
+    block_on(service.settle(usize::MAX)).unwrap();
     let answer = ask(&mut service, "/w/m/q/C.java");
 
     // then
@@ -770,7 +816,7 @@ fn should_drop_a_pending_file_from_the_count_when_it_is_deleted_before_settle() 
     world.tree.remove("m/q/D.java").unwrap();
 
     // when
-    block_on(service.settle()).unwrap();
+    block_on(service.settle(usize::MAX)).unwrap();
     let answer = ask(&mut service, "/w/m/p/A.java");
 
     // then
@@ -816,7 +862,7 @@ fn should_read_every_pending_file_when_sync_runs_before_settle() {
     // then
     assert_eq!(indexed(&world), 4);
     assert!(answer.completeness.is_complete(), "{:?}", reasons(&answer));
-    assert!(!block_on(service.settle()).unwrap());
+    assert!(!block_on(service.settle(usize::MAX)).unwrap());
 }
 
 #[test]

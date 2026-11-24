@@ -426,6 +426,25 @@ Before slice 3 (2026-11-19, slice 2 after its review, another lane building at l
 - **The cookie** costs well under 0.1 ms through inotify, more than a thousand times inside plan §1.7's 100 ms freshness target; a request that needs a second cookie pays it twice. The 200 ms deadline (`ServiceConfig::new`) is never near.
 - **The rescan** is the listing (the walk, `just bench-fs`) plus `git ls-files` plus the stats of every indexed file, 16 at a time on the pool: 96–120 ms on medium. The shell does not narrow a rescan with `git diff` and `status` (`changed_since`), which alone cost more (`just bench-git`: 39 ms for `status` on medium) than every stat does.
 
+#### The settle in slices (IDX-09d)
+
+The daemon settles a view a slice at a time (`SETTLE_SLICE`, 512 files, one background step each; `jfl-composition/src/daemon/views.rs`), so its loop is held for one slice, not the whole view, **while no rescan is due** (a rescan reads every file still deferred in one build: IDX-09e). `just bench-views` reports each slice's time (what the loop is held for), each write-back slice's, and a request on the opened file asked between each two slices; the full index's time leaves those requests out. `--settle-slice N` overrides the slice (a number above the view's files is the one build of before). A one-off probe drove the release `jfl lsp` on medium (fresh state directory, warm page cache, empty store): definitions back to back from the first answer for 1.5 s, then SIGTERM to the daemon, timed to its exit.
+
+Each publish costs its slice, not the view: generations share the entries their build did not touch (`jfl_application::SharedIndex`, sorted chunks of up to 128 entries behind `Arc`s), and the publish's counts, its store check and the shell's count and deferred set are adjusted by the touched paths. Before that (review round 1), every slice copied, recounted and walked the whole index: about 3.5 ms a slice on medium with a warm store (+8.7 % and +11.6 % on the whole warm open, two runs), quadratic in the view, about +30 % projected on large's warm open.
+
+Measured 2026-11-24 on the 4 vCPU Xeon @ 2.10 GHz VM, **not quiet**: the other lane's work and this lane's Apalache ran throughout, load 2.9 to 4.6. Medium spring-framework (9,294 files), shared-index build, two rounds alternated:
+
+| slice | settle slices | each slice p50 / p95 (empty store) | whole view published, empty store | warm store: whole view (6 opens) | warm store: the settle alone | a request between slices p50 / p95 |
+|:--|--:|--:|--:|--:|--:|--:|
+| one build (before) | 1 | 4,075–4,291 ms: the loop held for all of it | 4,470 / 4,284 ms | 637–754 ms, median 720 | 421–495 ms | none answered until the end |
+| 512 (the daemon's) | 19 | 166–240 / 299–307 ms | 4,350 / 3,538 ms | 643–754 ms, median 723 | 19 × 22–27 ms = 420–510 ms | 1.6–2.4 / 3.5–11.4 ms |
+
+The `jfl lsp` probe, slice 512, three runs at load 4.6: first answer 193–220 ms; 6 or 7 definitions during the settle, each p50 217–268 ms, p95 and max 350–421 ms (each waits for the slice it arrives in); SIGTERM to exit 239–354 ms. Before, a request or SIGTERM behind the settle waited for the rest of it: up to the whole one-build time above. An earlier probe at load 2.6 to 3.0, with the index copied per slice, gave 207–222 ms p50 and 187–199 ms to exit.
+
+- **Full index:** within noise of the one build, cold and warm: the alternated rounds cross on the empty store, and the warm-store open and its settle alone match to within a few percent (median 723 against 720 ms).
+- **Large, projected** (elasticsearch, 33,850 files, about 9 s for the whole settle on four threads quiet): 66 slices of about 140 ms (its files are larger: 9.9 KB mean against 5.8), a request or SIGTERM waiting at most about one slice while no rescan is due. A slice's fixed cost no longer grows with the view (a publish copies one pointer per chunk of 64 to 128 entries, a few hundred on large, and walks only the touched entries), so the per-slice overhead stays at medium's, within noise.
+- **Quiet numbers are owed:** the slices here are about twice the quiet machine's (the 2.2 s quiet full index makes a 512-file slice about 120 ms).
+
 ### The queries (IDX-10, `just bench-queries`)
 
 `crates/jfl-composition/benches/queries.rs` opens and settles the corpus's view through the view service over the real adapters (as `view_service.rs` does: four pool threads, a scratch store), then measures each query over the published generation:

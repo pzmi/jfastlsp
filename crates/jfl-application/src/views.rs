@@ -36,6 +36,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 use std::time::Duration;
 
+use crate::shared_index::SharedIndex;
 use jfl_domain::{
     Completeness, FileUri, Generation, IncompleteReason, IndexState, IndexStateError, ModuleIndex,
     ModuleName, RelPath, completeness,
@@ -141,8 +142,9 @@ pub struct Published<D, G, K> {
     pub generation: Generation,
     /// `HEAD` and the index it was built at.
     pub git: GitSeen<G>,
-    /// Its files.
-    pub index: BTreeMap<RelPath, Entry<D, K>>,
+    /// Its files, sharing every entry its build did not touch with the generation before
+    /// (IDX-09d: a publish costs what the build changed, not the view).
+    pub index: SharedIndex<RelPath, Entry<D, K>>,
     /// The latest read stamp of any entry: a request whose cookie is older finds a late read.
     latest_read: Option<Stamp>,
     /// How many of its files exist, counted once at publish so a pin does not walk the index.
@@ -150,9 +152,55 @@ pub struct Published<D, G, K> {
 }
 
 impl<D: FileObserved, G, K> Published<D, G, K> {
-    fn new(generation: Generation, git: GitSeen<G>, index: BTreeMap<RelPath, Entry<D, K>>) -> Self {
+    fn new(
+        generation: Generation,
+        git: GitSeen<G>,
+        index: SharedIndex<RelPath, Entry<D, K>>,
+    ) -> Self {
         let latest_read = index.values().filter_map(|e| e.read_at).max();
         let present = index.values().filter(|e| e.seen.present()).count();
+        Self {
+            generation,
+            git,
+            index,
+            latest_read,
+            present,
+        }
+    }
+
+    /// The generation after `prev` whose build changed only `touched`: its counts are `prev`'s
+    /// adjusted by those paths, so the publish walks what changed, not the view. A read stamp
+    /// never goes down when an entry is replaced; only a removed entry that held the latest one
+    /// makes it walk the index again.
+    fn after(
+        prev: &Self,
+        generation: Generation,
+        git: GitSeen<G>,
+        index: SharedIndex<RelPath, Entry<D, K>>,
+        touched: &BTreeSet<RelPath>,
+    ) -> Self {
+        let mut present = prev.present;
+        let mut latest_read = prev.latest_read;
+        let mut walk = false;
+        for path in touched {
+            let old = prev.index.get(path);
+            let new = index.get(path);
+            if old.is_some_and(|e| e.seen.present()) {
+                present = present.saturating_sub(1);
+            }
+            if new.is_some_and(|e| e.seen.present()) {
+                present = present.saturating_add(1);
+            }
+            let old_read = old.and_then(|e| e.read_at);
+            let new_read = new.and_then(|e| e.read_at);
+            if old_read.is_some() && old_read == prev.latest_read && new_read < old_read {
+                walk = true;
+            }
+            latest_read = latest_read.max(new_read);
+        }
+        if walk {
+            latest_read = index.values().filter_map(|e| e.read_at).max();
+        }
         Self {
             generation,
             git,
@@ -169,7 +217,7 @@ pub struct Build<D, G, K> {
     /// `HEAD` and the index it records.
     pub git: GitSeen<G>,
     /// Its files: the published ones, with every path it re-reads replaced.
-    pub index: BTreeMap<RelPath, Entry<D, K>>,
+    pub index: SharedIndex<RelPath, Entry<D, K>>,
     /// The paths whose summaries it has yet to read and store.
     pub pending: BTreeSet<RelPath>,
     /// Whether its publish makes the view certain: a full scan started with the watch up and no
@@ -177,6 +225,8 @@ pub struct Build<D, G, K> {
     pub certifies: bool,
     /// The `sync` (its epoch) whose rescan this is.
     pub serves_sync: Option<u64>,
+    /// The paths it replaced or removed: all its publish has to look at.
+    touched: BTreeSet<RelPath>,
 }
 
 /// Where a view's `sync` is.
@@ -356,6 +406,15 @@ pub enum ViewError {
     /// Nothing to reconcile: no delivered event and no rescan due.
     #[error("nothing to reconcile")]
     NothingToReconcile,
+    /// A rescan is due: a part of the delivered events may not be taken alone.
+    #[error("a rescan is due")]
+    RescanDue,
+    /// A path to take is not a delivered event of the view.
+    #[error("a path to take is not delivered")]
+    NotDirty,
+    /// The part leaves out a path a waiting request needs.
+    #[error("the part leaves out a path a waiting request needs")]
+    NeededNotTaken,
     /// No build is in progress.
     #[error("no build is in progress")]
     NoBuild,
@@ -625,8 +684,85 @@ impl<D: FileObserved, G: Observed, K: Clone + Eq + fmt::Debug> ViewRegistry<D, G
             pending: todo.clone(),
             certifies: rescan && view.watched && listed.is_some(),
             serves_sync,
+            touched: todo.clone(),
         });
         Ok(todo)
+    }
+
+    /// The files the waiting requests of the view at `root` need: each one's file while the
+    /// generation it waits for is not published. A part ([`ViewRegistry::reconcile_part`]) must
+    /// take them all (the model's `needed`).
+    #[must_use]
+    pub fn needed(&self, root: &FileUri) -> BTreeSet<RelPath> {
+        let Some(view) = self.views.get(root) else {
+            return BTreeSet::new();
+        };
+        self.requests
+            .values()
+            .filter(|r| {
+                r.phase == RequestPhase::Waiting
+                    && r.view == *root
+                    && r.need > view.published.generation
+            })
+            .map(|r| r.path.clone())
+            .collect()
+    }
+
+    /// Starts a build of `take`, a part of the view's delivered events (the model's
+    /// `reconcilePart`, IDX-09d): the rest stay delivered, so no answer is complete until a build
+    /// takes them. Refused while a rescan is due (a rescan is whole: it certifies, records `HEAD`
+    /// and the index, and serves `sync`), for a path not delivered, and when the part leaves out a
+    /// path a waiting request needs ([`ViewRegistry::needed`]), whose generation must hold what
+    /// its stat saw. Returns the paths to read, each named by `stat_file`'s entry until read.
+    ///
+    /// Pinned by: `tests/views.rs::should_refuse_a_part_that_leaves_out_a_needed_path_when_a_request_waits`
+    /// and `tests/views.rs::should_publish_a_part_and_keep_the_rest_dirty_when_a_part_is_taken`.
+    pub fn reconcile_part(
+        &mut self,
+        root: &FileUri,
+        take: &BTreeSet<RelPath>,
+        mut stat_file: impl FnMut(&RelPath) -> D,
+    ) -> Result<BTreeSet<RelPath>, ViewError> {
+        let needed = self.needed(root);
+        let view = self.view_mut(root)?;
+        if view.build.is_some() {
+            return Err(ViewError::BuildActive);
+        }
+        if view.rescan {
+            return Err(ViewError::RescanDue);
+        }
+        if take.is_empty() {
+            return Err(ViewError::NothingToReconcile);
+        }
+        if !take.is_subset(&view.dirty) {
+            return Err(ViewError::NotDirty);
+        }
+        if !needed.is_subset(take) {
+            return Err(ViewError::NeededNotTaken);
+        }
+        let published = Arc::clone(&view.published);
+        let mut index = published.index.clone();
+        for path in take {
+            view.dirty.remove(path);
+            let read_at = index.get(path).and_then(|e| e.read_at);
+            index.insert(
+                path.clone(),
+                Entry {
+                    seen: stat_file(path),
+                    summary: None,
+                    read_at,
+                },
+            );
+        }
+        view.build = Some(Build {
+            git: published.git.clone(),
+            index,
+            pending: take.clone(),
+            certifies: false,
+            serves_sync: None,
+            touched: take.clone(),
+        });
+        Ok(take.clone())
     }
 
     /// The build's summary of `path` is stored under `key`: it was read `read_at`, when the stat
@@ -674,6 +810,7 @@ impl<D: FileObserved, G: Observed, K: Clone + Eq + fmt::Debug> ViewRegistry<D, G
             .ok_or(ViewError::NoBuild)?;
         build.index.remove(path);
         build.pending.remove(path);
+        build.touched.insert(path.clone());
         Ok(())
     }
 
@@ -690,10 +827,15 @@ impl<D: FileObserved, G: Observed, K: Clone + Eq + fmt::Debug> ViewRegistry<D, G
         if !build.pending.is_empty() {
             return Err(ViewError::PendingSummaries);
         }
-        let stored = build
-            .index
-            .values()
-            .all(|e| e.summary.as_ref().is_some_and(|key| store.holds(key)));
+        // Only the entries the build touched: every other one is the published generation's,
+        // which this guard let through when it was published, and a store only grows (the
+        // model's `store`), so it is still stored (IDX-09d: a publish walks what changed).
+        let stored = build.touched.iter().all(|path| {
+            build
+                .index
+                .get(path)
+                .is_none_or(|e| e.summary.as_ref().is_some_and(|key| store.holds(key)))
+        });
         if !stored {
             return Err(ViewError::NotStored);
         }
@@ -702,7 +844,13 @@ impl<D: FileObserved, G: Observed, K: Clone + Eq + fmt::Debug> ViewRegistry<D, G
             return Err(ViewError::NoBuild);
         };
         view.replaced = view.published.generation;
-        view.published = Arc::new(Published::new(generation, build.git, build.index));
+        view.published = Arc::new(Published::after(
+            &view.published,
+            generation,
+            build.git,
+            build.index,
+            &build.touched,
+        ));
         view.certain = view.certain || build.certifies;
         if view.sync.phase == SyncPhase::Waiting && build.serves_sync == Some(view.sync.epoch) {
             view.sync.scanned = true;

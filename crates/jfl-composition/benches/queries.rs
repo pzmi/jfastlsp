@@ -380,7 +380,7 @@ fn main() -> Result<(), String> {
     let started = Instant::now();
     let answer = block_on(service.request(&first)).map_err(|e| e.to_string())?;
     service.finish(answer.id).map_err(|e| e.to_string())?;
-    block_on(service.settle()).map_err(|e| e.to_string())?;
+    while block_on(service.settle(usize::MAX)).map_err(|e| e.to_string())? {}
     let answer = block_on(service.request(&first)).map_err(|e| e.to_string())?;
     println!(
         "  view opened and settled in {:.0} ms: {} files, complete: {}",

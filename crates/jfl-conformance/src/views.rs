@@ -19,8 +19,8 @@
 //! Every type of the observation, nested ones included, has `deny_unknown_fields` and a derived
 //! `PartialEq` (IDX-09's obligation 9), so the comparison covers the whole model state.
 //!
-//! Two negative controls (plan §7.1: publishing before the last summary is stored), each
-//! diverging where its fault first shows:
+//! Three negative controls, each diverging where its fault first shows (the first two: plan
+//! §7.1, publishing before the last summary is stored):
 //!
 //! - [`control`], the registered one: the registry is shown a store that lags the observed one
 //!   by its last write (a write acknowledged before it can be read back), so the atomic-publish
@@ -30,6 +30,11 @@
 //!   summaries are stored; it diverges at `reconcileStart` (with a path pending the guard
 //!   refuses, with none the early generation differs from the model's). Pinned by
 //!   tests/replay.rs::should_diverge_at_the_reconcile_when_the_views_control_publishes_early.
+//! - [`control_part_without_needed`] (IDX-09d): a part of the delivered events leaves out the
+//!   paths the waiting requests need; the registry's guard refuses it (`NeededNotTaken`) at the
+//!   model's `reconcilePart`: step 18 of `views-settle-in-slices`, whose part holds another path
+//!   beside the needed one. Pinned by
+//!   tests/replay.rs::should_diverge_at_the_part_when_the_views_control_leaves_out_a_needed_path.
 //!
 //! Cookie events carry their cookie's sequence number as its stamp, which is where the model
 //! writes it (`cookieSeq`). A rescan is given the scripted tree's listing of the view's present
@@ -345,6 +350,8 @@ enum Fault {
     LaggingStore,
     /// Each build is published as soon as it starts.
     PublishAtStart,
+    /// A part leaves out the paths the waiting requests need.
+    PartWithoutNeeded,
 }
 
 type Registry = ViewRegistry<Disk, GitVer, Summary>;
@@ -714,6 +721,34 @@ impl ViewsDriver {
         Ok(())
     }
 
+    fn reconcile_part(&mut self, view: &str, take: &BTreeSet<String>) -> Result<(), StepError> {
+        let root = root_of(view).map_err(StepError::Harness)?;
+        let mut rels = BTreeSet::new();
+        for path in take {
+            let rel = file_of(path)
+                .ok()
+                .and_then(|f| f.relative_to(&root))
+                .ok_or_else(|| refused("the path is not under the view"))?;
+            rels.insert(rel);
+        }
+        if self.fault == Fault::PartWithoutNeeded {
+            let needed = self.registry.needed(&root);
+            rels.retain(|p| !needed.contains(p));
+        }
+        let files = self.tree.files.clone();
+        self.registry
+            .reconcile_part(&root, &rels, |rel| {
+                files.get(&model_path(&root, rel)).cloned().unwrap_or(Disk {
+                    ver: 0,
+                    present: false,
+                    stat: 0,
+                    recent: false,
+                })
+            })
+            .map(|_| ())
+            .map_err(refused)
+    }
+
     fn summarise(&mut self, view: &str, path: &str) -> Result<(), StepError> {
         let root = root_of(view).map_err(StepError::Harness)?;
         let disk = self.file(path).map_err(StepError::Harness)?;
@@ -883,6 +918,12 @@ impl ViewsDriver {
                 self.registry.watch_restored(&root).map_err(refused)
             }
             "reconcileStart" => self.reconcile_start(&view()?),
+            "reconcilePart" => {
+                let take = step
+                    .pick::<BTreeSet<String>>("take")?
+                    .ok_or_else(|| harness(step, "no `take` pick"))?;
+                self.reconcile_part(&view()?, &take)
+            }
             "summarise" => self.summarise(&view()?, &path()?),
             "publish" => {
                 let root = root_of(&view()?).map_err(StepError::Harness)?;
@@ -890,7 +931,7 @@ impl ViewsDriver {
                     store: &self.store,
                     hidden: match self.fault {
                         Fault::LaggingStore => self.last_put.as_ref(),
-                        Fault::None | Fault::PublishAtStart => None,
+                        Fault::None | Fault::PublishAtStart | Fault::PartWithoutNeeded => None,
                     },
                 };
                 self.registry
@@ -944,7 +985,7 @@ impl ViewsDriver {
 
     fn index_obs(
         root: &FileUri,
-        index: &BTreeMap<RelPath, jfl_application::Entry<Disk, Summary>>,
+        index: &jfl_application::SharedIndex<RelPath, jfl_application::Entry<Disk, Summary>>,
     ) -> (Index, BTreeMap<String, i64>) {
         let files = index
             .iter()
@@ -1147,4 +1188,11 @@ pub fn control() -> Replayer {
 /// stored; it diverges at `reconcileStart`.
 pub fn control_publishing_at_start() -> Replayer {
     Replayer::new(ViewsDriver::new(Fault::PublishAtStart))
+}
+
+/// The third control (IDX-09d): a part leaves out the paths the waiting requests need, as a shell
+/// slicing a settle without them would; the registry's guard refuses it (`NeededNotTaken`), so
+/// it diverges at the `reconcilePart` that a request waits on.
+pub fn control_part_without_needed() -> Replayer {
+    Replayer::new(ViewsDriver::new(Fault::PartWithoutNeeded))
 }

@@ -14,8 +14,12 @@
 //! - **View open, empty store, warm page cache:** a fresh service with an empty store, after the
 //!   stages have read every file. The first request's answer (the
 //!   view opened with only its file's directory read: plan §1.7's first useful answer), then
-//!   `settle` (every other file read and published: the full syntax index), then `write_back`
-//!   (the store written, after the publish). One run. With the argument `cold` (`just
+//!   `settle` in the daemon's slices (`--settle-slice N` overrides `SETTLE_SLICE`; every other
+//!   file read and published a slice at a time: the full syntax index, which leaves out a request
+//!   on the first file asked between each two slices), then `write_back` in the daemon's slices
+//!   (the store written, after the publish). Each slice's time is what the daemon's loop is held
+//!   for (IDX-09d); the request between slices is what a client waits beyond the slice it arrived
+//!   in. One run. With the argument `cold` (`just
 //!   bench-views SIZE cold`) only this, three times, each after a page-cache drop, as plan §1.7's
 //!   cold rows mean it (Linux, root).
 //! - **View open, warm:** the same with the store filled (a daemon restart). Three runs.
@@ -50,6 +54,7 @@ use jfl_application::{
     BlockingPool, CountingClock, Interrupted, ServiceConfig, Summary, SummaryStore as _,
     ViewService, WallClock,
 };
+use jfl_composition::daemon::views::{SETTLE_SLICE, WRITE_SLICE};
 use jfl_domain::{FileSummary, FileUri, RelPath, SyntaxInputs, SyntaxKey};
 
 /// Requests timed for the cookie round trip.
@@ -66,9 +71,8 @@ fn drop_caches() -> bool {
 
 /// The blocking pool's threads: E1's four cores (plan §1.7).
 const POOL_THREADS: usize = 4;
-/// Store writes per [`ViewService::write_back`] call, as a daemon would slice them between
-/// requests.
-const WRITE_BACK_BUDGET: usize = 256;
+/// Store writes per [`ViewService::write_back`] call: the daemon's slice between requests.
+const WRITE_BACK_BUDGET: usize = WRITE_SLICE;
 
 /// The value after `flag` on the command line.
 fn arg_after(flag: &str) -> Option<usize> {
@@ -88,6 +92,14 @@ struct Opened {
     written: Duration,
     files: usize,
     complete: bool,
+    /// Each settle slice's time: what the daemon's loop is held for, one step at a time.
+    slices: Vec<Duration>,
+    /// Each write-back slice's time.
+    writes: Vec<Duration>,
+    /// A request on the first file asked after each slice but the last: its whole time.
+    between: Vec<Duration>,
+    /// How many of those answers were incomplete (the view still settling).
+    between_incomplete: usize,
 }
 
 impl Opened {
@@ -104,6 +116,26 @@ impl Opened {
             ms(self.written)
         )
     }
+
+    /// The loop's holds and the requests between the slices (IDX-09d).
+    fn holds(&self) -> String {
+        let max = |v: &[Duration]| v.iter().max().copied().unwrap_or_default();
+        format!(
+            "settle in {} slices: each p50 {:.0} ms, p95 {:.0} ms, max {:.0} ms; write-back in {} slices: p95 {:.0} ms, max {:.0} ms; a request between slices: p50 {:.2} ms, p95 {:.2} ms, max {:.2} ms ({} of {} incomplete)",
+            self.slices.len(),
+            ms(percentile(self.slices.clone(), 50)),
+            ms(percentile(self.slices.clone(), 95)),
+            ms(max(&self.slices)),
+            self.writes.len(),
+            ms(percentile(self.writes.clone(), 95)),
+            ms(max(&self.writes)),
+            ms(percentile(self.between.clone(), 50)),
+            ms(percentile(self.between.clone(), 95)),
+            ms(max(&self.between)),
+            self.between_incomplete,
+            self.between.len()
+        )
+    }
 }
 
 fn open(
@@ -111,6 +143,7 @@ fn open(
     pool: &Pool,
     config: &ServiceConfig,
     first: &FileUri,
+    slice: usize,
 ) -> Result<Opened, String> {
     let started = Instant::now();
     let mut service = service(store, pool, config.clone())?;
@@ -125,10 +158,38 @@ fn open(
         .count();
     let first_complete = answer.completeness.is_complete();
     service.finish(answer.id).map_err(|e| e.to_string())?;
-    block_on(service.settle()).map_err(|e| e.to_string())?;
-    let settled = started.elapsed();
-    while block_on(service.write_back(WRITE_BACK_BUDGET)) > 0 {}
-    let written = started.elapsed();
+    let mut slices = Vec::new();
+    let mut between = Vec::new();
+    let mut between_incomplete = 0_usize;
+    let mut asking = Duration::ZERO;
+    loop {
+        let step = Instant::now();
+        let more = block_on(service.settle(slice)).map_err(|e| e.to_string())?;
+        slices.push(step.elapsed());
+        if !more {
+            break;
+        }
+        let asked = Instant::now();
+        let answer = block_on(service.request(first)).map_err(|e| e.to_string())?;
+        between_incomplete =
+            between_incomplete.saturating_add(usize::from(!answer.completeness.is_complete()));
+        service.finish(answer.id).map_err(|e| e.to_string())?;
+        let took = asked.elapsed();
+        between.push(took);
+        asking = asking.saturating_add(took);
+    }
+    // The full index's time leaves out the requests asked between the slices.
+    let settled = started.elapsed().saturating_sub(asking);
+    let mut writes = Vec::new();
+    loop {
+        let step = Instant::now();
+        let waiting = block_on(service.write_back(WRITE_BACK_BUDGET));
+        writes.push(step.elapsed());
+        if waiting == 0 {
+            break;
+        }
+    }
+    let written = started.elapsed().saturating_sub(asking);
     let answer = block_on(service.request(first)).map_err(|e| e.to_string())?;
     let files = answer.generation.index.len();
     let complete = answer.completeness.is_complete();
@@ -143,6 +204,10 @@ fn open(
         written,
         files,
         complete,
+        slices,
+        writes,
+        between,
+        between_incomplete,
     })
 }
 
@@ -514,8 +579,9 @@ fn main() -> Result<(), String> {
     if let Some(whole) = arg_after("--open-whole") {
         config.open_whole = whole;
     }
+    let slice = arg_after("--settle-slice").unwrap_or(SETTLE_SLICE);
     println!(
-        "  {threads} pool threads, {} files in flight, views of up to {} files opened whole",
+        "  {threads} pool threads, {} files in flight, views of up to {} files opened whole, settled in slices of {slice}",
         config.parallelism, config.open_whole
     );
 
@@ -525,25 +591,27 @@ fn main() -> Result<(), String> {
             if !drop_caches() {
                 return Err("dropping the page cache needs root on Linux".to_owned());
             }
-            let opened = open(&store, &pool, &config, &first)?;
+            let opened = open(&store, &pool, &config, &first, slice)?;
             println!(
                 "  view open, empty store, page cache dropped: {}",
                 opened.line()
             );
+            println!("    {}", opened.holds());
         }
         let _ = std::fs::remove_dir_all(&store);
         return Ok(());
     }
-    let opened = open(&store, &pool, &config, &first)?;
+    let opened = open(&store, &pool, &config, &first, slice)?;
     println!(
         "  view open, empty store, warm page cache: {}",
         opened.line()
     );
+    println!("    {}", opened.holds());
     let mut warm_runs = Vec::new();
     let mut warm = None;
     for _ in 0..3 {
-        let opened = open(&store, &pool, &config, &first)?;
-        warm_runs.push(opened.line());
+        let opened = open(&store, &pool, &config, &first, slice)?;
+        warm_runs.push(format!("{}\n    {}", opened.line(), opened.holds()));
         warm = Some(opened.service);
     }
     for line in warm_runs {

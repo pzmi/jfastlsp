@@ -91,6 +91,8 @@ CLI carrier), **SEM-07** (M4),
 | IDX-07 | Syntax adapter: tree-sitter summaries and the golden Java corpus | IDX-02 | deep | L |  | IDX-08 |
 | IDX-08 | Summary store at the DEC-03 tier | IDX-02, DEC-03 | standard | M |  | IDX-07 |
 | IDX-09 | View registry, generations and freshness (views driver) | IDX-05, IDX-06, IDX-07, IDX-08, FORMAL-03 | deep | L |  | LSP-01 |
+| IDX-09d | Settle a view in slices: the daemon's loop never held for the whole view | IDX-09, IDX-12, LSP-02 | deep | L |  | LSP-04 |
+| IDX-09e | A rescan with deferred files, in slices (blocks M1's bench gate) | IDX-09d | deep | M |  | LSP-03 |
 | IDX-10 | Queries: `sym`, `def`, `hover` | IDX-09 | deep | L |  | LSP-01 |
 | IDX-11 | Queries: `refs`, the `possible` superset, completeness | IDX-10 | deep | L |  | IDX-12 |
 | IDX-12 | Daemon and IPC: lock, socket, spawn, reconnect (daemon driver) | IDX-03, IDX-09, FORMAL-04 | deep | L |  | IDX-11 |
@@ -2070,6 +2072,114 @@ but follow in lane CLI (M2). Starts after the go decision.
   a test pin its stat set (here or IDX-15). The `repo_probe` fake cannot yet be told to fail with
   an I/O error (ver §5): add it with the views driver.
 - **Impact:** none (internal); model conformance.
+
+#### IDX-09d: Settle a view in slices
+- **Depends on:** IDX-09, IDX-12, LSP-02. **Model:** deep. **Size:** L. **Parallel with:** LSP-04.
+- **Cites:** plan §4, §7.1, §1.7; ver §6; ADR 0007, ADR 0014, ADR 0031; IDX-09's "Left after slice 2"
+  (`settle` holds the daemon's loop) and the LSP-02 review (a request queued behind `settle` on
+  large passes `CALL_BUDGET`; SIGTERM, accepts and ticks wait).
+- **Why:** `ViewService::settle` read the rest of a deferred view as one build, which the daemon's
+  run loop awaited to its end: about 2 s on medium, 9 s projected on large, over the 8 s per-call
+  budget there. Cancelling it was no way out: a build dropped between `reconcile_start` and
+  `publish` stays set.
+- **As built (2026-11-24):** model first. `views.qnt` gained `reconcilePart(view, take)`: a build
+  of part of the delivered events, never while a rescan is due (a rescan is whole) and only with
+  every path a waiting request needs (`needed`: each waiting request's file while the generation
+  it waits for is unpublished); the rest stay delivered, so no answer is complete until a build
+  takes them. Scenario `settleInSlices` (regression trace `views-settle-in-slices`, 26 steps),
+  guard tests (`partLeavingOutANeededPathIsRefusedTest` and its twin, `partDuringARescanIsRefusedTest`
+  and its twin), and the broken control `reconcilePartIgnoringRequests`, which violates
+  `FreshAfterStat` (`partIgnoringRequestsViolatesFreshAfterStatTest`). The step picks `take` as one
+  delivered path, alone or with every needed path, so the simulation takes parts while a request
+  waits: with the control in `reconcilePart`'s place, 20,000 × 30 steps find its violation in
+  about 1,800 samples at each of seeds 0x1 to 0x5 (with any subset, review round 1, it found
+  none); Apalache's length 5 cannot reach that fault (about 10 steps), so the simulation and the
+  scenario carry it. Every other committed views trace changed only by the new `take: None`
+  pick. The registry's `ViewRegistry::reconcile_part` and `needed` follow the model (refusals
+  `RescanDue`, `NotDirty`, `NeededNotTaken`; `tests/views.rs`); the `views` driver replays the
+  action and a third control, `control_part_without_needed`, diverges at step 18 of the new trace
+  through the registry's `NeededNotTaken` guard
+  (`tests/replay.rs::should_diverge_at_the_part_when_the_views_control_leaves_out_a_needed_path`).
+  The shell: `ViewService::settle(slice)` delivers every deferred file on its first call and then
+  reads and publishes at most `slice` of them per call (`reconcilePart`, or the whole build when a
+  rescan is due), returning whether any remain; a request's reconcile takes the delivered files
+  that are not deferred and the files waiting requests need, never the rest
+  (`should_publish_a_generation_per_slice_and_answer_between_them_when_settled_in_slices`). The
+  daemon runs one slice of `SETTLE_SLICE` (512) per background step, then `write_back` in its
+  slices as before (`crates/jfl-composition/tests/daemon.rs::should_answer_a_request_between_the_slices_of_a_settle_when_the_view_is_large`:
+  three slices, three generations, every answer before the last incomplete). No abort transition:
+  each step still runs to its end, bounded by its slice, so nothing is ever cancelled mid-build.
+  **The bound holds only while no rescan is due:** a rescan is whole, so it reads every file still
+  deferred in one build, in the settle's step or inline in the request that finds it due; that
+  build holds the loop as long as before (IDX-09e). **A publish costs its slice, not the view**
+  (review round 1: copying the whole index per slice made the settle quadratic, +8.7 to +11.6 % on
+  medium with a warm store, about +30 % projected on large): generations share their untouched
+  entries (`jfl_application::SharedIndex`, sorted chunks behind `Arc`s; **Reuse considered:** `im`
+  and `rpds`, both MPL-2.0, outside `deny.toml`'s allowlist, and larger than the five operations
+  needed), the registry's publish adjusts its counts and checks the store over the touched paths
+  only (the others passed at their publish, and a store only grows), and the shell keeps the
+  deferred set and the count beside the view instead of walking it.
+- **Measured** (`doc/bench/README.md`, "The settle in slices", medium, 2026-11-24, a loaded VM):
+the loop is held p95 299–307 ms per slice (the whole 4.1–4.3 s settle before); a request between
+  slices 1.6–2.4 ms p50 in process, and a definition during the settle p50 217–268 ms over
+  `jfl lsp` (each waits for its slice); SIGTERM to exit 239–354 ms; the full index within noise of
+  the one build, cold and with a warm store (median 723 against 720 ms), and a slice's fixed cost
+  no longer grows with the view, so large's projection is the same.
+- **Left:**
+  - a rescan due while deferred files remain: IDX-09e;
+  - quiet-machine numbers, and large measured rather than projected;
+  - the reference machine (`tests/views_machine.rs`) does not draw parts yet; the generated
+    conformance traces do, rarely (14 parts in 200 traces of 30 steps at seed 0x99: a rescan,
+    which refuses a part, is often due), so the committed trace and the simulation carry them;
+  - `write_back` was already sliced (`WRITE_SLICE`, p95 about 130–160 ms here); a cheaper store
+    write stays with IDX-08 and DEC-03.
+- **Accept:**
+  - [x] `views.qnt` models the part, its scenario, guard tests and broken control, and the simulation finds the control (`doc/formal-models.md`, controls); `formal-test` and `formal-freshness` green; `formal-verify views` green within `formal/models.toml`'s budget: Apalache at length 5 in 1169 s (858 s before), the simulation 185 s, 23 min in all against the 60-minute job, about 14 minutes of room at CI's doubling (`doc/formal-models.md`, Budget)
+  - [x] the driver replays `views-settle-in-slices` and its control diverges at the part (`tests/replay.rs`)
+  - [x] a request between slices is answered from the latest generation, incomplete until the last slice (`tests/view_service.rs`, `tests/daemon.rs`)
+  - [x] measured on medium with large projected: full index, loop hold, request latency during the settle, SIGTERM to exit (`doc/bench/README.md`)
+- **Impact:** while no rescan is due, the daemon answers, accepts and stops within one slice during a settle (a rescan still reads every deferred file in one build: IDX-09e); no protocol change.
+
+#### IDX-09e: A rescan with deferred files, in slices
+- **Depends on:** IDX-09d. **Model:** deep. **Size:** M. **Parallel with:** LSP-03. **Blocks:** M1's
+  bench gate (LSP-06): until it lands, a settle's hold is bounded by one slice only while no
+  rescan is due.
+- **Cites:** plan §4, §7.1, §1.7; ver §6; ADR 0007, ADR 0014, ADR 0031; the IDX-09d review.
+- **Why:** a rescan is whole (`reconcileStart`): it re-stats every entry and reads every one a stat
+  cannot prove, and every deferred entry is racy, so a rescan due while a settle has files left
+  reads them all in one build: about 2 s on medium, 9 s on large, in the settle's background step
+  or, when a request finds the rescan due, inline in that request, past the 8 s call budget on
+  large. Every trigger, each common during a settle in agent use:
+  - a file created in the view during the settle: a request's part takes it, the shell finds it
+    unknown to the published generation and escalates to `Event::Git`
+    (`ViewService::reconcile_part`, the `escalate` branch);
+  - a linked worktree's `git add` or commit (`.claude/worktrees/…`, the target layout): its `HEAD`
+    and index live outside its root, so no watcher event is raised, and the next request's stat
+    sets the rescan (`requestStart`) and that request performs the whole build inline;
+  - a lost watch (`watchLost`, a degrading `Rescan`), and its restore;
+  - an overflow (`IN_Q_OVERFLOW`, `dropEvent`: every view on the instance);
+  - a `.git` hint (the main worktree's `HEAD` or index, or any non-`.java` path);
+  - `sync`, whose rescan is its barrier.
+- **Proposed model change (the reviewer's):** a rescan that may leave the delivered deferred files
+  in `dirty`: `reconcileStart` on a rescan takes every changed path except, at its choice, paths
+  that are delivered and unread (a deferred file is delivered by the settle's first slice), which
+  stay `dirty` for the settle's parts. `completeAt` stays honest because `dirty` stays non-empty
+  until a part takes them; `certifies` is unaffected (the scan still started with the watch up,
+  and a delivered path is known changed). `sync`'s barrier then needs its rescan and every part
+  after it until `dirty` holds nothing delivered before the `sync` (`SyncIsBarrier` decides
+  whether `syncDone` waits for them). Model first: the scenario (a created file during a settle;
+  a linked worktree's commit during a settle, with a request), a broken control (a rescan that
+  drops the left paths from `dirty`, violating `CompleteIsHonest`), the driver, then the
+  registry and the shell (a rescan leaves `Opened::deferred` delivered; a request's rescan then
+  reads only its own and the non-deferred files). Apalache's budget is nearly spent: `views` at
+  length 5 took 1169 s after IDX-09d, leaving about 14 minutes of room in the 60-minute job at
+  CI's doubling (`doc/formal-models.md`, Budget), so measure first, and split
+  the job or lower the simulation's share if it does not fit.
+- **Accept:**
+  - [ ] the model change above with its scenario, control (found by the simulation) and driver; `formal-verify views` within the budget
+  - [ ] a rescan during a settle reads at most one slice of deferred files per step, and a request that finds a rescan due answers within its budget on large (`tests/view_service.rs`, `tests/daemon.rs`)
+  - [ ] measured on medium with large projected: the longest hold during a settle with each trigger above
+- **Impact:** the IDX-09d bound (one slice) holds with a rescan due; no protocol change.
 
 #### IDX-10: Queries: `sym`, `def`, `hover`
 - **Depends on:** IDX-09. **Model:** deep. **Size:** L. **Parallel with:** LSP-01.

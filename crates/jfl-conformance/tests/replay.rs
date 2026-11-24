@@ -735,6 +735,49 @@ fn should_diverge_at_the_reconcile_when_the_views_control_publishes_early() -> T
     Ok(())
 }
 
+/// The views regression trace that settles in slices (IDX-09d): the second part, at step 18,
+/// takes the file a waiting request needs beside another.
+const VIEWS_SLICES: &str = "formal/traces/regression/views-settle-in-slices.itf.json";
+
+#[test]
+fn should_diverge_at_the_part_when_the_views_control_leaves_out_a_needed_path() -> TestResult {
+    // given
+    let text = fs::read_to_string(root().join(VIEWS_SLICES))?;
+    let context = Context {
+        model: "views",
+        seed: "0x3",
+        trace: VIEWS_SLICES,
+    };
+
+    // when
+    let conformed = replay::replay(
+        views::driver(),
+        &context,
+        trace::parse(VIEWS_SLICES, &text)?,
+    );
+    let control = replay::replay(
+        views::control_part_without_needed(),
+        &context,
+        trace::parse(VIEWS_SLICES, &text)?,
+    );
+
+    // then: the first part, with no request waiting, conforms under the control too; the second
+    // is refused by the registry's guard, not for being empty
+    assert_eq!(conformed, Ok(27));
+    let Err(Failure::Diverged(divergence)) = control else {
+        return Err(format!("the views control did not diverge: {control:?}").into());
+    };
+    assert_eq!(divergence.step, 18);
+    assert_eq!(divergence.action, "reconcilePart");
+    assert!(
+        divergence
+            .to_string()
+            .contains("the part leaves out a path a waiting request needs"),
+        "{divergence}"
+    );
+    Ok(())
+}
+
 /// The daemon regression traces with a shutdown, and the step of the first shutdown step in each.
 const DAEMON_SHUTDOWNS: [(&str, usize, &str); 3] = [
     (

@@ -233,11 +233,25 @@ the testkit's fakes, and `tests/views_machine.rs` runs the registry against a re
     prove (`reconcileStart`), or leaves out what its listing lacks. `ViewService::settle` is the
     exception: its file events are **made by the shell, not raised by a watcher**, so they are not
     the model's `deliver`, which takes a queued event. They are a harmless over-approximation
-    (an extra dirty path is re-read), after which `reconcileStart`, `summarise` and `publish`
-    are the model's.
-  - No transition is added and no invariant changes, so `views.qnt` and its driver are unchanged
-    (review of 2026-11-19: writing the store after the publish is a sound refinement of
-    `store`, and Pending is a coverage gap). Pinned by `tests/view_service.rs`: the two tests
+    (an extra dirty path is re-read), after which `reconcilePart` (or `reconcileStart` on a
+    rescan), `summarise` and `publish` are the model's.
+  - **The settle in slices** (IDX-09d): the first slice delivers every deferred file, then each
+    slice is the model's `reconcilePart` of at most `SETTLE_SLICE` of them (512 in the daemon),
+    its reads and its publish, one daemon background step each. Until the last slice publishes,
+    the deferred files are delivered and unpublished, so the model itself makes every answer
+    incomplete (`completeAt` needs `dirty` empty), beside the coverage rule. A request takes
+    the delivered files that are not deferred and the ones a waiting request needs (its own:
+    `reconcilePart`'s guard), never the rest of the view; a rescan takes them all in its one
+    build (`reconcileStart`, which is whole), and so does a request while one is due: a slice
+    bounds the hold only while no rescan is due (IDX-09e has the triggers and the model change).
+    Each publish shares the entries its build did not touch with the generation before
+    (`SharedIndex`), and the registry's atomic-publish guard checks the touched entries only:
+    the others passed it when they were published, and the model's `store` only grows. Pinned by
+    `should_publish_a_generation_per_slice_and_answer_between_them_when_settled_in_slices` and,
+    in the daemon, `crates/jfl-composition/tests/daemon.rs::should_answer_a_request_between_the_slices_of_a_settle_when_the_view_is_large`.
+  - Slice 3 added no transition and changed no invariant (review of 2026-11-19: writing the
+    store after the publish is a sound refinement of `store`, and Pending is a coverage gap);
+    IDX-09d added `reconcilePart` for the slices. Pinned by `tests/view_service.rs`: the two tests
     above and `should_settle_from_the_disk_when_a_pending_file_changes_before_settle`,
     `should_drop_a_pending_file_from_the_count_when_it_is_deleted_before_settle` and
     `should_read_every_pending_file_when_sync_runs_before_settle`. Letting a stat prove a pending
@@ -300,6 +314,7 @@ is `None`. The action itself is `mbt::actionTaken`.
 | `watchLost` | `view` | The view's watch is lost. |
 | `watchRestored` | `view` | The view's watch is re-established. |
 | `reconcileStart` | `view` | The registry starts the next build. On a rescan, the build takes every path a stat cannot prove unchanged. |
+| `reconcilePart` | `view`, `take` | The registry starts a build of `take`, a part of the delivered events (IDX-09d: a settle's slice, or a request's own files during one); the rest stay delivered. Never while a rescan is due, and only with every path a waiting request needs (`needed`). `step` picks `take` as one delivered path, alone or with every needed path (not any subset: with every subset the simulation never took a part while a request waited). |
 | `summarise` | `view`, `path` | The build re-reads the path, summarises it and stores the summary. |
 | `publish` | `view` | The registry publishes the build atomically. |
 | `requestStart` | `req`, `path` | Starts the request: bind, stat, and write a cookie. |
@@ -443,6 +458,7 @@ asserts the outcome.
 | `twoViewsShareAGeneration` | 8 | Both views are at generation 1, `m` with an event in flight. Requests in `n` and in `m` both pin generation 1, and only `n`'s is complete. |
 | `concurrentEditsDuringRequest` | 10 | The review's round 2 counterexample, with the fix. Edits land while a request waits, and `m/A` is summarised at its newest version beside the old `m/B`, a mix the disk never held. The summary was read after the cookie, so the answer is incomplete (`nonSnapshotIsIncompleteTest`; with a second cookie and the edits still arriving, `secondCookieWithEditsInFlightStaysIncompleteTest`). |
 | `headMovedOutsideTheRoot` | 15 | The review's round 1 counterexample, with the fix. `n` checks out while a request waits. Its file events are reconciled, but nothing sees its HEAD. The pin's re-stat does see it, so the answer is incomplete and a rescan starts. |
+| `settleInSlices` | 26 | IDX-09d. Two files are delivered; a part takes `m/A` and publishes generation 2. A request on `m/A` is answered from it between the slices, incomplete while `m/B` waits. `m/A` changes again; a request on `m/B` waits for the next part, which must take `m/B` (here beside `m/A`) (`partLeavingOutANeededPathIsRefusedTest`, `partTakingTheNeededPathIsTakenTest`); after its second cookie the answer is complete at generation 3. A part is refused while a rescan is due (`partDuringARescanIsRefusedTest`, `rescanTakesWhatAPartWouldTest`). |
 
 Three tests have no trace:
 
@@ -471,9 +487,10 @@ Each control is an action variant with a Quint test that expects its invariant t
 | `requestPinTrusting` | No cookie, and trusts a lost watch: two tests. | `CompleteIsHonest` |
 | `dropEventMarkingOne` | An overflow marks one view of a shared instance. | `CompleteIsHonest` |
 | `syncDoneEarly` | `sync` returns without its rescan. | `SyncIsBarrier` |
+| `reconcilePartIgnoringRequests` | A part leaves out the file a waiting request's stat saw change (IDX-09d): `partIgnoringRequestsViolatesFreshAfterStatTest`. The simulation finds it too, put in `reconcilePart`'s place in `daemonStep`: `quint run --backend typescript --main views --step step --invariant FreshAfterStat --max-steps 30 --max-samples 20000 --seed <s>` found the violation within 12–13 s (about 1,800 samples) at each of the seeds 0x1 to 0x5 (2026-11-24); with the part picked from every subset of the delivered paths it found none in 20,000 (the IDX-09d review). Apalache at length 5 cannot reach it (the shortest violation is about 10 steps). | `FreshAfterStat` |
 
 Plan §7.1 names IDX-09's own negative control: publishing before the last summary is stored. The
-driver has two (`crates/jfl-conformance/src/views.rs`), each diverging where its fault first
+driver has three (`crates/jfl-conformance/src/views.rs`), each diverging where its fault first
 shows:
 
 - **The registered control** shows the registry a store that lags the observed one by its last
@@ -484,6 +501,10 @@ shows:
   are stored. It diverges at `reconcileStart` (with a path pending the guard refuses
   `PendingSummaries`; with none the early generation differs from the model's): step 3 of the
   same trace.
+- **The part-without-needed control** (IDX-09d) leaves out of each part the paths the waiting
+  requests need, as a shell slicing a settle without them would. The registry's guard refuses
+  it (`NeededNotTaken`): step 18 of `views-settle-in-slices`, whose part holds another path
+  beside the needed one, so the refusal is the guard's and not an empty part's (`tests/replay.rs::should_diverge_at_the_part_when_the_views_control_leaves_out_a_needed_path`).
 
 `conformance-replay` requires the registered control to diverge on the generated batch or the
 committed regression traces, so the requirement holds at every seed: in a batch of ten 30-step
@@ -498,12 +519,16 @@ Temurin JDK 21. The registry holds two numbers per model: `steps`, Apalache's bo
 
 | Check | Budget | Time |
 |:--|:--|:--|
-| `formal-typecheck` and `formal-test` (29 views tests, 1 smoke) | every `check` | about 4 s |
-| `formal-freshness`: eight traces regenerated | every `check` | about 2 s per trace |
-| `conformance-replay` | 10 traces of `sim_steps` (30), generated twice, every `check` | a few seconds; the views driver replays them and the seven regression traces, and its control diverges (IDX-09). |
-| `formal-verify views`: Apalache | `steps = 5` | 858 s |
-| `formal-verify views`: simulation | 20000 samples of `sim_steps` (30) | 172 s |
-| `formal-verify views` in all | weekly in `formal.yml` (60-minute job) | 1048 s; perhaps twice that on a CI runner |
+| `formal-typecheck` and `formal-test` (35 views tests, 1 smoke) | every `check` | about 6 s |
+| `formal-freshness`: nine traces regenerated | every `check` | about 2 s per trace |
+| `conformance-replay` | 10 traces of `sim_steps` (30), generated twice, every `check` | a few seconds; the views driver replays them and the eight regression traces, and its control diverges (IDX-09). |
+| `formal-verify views`: Apalache | `steps = 5` | 858 s; 1169 s with IDX-09d's `reconcilePart` and its biased pick (2026-11-24, the other lane's work and this lane's benches running; 1093 s with the first, unbiased pick) |
+| `formal-verify views`: simulation | 20000 samples of `sim_steps` (30) | 172 s; 185 s with `reconcilePart` |
+| `formal-verify views` in all | weekly in `formal.yml` (60-minute job) | 1048 s; 1369 s with `reconcilePart` (23 min); perhaps twice that on a CI runner, about 46 min |
+
+**The margin is about 14 minutes** of the 60-minute job at that doubling (IDX-09d's review). Another
+transition of `reconcilePart`'s cost at `steps = 5` would not fit: measure it on a CI runner first,
+or split the job (Apalache and the simulation in separate jobs), before adding one (IDX-09e).
 
 **Apalache's time grows steeply with the bound.** On round 3's model it took 188 s at length 4
 and 858 s at length 5. Round 2's model, without the request history and read stamps, took 40 s at

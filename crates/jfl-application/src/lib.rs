@@ -26,6 +26,7 @@ pub mod diagnostics;
 pub mod hints;
 pub mod queries;
 pub mod repo_probe;
+pub mod shared_index;
 pub mod source_tree;
 pub mod summary_store;
 pub mod syntax_indexer;
@@ -44,6 +45,7 @@ pub use repo_probe::{
     ChangedFiles, GitFile, GitSnapshot, GitStat, GitStep, HeadState, ObjectId, RepoId, RepoProbe,
     RepoProbeError, StatRecord, TrackedFiles, Worktree, WorktreeKind,
 };
+pub use shared_index::SharedIndex;
 pub use source_tree::{
     Exclusion, FileStat, FsKind, GitEntry, GitMarker, Hint, HintSubject, Hints, ListMode,
     ListedFile, Listing, MTime, ReadBytes, Rescan, RescanReason, RescanReasons, Skipped,

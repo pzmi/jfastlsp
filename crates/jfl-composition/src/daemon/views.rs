@@ -8,9 +8,15 @@
 //!   partial and says `deadline`), and lets the pin go. Pinned by
 //!   `tests/daemon.rs::should_answer_a_definition_from_the_views_with_an_honest_envelope_when_a_client_asks`. The request's own stats run inline on the
 //!   loop, the reads and parses on the blocking pool (IDX-09's decision).
-//! - **Between requests** ([`Service::background`]): `settle` once a request opened a view (the
-//!   rest of the view read, published), then `write_back` in slices of [`WRITE_SLICE`]
-//!   summaries, each step run to its end.
+//! - **Between requests** ([`Service::background`]): `settle` once a request opened a view, in
+//!   slices of [`SETTLE_SLICE`] files (the rest of the view read and published a slice at a time,
+//!   IDX-09d), then `write_back` in slices of [`WRITE_SLICE`] summaries, each step run to its
+//!   end, so a frame, a signal or a tick waits at most one slice, **except while a rescan is
+//!   due**: a rescan is whole, so it reads every file still deferred in one build, in the settle's
+//!   step or in the request that finds it due (a file created during the settle, a linked
+//!   worktree's `git add` or commit seen by a request's stat, a lost watch, an overflow, a `.git`
+//!   hint, `sync`): the hold of before, for that build (IDX-09e). Pinned by
+//!   `tests/daemon.rs::should_answer_a_request_between_the_slices_of_a_settle_when_the_view_is_large`.
 //! - **An open document that differs from the disk** is answered `ContentModified` rather than
 //!   from the disk, whether it is the document asked about or one any hit (`exact` or `possible`)
 //!   lands in: the index holds the disk's text, so a position in the client's buffer, or a hit's
@@ -61,6 +67,13 @@ use super::service::{Context, Overlay, Service, Working, error_body, result_body
 
 /// The summary store's cap on disk: 2 GiB, about four times the large corpus's summaries.
 pub const STORE_CAP: u64 = 2 << 30;
+
+/// The deferred files one background step of a settle reads and publishes (IDX-09d): about
+/// 100 ms of reads and parses on the bench VM's four threads (`doc/bench/README.md`), so a frame,
+/// SIGTERM or a tick waits at most about that long behind one while no rescan is due. A publish
+/// shares the untouched entries with the generation before, so a slice costs what it reads,
+/// whatever the view's size.
+pub const SETTLE_SLICE: usize = 512;
 
 /// The summaries one background step writes to the store: about 10 to 60 ms of writes on the
 /// bench VM (30 to 250 µs each, IDX-09), so a request waits at most that long behind one.
@@ -307,10 +320,11 @@ impl Service for Views {
 
     fn background(&mut self) -> Option<Working<'_, ()>> {
         if self.settle {
-            self.settle = false;
             return Some(Box::pin(async move {
-                // A view that cannot be read whole now stays partly indexed and says so.
-                let _settled = self.engine.settle().await;
+                // One slice per step; a slice that fails stops the settle, and its view stays
+                // partly indexed and says so.
+                let more = self.engine.settle(SETTLE_SLICE).await;
+                self.settle = matches!(more, Ok(true));
                 self.write_back = true;
             }));
         }

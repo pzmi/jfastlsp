@@ -14,11 +14,11 @@
 //! spinning. Every timer is in [`super::timer`].
 //!
 //! **Between requests** the loop runs the service's background work ([`Service::background`]:
-//! the views' `settle` after a request that opened one, then their `write_back` in slices), one
-//! step at a time and only when nothing else is ready (the `select!` is biased, the work last), so
-//! a waiting frame, a signal or a tick is taken before the next step. A step runs to its end once
-//! started: a `settle` or a reconcile dropped half way would leave its view's build set for good
-//! (IDX-09's wiring notes).
+//! the views' `settle` in slices after a request that opened one, then their `write_back` in
+//! slices), one step at a time and only when nothing else is ready (the `select!` is biased, the
+//! work last), so a waiting frame, a signal or a tick is taken before the next step. A step runs
+//! to its end once started: a slice dropped half way would leave its view's build set for good
+//! (IDX-09's wiring notes); each is bounded instead (IDX-09d), so the loop is held for one slice.
 //!
 //! Pinned by `tests/daemon.rs`.
 
