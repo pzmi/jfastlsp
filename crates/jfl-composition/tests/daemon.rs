@@ -111,6 +111,23 @@ mod given {
             child.lock().unwrap().try_exit().unwrap()
         }
 
+        /// Waits for `pid`'s exit and gives it. The exit is the only signal that the daemon has
+        /// exited: its shutdown removes the socket and releases the lock before it returns from
+        /// `run` and the process ends (`daemon/run.rs`), so neither says it has exited. Pinned
+        /// by `should_not_have_exited_when_its_socket_is_gone_and_its_lock_free_while_it_runs`.
+        pub(crate) fn wait_exit(
+            &self,
+            pid: u32,
+            deadline: Duration,
+        ) -> Result<jfl_process::Exit, jfl_testkit::poll::PollTimeout> {
+            let mut exit = None;
+            jfl_testkit::poll::wait_until(deadline, "the daemon's exit", || {
+                exit = self.exit_of(pid);
+                exit.is_some()
+            })?;
+            Ok(exit.expect("the wait ended on an exit"))
+        }
+
         /// Whether the lock is free: a probe takes and releases it.
         pub(crate) fn lock_free(&self) -> bool {
             jfl_adapter_ipc::Flock::try_acquire(&self.state.lock_path()).is_ok()
@@ -496,15 +513,53 @@ fn should_keep_serving_others_and_sigterm_when_a_client_stops_reading() {
     let severed = (0..200_000).any(|_| slow.send(&request, &mut frames::plenty()).is_err());
     let answered = proxy.call::<Status>(StatusParams { worktree: None }, Duration::from_secs(5));
     assert!(jfl_testkit::signal::send(pid, "TERM"));
-    let stopped = wait_until(Duration::from_secs(20), "the shutdown", || {
-        !daemons.socket.path().exists() && daemons.lock_free()
-    });
+    let exit = daemons.wait_exit(pid, Duration::from_secs(20));
 
-    // then
+    // then: it exited 0, and its shutdown, which comes before the exit, left no socket and no lock
     assert!(severed, "the daemon kept a client that never reads");
     assert_eq!(answered.map(|r| pid_of(&r)).ok(), Some(pid));
-    assert!(stopped.is_ok(), "{stopped:?}");
-    assert_eq!(daemons.exit_of(pid), Some(jfl_process::Exit::Code(0)));
+    assert_eq!(exit, Ok(jfl_process::Exit::Code(0)));
+    assert!(!daemons.socket.path().exists());
+    assert!(daemons.lock_free());
+}
+
+#[test]
+fn should_not_have_exited_when_its_socket_is_gone_and_its_lock_free_while_it_runs() {
+    // given: a serving daemon, stopped (SIGSTOP, seen by `waitid`), its socket removed and its
+    // lock file replaced: the state its shutdown leaves just before it exits, held while it can
+    // neither run nor exit
+    use rustix::process::{Pid, WaitId, WaitIdOptions, waitid};
+    let daemons = Daemons::new();
+    let mut proxy = daemons.proxy("a", None);
+    let pid = pid_of(
+        &proxy
+            .call::<Status>(StatusParams { worktree: None }, BUDGET)
+            .unwrap(),
+    );
+    let raw = Pid::from_raw(i32::try_from(pid).unwrap()).unwrap();
+    assert!(jfl_testkit::signal::send(pid, "STOP"));
+    wait_until(Duration::from_secs(20), "the daemon's stop", || {
+        let stopped = waitid(
+            WaitId::Pid(raw),
+            WaitIdOptions::STOPPED | WaitIdOptions::NOHANG,
+        );
+        matches!(stopped, Ok(Some(status)) if status.stopped())
+    })
+    .unwrap();
+    fs::remove_file(daemons.socket.path()).unwrap();
+    fs::remove_file(daemons.state.lock_path()).unwrap();
+
+    // when: the signals the SIGTERM test used to wait on, then the exit read at once, as it did
+    let signalled = !daemons.socket.path().exists() && daemons.lock_free();
+    let read_at_once = daemons.exit_of(pid);
+    assert!(jfl_testkit::signal::send(pid, "CONT"));
+    let waited = daemons.wait_exit(pid, Duration::from_secs(20));
+
+    // then: both signals held while it had not exited; the wait on the exit itself sees it exit
+    // 0 (its next tick finds its lock path and socket gone)
+    assert!(signalled);
+    assert_eq!(read_at_once, None);
+    assert_eq!(waited, Ok(jfl_process::Exit::Code(0)));
 }
 
 #[test]

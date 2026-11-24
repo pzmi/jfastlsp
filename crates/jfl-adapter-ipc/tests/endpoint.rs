@@ -218,6 +218,57 @@ fn should_refuse_the_peer_when_its_uid_is_not_the_daemons() {
 }
 
 #[test]
+fn should_serve_the_next_peer_when_one_closed_before_its_accept() {
+    // given: a peer that connected and closed (a proxy's second check), then one that sent its
+    // handshake, both waiting in the backlog. On macOS the first one's credentials can no
+    // longer be read (`ENOTCONN`); on Linux it is served and reads its EOF
+    let scratch = Scratch::new();
+    let state = StateDir::open(&scratch.state()).unwrap();
+    let path = SocketPath::of_state(&state).unwrap();
+    let rt = runtime();
+    let listener = rt
+        .block_on(async { Listener::bind(&path, current_uid()) })
+        .unwrap();
+    assert!(jfl_adapter_ipc::client::listening(path.path()));
+    let mut client = ClientConn::connect(path.path()).unwrap();
+    client
+        .send(
+            br#"{"jsonrpc":"2.0","id":"hs","method":"jfl/status","params":{"worktree":null}}"#,
+            &mut plenty(),
+        )
+        .unwrap();
+
+    // when: accepting until a peer's first read is a frame, as the daemon's host does; the
+    // closed peer, if it is served at all, ends at once
+    let mut firsts = Vec::new();
+    for _ in 0..2 {
+        let first = match rt.block_on(listener.accept()) {
+            Ok(Accepted::Peer(mut reader, _writer)) => rt.block_on(reader.next()),
+            other => panic!("the accept failed after a peer closed: {other:?}"),
+        };
+        let served = matches!(first, Incoming::Call(_));
+        firsts.push(first);
+        if served {
+            break;
+        }
+    }
+
+    // then
+    assert!(
+        matches!(firsts.last(), Some(Incoming::Call(call)) if call.id == RequestId::String("hs".into())),
+        "{firsts:?}"
+    );
+    assert!(
+        firsts
+            .iter()
+            .rev()
+            .skip(1)
+            .all(|first| matches!(first, Incoming::End(_))),
+        "{firsts:?}"
+    );
+}
+
+#[test]
 fn should_carry_frames_both_ways_when_a_peer_of_the_daemons_uid_connects() {
     // given
     let scratch = Scratch::new();

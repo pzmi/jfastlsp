@@ -667,7 +667,10 @@ version mismatch stops the old daemon with `jfl/stop` and spawns, ADR 0021); 9, 
 - **The version handshake's mismatch** (ADR 0021: the proxy asks the old daemon to stop and
   respawns): to the model it is a SIGTERM followed by a spawn.
 - **Socket and directory modes, the peer-uid check, the socket path's length limit** (plan
-  §5.3): IDX-12's integration tests.
+  §5.3): IDX-12's integration tests. Nor the second check's probe: it connects and closes before
+  any handshake, so it is never a connection slot; the host drops it from the backlog on its way
+  to the connection `accept` names (on Linux it reads its EOF, on macOS its credentials can no
+  longer be read; FND-16).
 - **The lock file or the state directory deleted from outside** while a daemon holds the lock:
   a second daemon then locks a new file, and two own the directory. The model has this only as a
   code bug (`lockBreakingStale`); obligation 1's path check makes the old daemon stop.

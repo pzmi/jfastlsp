@@ -44,6 +44,7 @@ CLI carrier), **SEM-07** (M4),
 | FND-13 | Make CI green again on main | XT-02 | standard | M |  | FORMAL-05 |
 | FND-14 | Keep the queue-full reason when hints fold into a pending rescan | FND-13 | standard | S |  | — |
 | FND-15 | Accept a rescan in place of an awaited hint, never a silent miss | FND-14 | standard | M |  | — |
+| FND-16 | Two daemon races from CI: a peer gone before its accept, an exit read before it happened | FND-15, IDX-12 | standard | M |  | — |
 | XT-01 | Scaffold `tools/xtask` and port the gate composition | FND-08, FND-09 | deep | M |  | FND-10, EVAL lane |
 | XT-02 | Tool pins: `tools/versions.toml`, `cargo xtask doctor`, `install-tools` | XT-01 | standard | M |  | EVAL lane |
 | XT-03 | Security and workflow stages into xtask | XT-02 | standard | M |  | EVAL lane |
@@ -612,6 +613,41 @@ foundation piece by piece (ADR 0035).
   - [ ] `just check` green; the `macos` nightly green on the landed commit
 - **Impact:** tests (the `source_tree` contract's two watch cases, one new strict case, the fake's
   root event, one adapter watch test); docs of the cookie port.
+
+#### FND-16: Two daemon races from CI: a peer gone before its accept, an exit read before it happened
+- **Depends on:** FND-15, IDX-12. **Model:** standard. **Size:** M. **Parallel with:** none.
+- **Cites:** plan §5.2, §5.3; ver §2, §3; ADR 0007.
+- **Race 1, a product bug on macOS** (the `macos` nightly of c03aa52, the first with IDX-12's
+  daemon driver): the regression trace `daemon-two-proxies-spawn-at-once` diverged at step 16,
+  `accept` of `c1` refused with `ENOTCONN` (os error 57). The interleaving: `d1` listens (step
+  10); `p2`'s second check under the spawn lock (`spawn`, step 13) finds it with
+  `client::listening`, which connects and closes at once, leaving a closed connection first in
+  `d1`'s backlog; `p1` and `p2` connect (14, 15); `d1`'s accept of `c1` takes the probe first,
+  and `Listener::accept` asks for its peer's credentials. Tokio's `peer_cred` on macOS reads
+  `LOCAL_PEEREPID` before `getpeereid`, and XNU answers it from the live peer, so a peer already
+  gone is `ENOTCONN`; the `?` made it the listener's error. On Linux `SO_PEERCRED` keeps the
+  credentials past the peer's close, so the probe is served, reads its EOF and is dropped, as the
+  host documents. Beyond the driver, the daemon's loop took the error for a failed accept and
+  stopped accepting until its next tick (up to 2 s) after any client that connected and left
+  before being accepted. The fix: a peer whose credentials cannot be read is closed unserved and
+  the next one accepted (`Listener::accept`); only the kernel's accept is the listener's error.
+  The design does not change (plan §5.3 says it now): the probe is no connection of the model and
+  the peer check is not modelled (`doc/formal-models.md`), so `daemon.qnt` and its driver stay.
+- **Race 2, a test race** (linux-arm, PR run 45355597699):
+  `should_keep_serving_others_and_sigterm_when_a_client_stops_reading` read the daemon's exit
+  (`try_wait`) as soon as its socket was gone and its lock free. The daemon's shutdown order is
+  stop accepting, unlink, release, then return from `run` (the runtime and service dropped) and
+  exit, so between the release and the exit the test read `None`. The test now waits for the exit
+  itself (`Daemons::wait_exit`, testkit `poll`) and then checks that the socket is gone and the
+  lock free, which the order guarantees by then. The daemon's own shutdown was right.
+- **Reuse considered:** none needed: fixes.
+- **Accept:**
+  - [ ] a peer whose credentials fail as XNU fails them for a gone peer is skipped and the next peer served; with the old `?` the accept fails with `NotConnected`, every time (`server::tests::should_accept_the_next_peer_when_the_credentials_of_a_gone_peer_fail`); against the real kernel, a peer closed before its accept never fails the accept (`tests/endpoint.rs::should_serve_the_next_peer_when_one_closed_before_its_accept`, the one that fails on macOS before the fix)
+  - [ ] a stopped daemon whose socket is gone and lock file replaced has not exited (the old test's read is `None` every time), and the wait on the exit sees it exit 0 (`should_not_have_exited_when_its_socket_is_gone_and_its_lock_free_while_it_runs`); the SIGTERM test waits on the exit
+  - [ ] the affected tests repeated 50 times or more without a failure; `just check` green
+  - [ ] the `macos` nightly green on the landed commit (owner-run, not reproducible here)
+- **Impact:** `jfl-adapter-ipc` (a gone peer never fails the accept); tests (the SIGTERM test's
+  wait, two new IPC tests, one new daemon test); plan §5.3; `doc/formal-models.md`.
 
 ### Lane XT: port mayfly's `xtask`, piece by piece
 

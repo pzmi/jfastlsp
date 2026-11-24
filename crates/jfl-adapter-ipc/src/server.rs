@@ -5,8 +5,17 @@
 //! `0700` state directory admits no other user), and records the bound file's identity so the
 //! daemon can tell later whether the path still names its socket (a socket file removed from
 //! under it: the model's `sweep`). Each accepted peer's uid (`SO_PEERCRED` on Linux,
-//! `getpeereid` on macOS, through Tokio's `peer_cred`) must equal the daemon's: the backstop if
-//! the directory check is ever wrong.
+//! `LOCAL_PEEREPID` and `getpeereid` on macOS, through Tokio's `peer_cred`) must equal the
+//! daemon's: the backstop if the directory check is ever wrong.
+//!
+//! A peer that closed before its accept (a proxy's second check, `client::listening`, connects
+//! and closes at once) is dropped and the next one accepted: on macOS the credential lookup of a
+//! connection whose peer is gone fails with `ENOTCONN` (XNU answers `LOCAL_PEEREPID` from the
+//! live peer, and Tokio asks for it first), and on Linux the credentials outlive the peer, so the
+//! connection is served and reads its EOF at once. Either way the listener itself is fine, and
+//! a failed lookup never stops the accepting. Pinned by
+//! `server::tests::should_accept_the_next_peer_when_the_credentials_of_a_gone_peer_fail` and
+//! `tests/endpoint.rs::should_serve_the_next_peer_when_one_closed_before_its_accept`.
 //!
 //! A connection is split: the [`ConnReader`] feeds the bytes it reads to `jfl-protocol`'s bounded
 //! decoder (the declared length checked before any allocation) and yields one [`Incoming`] per
@@ -76,18 +85,35 @@ impl Listener {
     }
 
     /// The next connection from the kernel's backlog. A peer of another uid is closed and
-    /// reported, never served.
+    /// reported, never served; a peer whose uid cannot be read (it closed before this accept,
+    /// on macOS) is closed and skipped. An error is the listener's own (`EMFILE`, say), never
+    /// one peer's.
     pub async fn accept(&self) -> io::Result<Accepted> {
-        let (stream, _) = self.inner.accept().await?;
-        let uid = stream.peer_cred()?.uid();
-        if uid != self.uid {
-            return Ok(Accepted::Refused { uid });
+        self.accept_with(|stream| stream.peer_cred().map(|cred| cred.uid()))
+            .await
+    }
+
+    /// [`Listener::accept`] with the peer's uid read by `peer_uid`, so a test can answer as
+    /// macOS does for a peer that is gone.
+    async fn accept_with(
+        &self,
+        mut peer_uid: impl FnMut(&tokio::net::UnixStream) -> io::Result<u32>,
+    ) -> io::Result<Accepted> {
+        loop {
+            let (stream, _) = self.inner.accept().await?;
+            // Unknown credentials are never served; the stream is dropped (closed) here.
+            let Ok(uid) = peer_uid(&stream) else {
+                continue;
+            };
+            if uid != self.uid {
+                return Ok(Accepted::Refused { uid });
+            }
+            let (read, write) = stream.into_split();
+            return Ok(Accepted::Peer(
+                Box::new(ConnReader::new(read, jfl_protocol::DEFAULT_MAX_FRAME_LEN)),
+                ConnWriter { half: write },
+            ));
         }
-        let (read, write) = stream.into_split();
-        Ok(Accepted::Peer(
-            Box::new(ConnReader::new(read, jfl_protocol::DEFAULT_MAX_FRAME_LEN)),
-            ConnWriter { half: write },
-        ))
     }
 }
 
@@ -189,5 +215,80 @@ impl ConnWriter {
         let frame = encode_frame(body, jfl_protocol::DEFAULT_MAX_FRAME_LEN)
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
         self.half.write_all(&frame).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+    use std::path::{Path, PathBuf};
+
+    use super::*;
+    use crate::client::ClientConn;
+    use crate::message::Incoming;
+    use crate::state::StateDir;
+
+    /// A scratch state directory under `/tmp` (short enough for `sun_path`; no env grant to
+    /// read `TMPDIR`), removed when dropped.
+    struct Scratch(PathBuf);
+
+    impl Scratch {
+        fn new(name: &str) -> Self {
+            let dir = Path::new("/tmp").join(format!("jfl-srv-{}-{name}", std::process::id()));
+            let _ = fs::remove_dir_all(&dir);
+            fs::create_dir_all(&dir).unwrap();
+            Self(dir)
+        }
+    }
+
+    impl Drop for Scratch {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn should_accept_the_next_peer_when_the_credentials_of_a_gone_peer_fail() {
+        // given: a listener whose backlog holds a peer that connected and closed (a proxy's
+        // second check), then a peer that sent its handshake; the uid lookup answers the first
+        // as XNU does for a peer that is gone
+        let scratch = Scratch::new("gone");
+        let state = StateDir::open(&scratch.0.join("s")).unwrap();
+        let path = SocketPath::of_state(&state).unwrap();
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_io()
+            .build()
+            .unwrap();
+        let listener = rt
+            .block_on(async { Listener::bind(&path, crate::current_uid()) })
+            .unwrap();
+        drop(ClientConn::connect(path.path()).unwrap());
+        let mut client = ClientConn::connect(path.path()).unwrap();
+        client
+            .send(
+                br#"{"jsonrpc":"2.0","id":"hs","method":"jfl/status","params":{}}"#,
+                &mut || Some(std::time::Duration::from_secs(10)),
+            )
+            .unwrap();
+        let mut lookups = 0_u32;
+
+        // when
+        let accepted = rt.block_on(listener.accept_with(|stream| {
+            lookups += 1;
+            if lookups == 1 {
+                Err(rustix::io::Errno::NOTCONN.into())
+            } else {
+                stream.peer_cred().map(|cred| cred.uid())
+            }
+        }));
+
+        // then: the gone peer was skipped and the next one served, its frame first
+        let mut reader = match accepted {
+            Ok(Accepted::Peer(reader, _writer)) => reader,
+            other => panic!("the accept failed on a gone peer: {other:?}"),
+        };
+        let first = rt.block_on(reader.next());
+        assert!(matches!(first, Incoming::Call(_)), "{first:?}");
+        assert_eq!(lookups, 2);
     }
 }

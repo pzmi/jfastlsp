@@ -442,7 +442,10 @@ daemon are the closest published shapes (§16).
   `umask` is process-wide and racy in a threaded daemon), but the window is harmless because no
   other user can traverse the directory; macOS ignores socket-file permissions on `connect`
   anyway. Each connection's peer uid (`SO_PEERCRED` on Linux, `getpeereid` on macOS) must equal
-  the daemon's: the backstop if the directory check is ever wrong.
+  the daemon's: the backstop if the directory check is ever wrong. A connection whose peer's
+  credentials cannot be read is closed unserved and the next one accepted, never a reason to stop
+  accepting: on macOS that is every peer gone before its accept (the proxy's second check
+  connects and closes), since XNU reads the peer's pid from the live peer (FND-16).
 - Socket paths are limited to about 104 bytes on macOS and 108 on Linux, and a state directory
   under a long `$XDG_STATE_HOME` or a sandbox's long `$TMPDIR` can exceed that. **Proposed
   (FND-08, for IDX-12), the policy the since-removed `jfl-jdtls` built and ADR 0028's amendment
