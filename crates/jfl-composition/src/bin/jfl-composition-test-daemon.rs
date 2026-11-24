@@ -13,7 +13,13 @@ fn main() -> ExitCode {
     match args.split_first() {
         Some((command, rest)) if command == "daemon" => match DaemonConfig::from_args(rest) {
             Ok(config) => match daemon::serve(&config) {
-                Ok(_) => ExitCode::SUCCESS,
+                Ok(stopped) => {
+                    // The daemon's log is its stderr; a WARN event, by its fixed name (fnd §5).
+                    if let Some(warning) = stopped.warning {
+                        eprintln!("WARN {}", warning.event());
+                    }
+                    ExitCode::SUCCESS
+                }
                 Err(why) => {
                     eprintln!("{why}");
                     ExitCode::from(1)

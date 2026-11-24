@@ -113,8 +113,10 @@ seed = "0x3"
 # The daemon model's scenarios (FORMAL-04, doc/formal-models.md): scripted steps like the views
 # scenarios, each from an initial state with its pick fixed (`initClean`: no socket file;
 # `initStale`: one left by a crash). Replayed through the daemon driver (IDX-12,
-# crates/jfl-conformance/src/daemon.rs); `daemon-swept-socket-stops`, guarded by the step count
-# `t` like the diagnostics scenarios, is IDX-12's (the socket file removed from under its daemon).
+# crates/jfl-conformance/src/daemon.rs); `daemon-swept-socket-stops` (IDX-12's: the socket file
+# removed from under its daemon) and `daemon-idle-exit-races-connect` (FND-18's: the spawn waits
+# for the stopping daemon's spawn lock) are guarded by the step count `t`, like the diagnostics
+# scenarios.
 [traces.daemon-two-proxies-spawn-at-once]
 model = "daemon"
 main = "daemon"
@@ -139,7 +141,7 @@ main = "daemon"
 init = "initClean"
 step = "idleExitRacesConnect"
 invariant = "allInvariants"
-max_steps = 32
+max_steps = 29
 seed = "0x3"
 
 [traces.daemon-sigterm-after-stale-start]

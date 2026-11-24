@@ -128,6 +128,19 @@ mod given {
             Ok(exit.expect("the wait ended on an exit"))
         }
 
+        /// The spawn lock, taken by the test. A proxy's spawn released it; under `cargo test` a
+        /// child another test thread starts may hold a copy until its exec, so this waits for it
+        /// as a proxy would.
+        pub(crate) fn spawn_lock(&self) -> jfl_adapter_ipc::Flock {
+            let mut lock = None;
+            jfl_testkit::poll::wait_until(Duration::from_secs(20), "the spawn lock", || {
+                lock = jfl_adapter_ipc::Flock::try_acquire(&self.state.spawn_lock_path()).ok();
+                lock.is_some()
+            })
+            .unwrap();
+            lock.expect("the wait ended on the lock")
+        }
+
         /// Whether the lock is free: a probe takes and releases it.
         pub(crate) fn lock_free(&self) -> bool {
             jfl_adapter_ipc::Flock::try_acquire(&self.state.lock_path()).is_ok()
@@ -654,6 +667,173 @@ fn should_stop_the_daemon_of_another_major_and_start_its_own_when_a_proxy_connec
     .unwrap();
     assert_eq!(daemons.exit_of(first), Some(jfl_process::Exit::Code(0)));
     assert_eq!(daemons.spawned().len(), 2, "{:?}", daemons.spawned());
+}
+
+#[test]
+fn should_wait_for_a_stopping_daemon_and_start_one_that_serves_when_a_proxy_finds_none() {
+    // given: a host that took its shutdown's first step: it no longer accepts, and it still holds
+    // the lock (FND-18's window, held here as long as the test likes)
+    use jfl_composition::daemon::host::HostConfig;
+    use jfl_composition::daemon::proxy::ProxyPhase;
+    use jfl_composition::daemon::stepped::SteppedHost;
+    let daemons = Daemons::new();
+    let mut host = SteppedHost::new(HostConfig {
+        state: daemons.state.clone(),
+        socket: daemons.socket.clone(),
+        uid: jfl_adapter_ipc::current_uid(),
+        notify: None,
+    })
+    .unwrap();
+    host.lock().unwrap();
+    host.listen().unwrap();
+    host.stop().unwrap();
+    // A child another test thread of this process starts holds a copy of each of its descriptors
+    // until its exec (close-on-exec), the closed listener's too (under `cargo test`; nextest runs
+    // each test in a process of its own): wait until nothing listens at the path.
+    wait_until(
+        Duration::from_secs(20),
+        "the stopped listener's close",
+        || !jfl_adapter_ipc::client::listening(daemons.socket.path()),
+    )
+    .unwrap();
+    let mut proxy = daemons.proxy("a", None);
+
+    // when: a proxy finds no daemon while it stops, then asks again once it has released its lock
+    let refused = proxy.connect().unwrap();
+    let during = proxy.take_spawn_lock().unwrap();
+    let spawned_during = daemons.spawned().len();
+    host.unlink().unwrap();
+    host.release().unwrap();
+    let served = proxy.call::<Status>(StatusParams { worktree: None }, BUDGET);
+
+    // then: nothing was spawned while the lock was held (before FND-18 the proxy took the spawn
+    // lock here and its daemon failed the lock); the daemon spawned after serves
+    assert_eq!(
+        (refused, during),
+        (ProxyPhase::NoDaemon, ProxyPhase::Disconnected)
+    );
+    assert_eq!(spawned_during, 0);
+    assert_eq!(
+        served.map(|r| pid_of(&r)).ok(),
+        daemons.spawned().last().copied()
+    );
+}
+
+#[test]
+fn should_keep_its_listener_until_it_holds_the_spawn_lock_and_release_both_before_the_end_when_stopped()
+ {
+    // given: a serving daemon, a client past its handshake, and the spawn lock held, as a proxy
+    // holds it while it spawns
+    use jfl_adapter_ipc::{ClientConn, Flock, Received};
+    let daemons = Daemons::new();
+    let mut proxy = daemons.proxy("a", None);
+    let pid = pid_of(
+        &proxy
+            .call::<Status>(StatusParams { worktree: None }, BUDGET)
+            .unwrap(),
+    );
+    let mut client = ClientConn::connect(daemons.socket.path()).unwrap();
+    client
+        .send(&frames::hello("c", 1), &mut frames::plenty())
+        .unwrap();
+    let hello = client.recv(&mut frames::plenty()).unwrap();
+    let spawning = daemons.spawn_lock();
+
+    // when: the client stops the daemon and reads its answer (written while the daemon waits for
+    // the spawn lock); another client connects; then the spawn lock is let go and the first client
+    // reads its connection's end
+    client
+        .send(&frames::stop(2), &mut frames::plenty())
+        .unwrap();
+    let answer = client.recv(&mut frames::plenty()).unwrap();
+    let late = ClientConn::connect(daemons.socket.path());
+    drop(spawning);
+    let end = client.recv(&mut frames::plenty()).unwrap();
+    let released_at_end = (
+        daemons.socket.path().exists(),
+        daemons.lock_free(),
+        Flock::try_acquire(&daemons.state.spawn_lock_path()).is_ok(),
+    );
+    let exit = daemons.wait_exit(pid, Duration::from_secs(20));
+
+    // then: while the stop waited for the spawn lock the listener still queued connections (before
+    // FND-18 it was closed before the answer was written: the late connect was refused), and by
+    // its end the daemon had removed its socket and released both locks
+    assert!(matches!(hello, Received::Frame(_)));
+    match answer {
+        Received::Frame(body) => assert!(matches!(
+            jfl_protocol::codec::decode_response::<Stop>(&body)
+                .unwrap()
+                .outcome,
+            Outcome::Result(_)
+        )),
+        Received::Eof => panic!("no answer to jfl/stop"),
+    }
+    assert!(late.is_ok(), "{:?}", late.err());
+    assert_eq!(end, Received::Eof);
+    assert_eq!(released_at_end, (false, true, true));
+    assert_eq!(exit, Ok(jfl_process::Exit::Code(0)));
+}
+
+#[test]
+fn should_exit_once_its_wait_for_the_spawn_lock_expires_when_the_holder_never_lets_go() {
+    // given: a serving daemon, and the spawn lock held for good (a suspended proxy's, or any
+    // process that locks the file)
+    use jfl_composition::daemon::run::SPAWN_LOCK_WAIT;
+    let daemons = Daemons::new();
+    let mut proxy = daemons.proxy("a", None);
+    let pid = pid_of(
+        &proxy
+            .call::<Status>(StatusParams { worktree: None }, BUDGET)
+            .unwrap(),
+    );
+    let holder = daemons.spawn_lock();
+
+    // when
+    let signalled = std::time::Instant::now();
+    assert!(jfl_testkit::signal::send(pid, "TERM"));
+    let exit = daemons.wait_exit(pid, SPAWN_LOCK_WAIT + Duration::from_secs(20));
+    let waited = signalled.elapsed();
+
+    // then: the held spawn lock delayed the exit by the whole wait, and did not prevent it: exit
+    // 0, its socket removed and its lock released, the spawn lock still the holder's
+    assert_eq!(exit, Ok(jfl_process::Exit::Code(0)));
+    assert!(waited >= SPAWN_LOCK_WAIT, "{waited:?}");
+    assert!(!daemons.socket.path().exists());
+    assert!(daemons.lock_free());
+    drop(holder);
+}
+
+#[test]
+fn should_end_its_wait_for_the_spawn_lock_when_a_second_sigterm_comes() {
+    // given: a serving daemon, and the spawn lock held for good
+    use jfl_composition::daemon::run::SPAWN_LOCK_WAIT;
+    let daemons = Daemons::new();
+    let mut proxy = daemons.proxy("a", None);
+    let pid = pid_of(
+        &proxy
+            .call::<Status>(StatusParams { worktree: None }, BUDGET)
+            .unwrap(),
+    );
+    let holder = daemons.spawn_lock();
+
+    // when: SIGTERM, and again at every look, until it exits; looking no longer than its wait
+    // for the spawn lock would take
+    let mut exit = None;
+    let ended = wait_until(SPAWN_LOCK_WAIT, "the exit, a SIGTERM at every look", || {
+        exit = daemons.exit_of(pid);
+        if exit.is_none() {
+            assert!(jfl_testkit::signal::send(pid, "TERM"));
+        }
+        exit.is_some()
+    });
+
+    // then: a second SIGTERM ended the wait before its deadline; the shutdown went on as usual
+    assert!(ended.is_ok(), "{ended:?}");
+    assert_eq!(exit, Some(jfl_process::Exit::Code(0)));
+    assert!(!daemons.socket.path().exists());
+    assert!(daemons.lock_free());
+    drop(holder);
 }
 
 #[test]

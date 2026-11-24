@@ -24,6 +24,7 @@ mod given {
     pub(crate) const WAIT: Duration = Duration::from_secs(20);
     pub(crate) const BROKEN: &str = "class A {\n  int x = 1\n}\n";
     pub(crate) const FIXED: &str = "class A {\n  int x = 1;\n}\n";
+    pub(crate) const FIXED_TOO: &str = "class A {\n  int x = 2;\n}\n";
 
     static NEXT: AtomicU32 = AtomicU32::new(0);
 
@@ -145,13 +146,55 @@ mod given {
 
     /// Waits until the daemon has sent something on `proxy`'s connection (or closed it), without
     /// reading it.
+    #[track_caller]
     pub(crate) fn readable(proxy: &Proxy<Recording>) {
+        let at = std::panic::Location::caller();
         let (_ringer, bell) = jfl_adapter_ipc::bell::bell().unwrap();
+        let connected = proxy.fd().is_some();
+        let started = std::time::Instant::now();
         let woken = bell.wait(proxy.fd(), WAIT).unwrap();
-        assert!(woken.readable, "the daemon sent nothing within {WAIT:?}");
+        let elapsed = started.elapsed();
+        assert!(
+            woken.readable,
+            "the daemon sent nothing (waited at {at}: {elapsed:?} of {WAIT:?}, interrupted: {}, \
+             connected: {connected}, phase: {:?})",
+            elapsed < WAIT,
+            proxy.phase()
+        );
+    }
+
+    /// The bytes on the wire of a publication of `uri` with no diagnostics, at the client's
+    /// `version` and the connection's `seq` (one notification per version): the daemon's own
+    /// encoding (`daemon::diagnostics`), framed.
+    pub(crate) fn empty_frame_len(uri: &DocumentUri, version: i32) -> u64 {
+        let body = jfl_protocol::codec::encode(&jfl_protocol::codec::notification::<
+            jfl_protocol::messages::PublishDiagnostics,
+        >(PublishDiagnosticsParams {
+            uri: uri.clone(),
+            version: Some(version),
+            seq: u64::try_from(version).unwrap(),
+            position_encoding: PositionEncoding::Utf16,
+            diagnostics: Vec::new(),
+        }))
+        .unwrap();
+        let frame =
+            jfl_protocol::frame::encode_frame(&body, jfl_protocol::DEFAULT_MAX_FRAME_LEN).unwrap();
+        u64::try_from(frame.len()).unwrap()
+    }
+
+    /// Waits until at least `bytes` wait unread on `proxy`'s connection (`FIONREAD`), without
+    /// reading them.
+    pub(crate) fn queued_at_least(proxy: &Proxy<Recording>, bytes: u64) {
+        jfl_testkit::poll::wait_until(WAIT, "the daemon's frames on the connection", || {
+            proxy
+                .fd()
+                .is_some_and(|fd| rustix::io::ioctl_fionread(fd).is_ok_and(|n| n >= bytes))
+        })
+        .unwrap();
     }
 
     /// Reads what came and takes the current publications, waiting for the first one.
+    #[track_caller]
     pub(crate) fn next_published(proxy: &mut Proxy<Recording>) -> Vec<PublishDiagnosticsParams> {
         loop {
             readable(proxy);
@@ -168,17 +211,18 @@ use given::*;
 
 #[test]
 fn should_drop_a_publication_when_it_is_older_than_the_documents_last_notification() {
-    // given: the daemon has published version 1, and it waits unread on the connection
+    // given: the proxy has read version 1's publication and not handed it on yet
     let world = World::new();
     let mut proxy = world.proxy();
     let doc = world.uri("A.java");
     let _ = proxy.did_open(doc.clone(), 1, BROKEN.to_owned());
     proxy.attach(WAIT).unwrap();
     readable(&proxy);
-
-    // when: the client's newer text goes before the old publication is read
-    assert!(proxy.did_change(doc.clone(), 2, FIXED.to_owned()));
     proxy.poll();
+
+    // when: the client's newer text goes before the old publication is handed on (no read in
+    // between, so version 2's publication cannot be among what is taken, however fast it comes)
+    assert!(proxy.did_change(doc.clone(), 2, FIXED.to_owned()));
     let stale = proxy.take_published();
     let fresh = next_published(&mut proxy);
 
@@ -187,6 +231,30 @@ fn should_drop_a_publication_when_it_is_older_than_the_documents_last_notificati
     assert_eq!(fresh.len(), 1);
     assert_eq!(fresh[0].version, Some(2));
     assert!(fresh[0].diagnostics.is_empty());
+    world.stop();
+}
+
+#[test]
+fn should_hand_on_only_the_newer_publication_when_both_arrive_before_the_proxy_reads() {
+    // given: version 1's publication waits unread on the connection
+    let world = World::new();
+    let mut proxy = world.proxy();
+    let doc = world.uri("A.java");
+    let _ = proxy.did_open(doc.clone(), 1, FIXED.to_owned());
+    proxy.attach(WAIT).unwrap();
+    readable(&proxy);
+
+    // when: the client's newer text goes, and its publication too is on the connection, whole,
+    // before the proxy reads (the order a loaded machine gave the old test, forced)
+    assert!(proxy.did_change(doc.clone(), 2, FIXED_TOO.to_owned()));
+    let both = empty_frame_len(&doc, 1) + empty_frame_len(&doc, 2);
+    queued_at_least(&proxy, both);
+    proxy.poll();
+    let handed = proxy.take_published();
+
+    // then: one read takes both, and only version 2's is handed on
+    assert_eq!(handed.len(), 1, "{handed:?}");
+    assert_eq!(handed[0].version, Some(2));
     world.stop();
 }
 

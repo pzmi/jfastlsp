@@ -96,8 +96,10 @@ impl Flock {
         Self::held(file, path)
     }
 
-    /// Takes the lock on `path`, waiting while another process holds it. Only the spawn lock is
-    /// waited for, and its holder keeps it at most for its bounded spawn wait.
+    /// Takes the lock on `path`, waiting while another process holds it, with no deadline of its
+    /// own: only the spawn lock is waited for. A proxy waits for it unbounded (a holder that runs
+    /// keeps it at most for its spawn wait; a suspended one, for ever); a daemon's shutdown waits
+    /// for it on its blocking pool under a deadline (`jfl-composition`'s `run::SPAWN_LOCK_WAIT`).
     pub fn acquire(path: &Path) -> Result<Self, LockError> {
         let file = open(path)?;
         file.lock().map_err(|source| LockError::Io {

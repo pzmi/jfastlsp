@@ -631,7 +631,8 @@ Unix sockets, `flock`s and files in a fresh state directory under the temporary 
   - `sock`, the socket file: present or not, and which daemon bound it. A file nobody listens on
     is stale: connecting to it fails (`ECONNREFUSED`), and binding over it fails
     (`EADDRINUSE`). Plan §5.3's fallback path under `/tmp/jfl-<euid>/` behaves the same.
-  - `spawn.lock`, the proxies' spawn lock, another flock.
+  - `spawn.lock`, the proxies' spawn lock, another flock, which a daemon also holds through its
+    shutdown (decision 9).
 - **Two proxies**, `p1` and `p2`: client sessions (`jfl lsp`, or a CLI call), each with its open
   documents and at most one unanswered request.
 - **Three daemon slots**, `d1` to `d3`: processes. A slot is reused once its process is dead and
@@ -652,15 +653,17 @@ Unix sockets, `flock`s and files in a fresh state directory under the temporary 
    lock), then binds, sets `0600`, listens, and reports ready. Binding before the lock serves
    clients from a daemon that is not the owner (control `listenBeforeLock`); not unlinking a
    stale file makes every later bind fail (the liveness control).
-3. **Shutdown order: stop accepting, unlink, release.** On SIGTERM or an idle exit the daemon
-   closes its listener (a connection still in the backlog is reset), cancels its queries, closes
-   every connection and drops its overlays, stops its workers, removes the socket file, and only
-   then releases the lock and exits 0. Releasing first lets the next owner bind before the old
+3. **Shutdown order: spawn lock, stop accepting, unlink, release.** On SIGTERM or an idle exit
+   the daemon takes the spawn lock (decision 9), closes its listener (a connection still in the
+   backlog is reset), cancels its queries, closes every connection and drops its overlays, stops
+   its workers, removes the socket file, and only then releases the lock, then the spawn lock,
+   and exits 0. Releasing first lets the next owner bind before the old
    one's unlink, which then removes the new socket (plan §7.2's own negative control,
    `releaseBeforeUnlink`, which only `OwnerReachable` catches).
 4. **Idle means no accepted connection.** The daemon cannot see its listener's backlog, so the
-   idle exit can race a new connection; the reset proxy reconnects, spawning if it must, and a
-   spawn that meets the stopping daemon's lock fails and is retried.
+   idle exit can race a new connection; the reset proxy reconnects, waits for the spawn lock the
+   stopping daemon holds, and spawns once it is released (until FND-18, a spawn that met the
+   stopping daemon's lock failed and was retried).
 5. **Overlays belong to connections.** They are keyed by connection and die with it: when the
    daemon reads a closed connection's EOF, when it stops, and when it crashes. A new daemon
    starts with none; nothing is persisted for it to restore (control `crashKeepingOverlays`).
@@ -684,6 +687,29 @@ Unix sockets, `flock`s and files in a fresh state directory under the temporary 
    allows the swept state (`sock.owner` is the daemon, `present` false), the one fault no code can
    prevent; liveness requires the notice (the control `progressStepIgnoringSweep`, and the Quint
    test `sweptUnnoticedNeverServesTest`, its cycle as named actions).
+9. **A shutdown holds the spawn lock** (FND-18, 2026-11-24). Between the shutdown's first step
+   and the release, a proxy's connect is refused (the listener is closed) or finds no socket (it
+   is unlinked), while the lock is still held. A proxy that spawned then started a daemon that
+   could only fail the lock, and `drive` retried at once: one wasted daemon per try, for as long
+   as the shutdown lasted (up to a slow client's write deadline), on an idle exit, a SIGTERM, and
+   an upgrade's stop of the old daemon (`jfl/stop` from a proxy of another major, whose end of
+   file came before the release). So the daemon takes the spawn lock as its shutdown's first act
+   (waiting while a proxy spawns, and the step is not enabled meanwhile) and releases it after
+   the lock. A proxy refused in the window now waits for the spawn lock; its second check then
+   finds no daemon, and its spawn takes the free lock (`SpawnWaitsForShutdown`, control
+   `stopWithoutSpawnLock`). **The wait is bounded** (FND-18's review): a running proxy holds the
+   spawn lock at most for its spawn wait, but a suspended one (a Ctrl-Z'd `jfl` mid-spawn), or
+   any process that locks the file, holds it for ever, and an unbounded wait kept the daemon
+   alive through SIGTERMs. So the daemon waits at most `run::SPAWN_LOCK_WAIT` (15 s: the
+   default spawn wait, 10 s, and a margin), or until a second SIGTERM, then stops without it,
+   as before FND-18 (a `WARN` event, `spawn_lock_wait_expired` or
+   `spawn_lock_wait_interrupted`): the fault `spawnLockWaitExpires`, which marks the daemon
+   `alone`; `SpawnWaitsForShutdown` is stated for a daemon not `alone`. A held spawn lock delays
+   the exit, never prevents it. The deadline also ends the one wait cycle through the socket:
+   a proxy holding the spawn lock whose second check connects into the waiting daemon's full
+   backlog. A spawn can still fail the lock after a fault: a daemon started by a proxy whose
+   wait expired, a swept socket's owner (`witnessLockRefused`), or a shutdown whose wait for the
+   spawn lock expired.
 
 ### IDX-12's obligations
 
@@ -707,8 +733,9 @@ These are the design above as IDX-12 must build it; the driver checks each again
    group can only reach a daemon that holds nothing yet (the model counts either as a crash).
 4. **The start order** of decision 2, and the error reported on the notify socket when the lock
    is held or the bind fails.
-5. **The shutdown order** of decision 3, the unlink before the release; on SIGTERM and on the
-   idle exit alike. The idle exit counts accepted connections only.
+5. **The shutdown order** of decision 3, the spawn lock first, the unlink before the release,
+   the spawn lock released last; on SIGTERM and on the idle exit alike. The idle exit counts
+   accepted connections only.
 6. **A crash leaves the socket file and releases the lock.** The driver's crash is an abort of
    the in-process host that closes every descriptor (the lock, the listener, the connections)
    without running the shutdown: the socket file stays. So the host's cleanup must be explicit
@@ -736,7 +763,10 @@ every tick of the run loop); 2, std and Tokio open every descriptor close-on-exe
 clears it (`jfl-adapter-ipc/tests/endpoint.rs`), and the notify socket is a path the daemon sends
 to, not an inherited descriptor, so a child inherits nothing; the daemon starts no worker yet, so
 "workers die with the daemon" is the first worker's task (SEM-04's javac pool); 3, `run::run`
-calls `setsid` first; 4 and 5, `run::run` and `Host::shutdown`; 6 and 7, `Host::crash` and the
+calls `setsid` first; 4 and 5, `run::run` and `Host::shutdown` (FND-18: `Host::stop` takes the
+spawn lock, which the run loop first waits for on the blocking pool with the listener still open,
+and `Host::release` drops it after the lock; the writers, which end the connections, drain after
+the release); 6 and 7, `Host::crash` and the
 per-connection `Conn`; 8, `daemon::proxy` (every wait a `poll(2)` bounded by the time left, an expiry a reset; a
 version mismatch stops the old daemon with `jfl/stop` and spawns, ADR 0021); 9, `daemon::stepped`; 10, the driver's observation types.
 
@@ -771,10 +801,11 @@ groups never appear in a trace. Each parameter is a nondeterministic pick named 
 | `didOpen`, `didClose` | `proxy`, `doc` | The client opens or closes a document; a ready proxy forwards it. |
 | `quit` | `proxy` | The client session ends and a new one takes the slot: the proxy closes its connection and releases the spawn lock if it holds it. |
 | `connect` | `proxy` | The proxy connects to the socket path: queued in the backlog of a listening daemon, or refused. |
-| `takeSpawnLock` | `proxy` | The proxy tries the spawn lock; held by the other: it will connect again. |
+| `takeSpawnLock` | `proxy` | The proxy tries the spawn lock; held by the other, or by a daemon shutting down: it will connect again. |
 | `spawn` | `proxy` | Under the spawn lock, the second check: connect again if a daemon listens, else spawn a daemon in the first free slot. |
 | `handshake` | `proxy` | The notify socket answers (ready, or the error of a failed or dead daemon); the proxy releases the spawn lock. |
 | `spawnTimeout` | `proxy` | The bounded wait expires while the daemon still starts. |
+| `spawnLockWaitExpires` | `daemon` | A fault: the shutdown's wait for the spawn lock, held by a proxy, expires; the daemon stops without it (`Host::stop_alone`), marked `alone`. |
 | `notice` | `proxy` | The proxy reads its connection's EOF. |
 | `lock` | `daemon` | The daemon tries the lock; held: it reports the error and exits 1. |
 | `unlinkStale` | `daemon` | The owner removes the socket file it found. |
@@ -782,12 +813,13 @@ groups never appear in a trace. Each parameter is a nondeterministic pick named 
 | `accept` | `daemon`, `conn` | Accept the queued connection: the version handshake, then the re-sent documents and request. |
 | `answer` | `daemon`, `conn` | Answer the request on the connection. |
 | `reap` | `daemon`, `conn` | Read the EOF of a connection its proxy closed; drop its overlays. |
-| `sigterm`, `idleExit` | `daemon` | The shutdown's first step: stop accepting, close every connection. The idle exit only with no accepted connection. |
+| `sigterm`, `idleExit` | `daemon` | The shutdown's first step: take the spawn lock (not enabled while a proxy holds it), stop accepting, close every connection. The idle exit only with no accepted connection. |
 | `unlink` | `daemon` | The shutdown removes the socket file. |
-| `exit` | `daemon` | The shutdown releases the lock; the daemon exits 0. |
+| `exit` | `daemon` | The shutdown releases the lock, then the spawn lock; the daemon exits 0. |
 | `crash` | `daemon` | Abort the daemon (obligation 6). A swept socket's binding dies with it. |
 | `sweep` | | Remove the socket file of the serving owner (decision 8). |
-| `noticeSwept` | `daemon` | The tick finds the path no longer names the bound socket: the shutdown's first step. |
+| `noticeSwept` | `daemon` | The tick finds the path no longer names the bound socket: the shutdown's first step, the spawn lock first. |
+| `noticeSweptAlone` | `daemon` | The same while a proxy holds the spawn lock: the wait's deadline passes and the daemon stops without it (`Host::stop_alone`), marked `alone`. A system move under fairness, not a fault. |
 
 Connection and daemon slots are taken first free in order (`d1`, `d2`, `d3`; `c1`, `c2`, `c3`), so
 an action has one outcome; the driver numbers its processes and connections the same way.
@@ -798,10 +830,10 @@ The model has seven variables:
 
 | Variable | Type | Observed from |
 |:--|:--|:--|
-| `daemons` | slot → `{ phase, lock }` | Each slot's process: `phase` one of `none`, `started`, `locked`, `serving`, `stopping` (stopped accepting), `unlinked` (socket removed, lock held), `exited`, `failed` (exited 1: the lock was held, or a control's failed bind), `crashed`; `lock` the inode of `daemon.lock` it holds an flock on, as a number (below), or 0. |
+| `daemons` | slot → `{ phase, lock, alone }` | Each slot's process: `phase` one of `none`, `started`, `locked`, `serving`, `stopping` (stopped accepting), `unlinked` (socket removed, lock held), `exited`, `failed` (exited 1: the lock was held, or a control's failed bind), `crashed`; `lock` the inode of `daemon.lock` it holds an flock on, as a number (below), or 0; `alone` whether its shutdown began without the spawn lock (`Host::alone`). |
 | `lockFile` | int | The inode at `<state>/daemon.lock`, 0 while there is none. The driver numbers inodes 1, 2, … in the order it first sees them. |
 | `sock` | `{ present, owner }` | Whether `<state>/sock` exists, and the slot whose bound socket has its inode (`""` for the initial stale file); with no file, the live slot that still holds a bound socket the path no longer names (swept), else `""`. |
-| `spawnLock` | string | The proxy holding `spawn.lock`, or `""`. |
+| `spawnLock` | string | The proxy holding `spawn.lock`, or the daemon slot holding it through its shutdown, or `""`. |
 | `conns` | slot → `{ state, proxy, daemon, overlays, inflight }` | `state` one of `free`, `backlog` (connected, not accepted), `open`, `peerClosed` (the proxy closed it, the daemon has not read EOF), `closed` (the daemon closed it, the proxy has not noticed); the daemon's overlays (document names) and whether it holds an unanswered request. |
 | `t` | int | The steps taken since `init`: the driver's step index. It is the liveness simulation's clock (`Progress`, below), in the model because Apalache cannot read a file holding a second module that imports the first. |
 | `proxies` | proxy → `{ phase, conn, daemon, docs, want }` | `phase` one of `disconnected`, `noDaemon`, `spawning`, `awaiting`, `connecting`, `ready`; its connection slot and the daemon slot it waits on (or `""`); the client's open documents and whether the client waits for an answer. |
@@ -810,7 +842,7 @@ The `released` phase appears only in the `releaseBeforeUnlink` control.
 
 ### Invariants
 
-`val allInvariants` is the conjunction of these six. Apalache and the simulation check it.
+`val allInvariants` is the conjunction of these seven. Apalache and the simulation check it.
 
 | Invariant | States |
 |:--|:--|
@@ -820,6 +852,7 @@ The `released` phase appears only in the `releaseBeforeUnlink` control.
 | `ShutdownReleases` | A daemon that exited holds no flock and left no socket file of its own. |
 | `OwnerReachable` | A serving owner's socket is the file at the path, or was swept from under it (decision 8). |
 | `ReconnectRestores` | A ready proxy's open connection holds every document its client has open, and its client's unanswered request. |
+| `SpawnWaitsForShutdown` | A daemon shutting down (`stopping`, `unlinked`) and not `alone` holds the spawn lock, so no proxy is spawning or awaiting a spawn meanwhile (decision 9, FND-18). |
 
 The first four are plan §7.2's. Plan §7.2's own negative control, releasing the lock before
 removing the socket, violates none of them: the old daemon has stopped serving before it
@@ -870,7 +903,19 @@ which the daemon reads as a fair move), so a third comes free for the waiting pr
 the other client churns, the waiting proxy's `connect` is enabled only now and then, which weak
 fairness does not force (that takes strong fairness). This starvation is an artifact of the
 model's bounded slots: the real system has no slot bound, so its `connect` is never disabled
-that way. That step of the argument is by hand.
+that way. That step of the argument is by hand. FND-18 made `noticeSwept`, the one shutdown step under
+fairness, enabled only while no proxy holds the spawn lock. After a sweep, two proxies retaking it
+between their failed spawns leave it free only now and then, and weak fairness does not force a
+step enabled only now and then: the liveness runs found such a run (recovery past 60 moves at
+seed `0x6b5f78fc057be`). The real daemon is not starved by it only because of its deadline: it
+queues a blocking `flock` that is woken at each release, but with two or more proxies another may
+already wait in `wait_spawn_lock`, and Linux wakes `flock` waiters to race in no set order, so a
+won race is overwhelmingly likely (each lost round costs a proxy a whole spawn), not guaranteed;
+the deadline (decision 9) guarantees it. So the model has the deadline as a system move,
+`noticeSweptAlone` (enabled while a proxy holds the spawn lock): with `noticeSwept`, the swept
+daemon always has a move enabled, and weak fairness forces one (`noticeSweptAloneTest`). The model's daemon also keeps serving while its stop is not enabled,
+where the real one has left its loop and serves nobody: the same for safety, a state the
+liveness runs do not see.
 
 **What runs where:**
 
@@ -909,12 +954,15 @@ sequence, and stops after its last step. Its regression trace, at seed `0x3`, is
 |:--|:--|:--|
 | `twoProxiesSpawnAtOnce` | 19 | Both proxies find no daemon. `p1` takes the spawn lock and spawns `d1`; `p2` is refused the spawn lock, connects again before `d1` listens, and when it takes the lock its second check finds `d1`, so it spawns nothing. One daemon serves both. |
 | `crashWithOpenDocuments` | 26 | `d1` crashes while `p1` has `a` open and a request in flight, and `p2`'s closed connection still holds `b` awaiting its EOF. The stale socket refuses `p1`; `p1` spawns `d2`, which unlinks the stale file and binds; `p1` re-sends `a` and its request; `d2` holds no overlay of either dead connection, and answers. |
-| `idleExitRacesConnect` | 32 | `d1`'s last connection closes; as its idle period ends, `p2` connects and sits in the backlog, and the idle exit resets it. `p2` is refused while `d1` stops, its spawned `d2` fails the lock `d1` still holds, and once `d1` has unlinked its socket and released the lock, `p2`'s next spawn (slot `d1` again) serves it. |
+| `idleExitRacesConnect` | 29 | `d1`'s last connection closes; as its idle period ends, `p2` connects and sits in the backlog, and the idle exit resets it. `p2` is refused while `d1` stops, and is refused the spawn lock `d1` holds through its shutdown, so no daemon is started to fail `d1`'s lock (until FND-18 its spawned `d2` failed it); once `d1` has unlinked its socket and released both locks, `p2`'s spawn (slot `d1` again) serves it. Guarded by the step count `t` (FND-18). |
 | `sigtermAfterStaleStart` | 14 | From a stale start: `p1` is refused and spawns; the daemon takes the existing lock file, unlinks the stale socket and binds. SIGTERM stops it with `p1` connected: `p1` reads EOF, the daemon unlinks and releases, nothing is left, and `p1` finds no socket. |
 | `sweptSocketStops` | 28 | IDX-12's: `d1`'s socket file is swept while `p1` is connected. `p2` finds no socket and spawns `d2`, which fails the lock `d1` still holds; `d1`'s tick notices the sweep and it shuts down (`p1` reads EOF, the unlink finds nothing, the release), and `p2`'s next spawn serves it. Guarded by the step count `t`. |
 
 More tests without a trace: `spawnLockRefusedTest`, `idleExitWaitsForOpenConnectionsTest` (the
-idle exit is refused while a connection is open), `secondDaemonFailsTheLockTest` (a daemon spawned
+idle exit is refused while a connection is open), `stopWaitsForTheSpawnLockTest` (a shutdown
+waits while a proxy holds the spawn lock; FND-18), `spawnLockWaitExpiresTest` (the fault: a
+hung spawner's lock, the shutdown alone, no invariant broken), `noticeSweptAloneTest` (a swept
+daemon whose wait for the spawn lock expires stops alone), `secondDaemonFailsTheLockTest` (a daemon spawned
 after a timed-out wait fails the lock, and its spawner's handshake reports it),
 `didCloseDropsTheOverlayTest`, and `unlinkBeforeReleaseKeepsOwnerReachableTest` (the real
 shutdown order on the control's interleaving).
@@ -933,6 +981,7 @@ Each control is an action variant with a Quint test that expects its invariant t
 | `exitLeakingLock` | Exits while a surviving child holds the lock's descriptor. | `ShutdownReleases` |
 | `releaseBeforeUnlink`, `unlinkAfterRelease` | Plan §7.2's control: releases the lock, then removes the socket. | `OwnerReachable` |
 | `acceptWithoutResend` | Accepts a reconnecting proxy without its documents and request. | `ReconnectRestores` |
+| `stopWithoutSpawnLock` | The shutdown before FND-18: stops accepting without the spawn lock, so a refused proxy spawns a daemon that fails the lock. | `SpawnWaitsForShutdown` |
 | `listenWithoutUnlinkingStale` | Binds without removing a stale socket file: the bind fails. | `EventuallyServed` (`Progress`) |
 | `progressStepIgnoringSweep` | A daemon never notices its socket swept: every spawn fails its lock. | `EventuallyServed` (`Progress`; by hand, and `sweptUnnoticedNeverServesTest` in every `check`) |
 
@@ -969,13 +1018,12 @@ Temurin JDK 21.
 
 | Check | Budget | Time |
 |:--|:--|:--|
-| `formal-test` (20 daemon tests) | every `check` | under a second |
+| `formal-test` (24 daemon tests) | every `check` | under a second |
 | `formal-freshness`: five traces regenerated | every `check` | about 2 s per trace |
 | `conformance-replay` | 10 traces of `sim_steps` (40), generated twice, every `check`, then the control | a few seconds (IDX-12: 240 generated traces at six seeds, 1640 states each batch, conform) |
-| `formal-verify daemon`: Apalache | `steps = 8` | 462 s; 552 s with IDX-12's `sweep` and `noticeSwept` (2026-11-19, another lane building) |
-| `formal-verify daemon`: simulation | 20000 samples of `sim_steps` (40) | 194 s (170 s without the other lane running); 157 s with IDX-12's actions |
-| `formal-verify daemon`: liveness and its control | 3000 samples of 92 steps, each | 89 s, then the control fails within seconds; 72 s with IDX-12's actions, and its `progressStepIgnoringSweep` control (by hand) fails in 3 s |
-| `formal-verify daemon` in all | weekly in `formal.yml` (60-minute job) | 762 s, with another lane building beside it; perhaps twice that on a CI runner |
+| `formal-verify daemon apalache` | `steps = 8`; weekly in `formal.yml`, a 60-minute job of its own | 462 s; 552 s with IDX-12's `sweep` and `noticeSwept` (2026-11-19, another lane building); 613 s with FND-18's spawn lock, `alone` and the faults (2026-11-24, loaded: 622 s as xtask times it, perhaps twice that on a CI runner) |
+| `formal-verify daemon simulation` | 20000 samples of `sim_steps` (40), then the liveness run, 3000 samples of 92 steps, and its control; weekly, a 60-minute job of its own | simulation 194 s (170 s without the other lane running), 157 s with IDX-12's actions, 205 s with FND-18's; liveness 89 s, 72 s with IDX-12's (its `progressStepIgnoringSweep` control, by hand, fails in 3 s), 92 s with FND-18's, the control failing within seconds; 309 s in all with FND-18's, as xtask times it |
+| `formal-verify daemon` in all | `just formal-verify daemon` locally (both halves, one after the other) | 762 s, with another lane building beside it; about 930 s with FND-18's |
 
 **Apalache's time grows steeply with the bound:** 24 s at length 4, 63 s at 6 and 467 s at 8;
 length 10 did not finish in 10 minutes. Length 8 covers every interleaving of a start (from a

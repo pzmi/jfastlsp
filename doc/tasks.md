@@ -46,6 +46,7 @@ CLI carrier), **SEM-07** (M4),
 | FND-15 | Accept a rescan in place of an awaited hint, never a silent miss | FND-14 | standard | M |  | — |
 | FND-16 | Two daemon races from CI: a peer gone before its accept, an exit read before it happened | FND-15, IDX-12 | standard | M |  | — |
 | FND-17 | A request through a link to its worktree (macOS's `$TMPDIR`) was refused, never answered | FND-16, LSP-02 | standard | M |  | IDX-09e |
+| FND-18 | Two test races on main: a spawn doomed by a stopping daemon's lock, a publication read early | FND-17 | standard | M |  | IDX-09e |
 | XT-01 | Scaffold `tools/xtask` and port the gate composition | FND-08, FND-09 | deep | M |  | FND-10, EVAL lane |
 | XT-02 | Tool pins: `tools/versions.toml`, `cargo xtask doctor`, `install-tools` | XT-01 | standard | M |  | EVAL lane |
 | XT-03 | Security and workflow stages into xtask | XT-02 | standard | M |  | EVAL lane |
@@ -695,6 +696,99 @@ foundation piece by piece (ADR 0035).
   spelling, finds open documents by canonical path); `jfl-adapter-git` (`resolve::canonical_path`,
   public); `jfl-domain` (`FileUri::respelled`, `Envelope::respelled`); `jfl-testkit`
   (`fixtures::symlink`); tests (four daemon tests, the jfl-cli world in both spellings); plan §4.1.
+
+#### FND-18: Two test races on main: a spawn doomed by a stopping daemon's lock, a publication read early
+- **Depends on:** FND-17. **Model:** standard. **Size:** M. **Parallel with:** IDX-09e.
+- **Cites:** plan §5.2, §7.2; ver §2, §6; ADR 0007.
+- **Race 1, a product bug: a spawn doomed by a stopping daemon's lock**
+  (`tests/daemon.rs::should_stop_the_daemon_of_another_major_and_start_its_own_when_a_proxy_connects`,
+  3 spawns instead of 2, about 2 runs in 50 under load). The interleaving: the proxy of another
+  major sends `jfl/stop` and reads its answer and the end of file (`stop_incompatible`); the old
+  daemon had dropped its listener when its loop ended and drained its writers (the end of file),
+  but released its lock only afterwards, in `Host::shutdown`. The proxy's reconnect in that window
+  is refused, its second check under the spawn lock finds nothing listening, and it launches a
+  daemon that fails `Host::lock` (`Held`, `Notice::Failed`); `drive` loops and launches a third
+  once the lock is free. **Not only the test:** every proxy refused between any shutdown's first
+  step and its release did the same (an idle exit racing a connect, which the model's
+  `idleExitRacesConnect` even showed as designed; SIGTERM; `jfl/stop`; an upgrade's stop of the
+  old daemon), and retried at once, one doomed daemon per try for as long as the shutdown lasted,
+  up to a client's 30 s write deadline. **The fix, model first:** the daemon takes the proxies'
+  spawn lock as its shutdown's first act (waiting on the blocking pool while a proxy spawns, the
+  listener still open) and releases it after the lock (`Host::stop`, `Host::release`, `run.rs`), so
+  a proxy refused in the window waits in `wait_spawn_lock`; and the writers, which end the
+  connections, drain after the release (on the one-thread runtime nothing runs between the stop
+  and the release), so a client that reads its end finds the lock free and the spawn lock is never
+  held for a peer's write deadline. `daemon.qnt`: the shutdown steps take the spawn lock, `exit`
+  and `crash` release it, the invariant `SpawnWaitsForShutdown`, the control
+  `stopWithoutSpawnLock`, `idleExitRacesConnect` rewritten (no failed spawn) and its trace and the
+  two other shutdown traces regenerated; the driver observes a host's spawn lock. A spawn can still
+  fail the lock after a fault (a spawner's expired wait, a swept socket), as modelled.
+  **The wait is bounded** (the review's MEDIUM): a suspended proxy (a Ctrl-Z'd `jfl` mid-spawn),
+  or any process that flocks `spawn.lock`, kept the daemon alive through SIGTERMs. The daemon
+  waits at most `run::SPAWN_LOCK_WAIT` (15 s: the default spawn wait and a margin) or until a
+  second SIGTERM (`timer::within`, ADR 0039's module), then stops without it (`Host::stop_alone`)
+  and reports a `WARN` event (`run::Warning`: `spawn_lock_wait_expired`,
+  `spawn_lock_wait_interrupted`, `spawn_lock_unavailable`), which `jfl daemon` writes to its log
+  (stderr) by its fixed name, no tracing subscriber being installed yet. The runtime ends with
+  `shutdown_background`, since a plain drop waits for the expired `flock(2)` still blocked on the
+  blocking pool. A shutdown that meets a held spawn lock never fails on it: `Host::shutdown`
+  stops alone (the review's LOW: an I/O error, then `Held`). Model first: the fault
+  `spawnLockWaitExpires` (like `spawnTimeout`), the daemon record's `alone`, `SpawnWaitsForShutdown`
+  stated for a daemon not `alone`, `spawnLockWaitExpiresTest`; every daemon trace regenerated.
+  The liveness runs then found the starvation the review foresaw (seed `0x6b5f78fc057be`): after a
+  sweep, two proxies retaking the spawn lock between failed spawns left `noticeSwept` enabled only
+  now and then, which weak fairness does not force. The deadline is what prevents it in the real
+  daemon, so the model has it as a system move, `noticeSweptAlone` (`noticeSweptAloneTest`; the
+  driver steps it as the tick's lost socket and `Host::stop_alone`).
+  The deadline also ends the one wait cycle through the socket (a proxy holding the spawn lock
+  whose second check connects into the waiting daemon's full backlog).
+- **Race 2, a test race: both publications read by one poll**
+  (`tests/pushed_diagnostics.rs::should_drop_a_publication_when_it_is_older_than_the_documents_last_notification`,
+  "the daemon sent nothing within 20s"). `readable` now names its call site, the time waited,
+  whether the wait was interrupted, and whether the proxy was connected. Under load (4 CPU
+  hogs) it failed 72 times in about 192 runs: every failure waited the full 20 s at `next_published` (line 195), connected, not
+  interrupted, and the proxy's trace showed one `poll` reading version 1's and version 2's
+  publications together: the daemon compiled and published version 2 before the descheduled
+  test thread polled, `take_published` kept the latest (version 2, correctly handed on as
+  `stale`), and `next_published` waited for a third publication that never comes, before the
+  assertion on `stale` could fail. Neither the slow first compile (i), nor the seq filter (ii: no
+  publication was ever filtered wrongly), nor `EINTR` (no handler in the test process). The
+  product is right; the LSP link drains the proxy (`publish`, whose `poll` empties the
+  connection's own buffer first) before every wait. **The fix:** the test reads version 1's
+  publication before the change is sent and takes it after, so nothing version 2 publishes can be
+  among what is taken; a new test forces the old test's interleaving (both frames whole on the
+  connection, counted with `FIONREAD`, before the read) and checks that only version 2's is handed
+  on. The old test's order under that interleaving fails 10 times in 10.
+- **Race 3, in this card's own new tests, found by their repeats:** under `cargo test` (tests as
+  threads of one process) a child that another test thread is starting holds a copy of every
+  descriptor until its exec (close-on-exec), so the stepped host's closed listener still took the
+  proxy's connect, and the spawn lock a proxy had released was still held when the test took it
+  (8 failures in 100 runs under load; `/proc` showed the listener held by a child of the test
+  process not yet exec'd). nextest, which the gate runs, gives each test its own process. A hold
+  can only last longer, so the tests wait for the listener's close and for the spawn lock, and the
+  first asserts what it is about (nothing spawned while the lock is held) and that the call after
+  the release is served, not how many spawns that took.
+- **Reuse considered:** none needed: fixes; the existing spawn lock is the wait.
+- **Speed:** no bench metric applies: only the daemon's shutdown changes, which no benchmark
+  measures (ADR 0031).
+- **Follow-up (pre-existing, not this card):** `Proxy::wait_spawn_lock` blocks in
+  `Flock::acquire` outside the call's budget, so `Proxy::call`'s "within `budget` in all" does
+  not hold while another process holds the spawn lock (a suspended spawner blocks every proxy
+  that finds no daemon).
+- **Accept:**
+  - [ ] a proxy that finds no daemon while a host is between its stop and its release is refused the spawn lock and starts nothing; after the release its spawn serves; before the fix it took the spawn lock and its daemon failed the lock, every time (`tests/daemon.rs::should_wait_for_a_stopping_daemon_and_start_one_that_serves_when_a_proxy_finds_none`)
+  - [ ] a stopped daemon keeps its listener while it waits for the spawn lock (a late connect is queued; before the fix it was refused, every time), and by the stopper's end of file the socket is gone and both locks free (`should_keep_its_listener_until_it_holds_the_spawn_lock_and_release_both_before_the_end_when_stopped`)
+  - [ ] a held spawn lock delays the exit by the whole wait and does not prevent it: exit 0, socket gone, lock free, the spawn lock still held (`should_exit_once_its_wait_for_the_spawn_lock_expires_when_the_holder_never_lets_go`); a second SIGTERM ends the wait (`should_end_its_wait_for_the_spawn_lock_when_a_second_sigterm_comes`); the wait outlasts a proxy's spawn wait (`run::tests`)
+  - [ ] the model: 24 daemon tests, `stopWithoutSpawnLockViolatesSpawnWaitsForShutdownTest`, `stopWaitsForTheSpawnLockTest`, `spawnLockWaitExpiresTest` and `noticeSweptAloneTest` among them; every daemon trace replays; `just formal-verify daemon apalache` green (613 s) and `just formal-verify daemon simulation` green (simulation 205 s, liveness 92 s and its control; 309 s)
+  - [ ] the forced both-arrive interleaving: only version 2 handed on (`should_hand_on_only_the_newer_publication_when_both_arrive_before_the_proxy_reads`); the old test's order under it fails every time
+  - [ ] the affected tests repeated under load, 4 CPU hogs: `tests/daemon.rs` 100 runs, no failure, and 60 more with the bounded wait, no failure (the major-mismatch test included); `tests/pushed_diagnostics.rs` 100 runs and 60 more, no failure (72 failures in about 192 runs before); `just check` green
+- **Impact:** `jfl-composition` (the daemon's shutdown holds the spawn lock, waited for at most
+  15 s or until a second SIGTERM; the writers drain after the release; `run::Stopped` with a
+  `WARN` event); `jfl-cli` (`jfl daemon` writes the event to its log); `jfl-adapter-ipc` (a doc);
+  `jfl-conformance` (the driver observes a host's spawn lock and `alone`, and applies
+  `spawnLockWaitExpires`); `formal/daemon.qnt`, the five daemon regression traces, the manifest's
+  daemon entry; tests (four daemon tests, one unit test, the pushed diagnostics test rewritten,
+  one new); plan §5.2, §7.2; `doc/formal-models.md`.
 
 ### Lane XT: port mayfly's `xtask`, piece by piece
 

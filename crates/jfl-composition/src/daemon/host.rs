@@ -7,9 +7,17 @@
 //! frame ([`Host::receive`]: an overlay, a request, a closed connection's EOF), [`Host::answer`],
 //! [`Host::reap`], and the shutdown's three steps [`Host::stop`], [`Host::unlink`] and
 //! [`Host::release`]. The orders are the run loop's: start lock, unlink, bind, ready (a held lock
-//! is reported on the notify socket and the daemon exits 1); shutdown stop accepting, unlink,
-//! release, never the release first (the model's `releaseBeforeUnlink`, the negative control of
-//! the daemon driver).
+//! is reported on the notify socket and the daemon exits 1); shutdown the proxies' spawn lock and
+//! stop accepting, unlink, release the lock and then the spawn lock, never the release first (the
+//! model's `releaseBeforeUnlink`, the negative control of the daemon driver).
+//!
+//! **The spawn lock across the shutdown** (FND-18): between stopping accepting and releasing the
+//! lock, a proxy's connect is refused and it would spawn a daemon that can only fail the lock
+//! still held, then retry at once, spawning again for as long as the shutdown lasts. Holding the
+//! proxies' spawn lock from before the listener closes until after the lock is released makes
+//! such a proxy wait instead (its second check then finds no daemon and its spawn takes the free
+//! lock). The model's `SpawnWaitsForShutdown`; pinned by
+//! `tests/daemon.rs::should_wait_for_a_stopping_daemon_and_start_one_that_serves_when_a_proxy_finds_none`.
 //!
 //! Cleanup is explicit, never a `Drop`: a crash ([`Host::crash`], in the driver an abort of the
 //! host) closes every descriptor and runs none of the shutdown, so the socket file stays, stale,
@@ -225,6 +233,11 @@ pub struct Host {
     server: ServerInfo,
     phase: Phase,
     lock: Option<Flock>,
+    /// The proxies' spawn lock, held from the shutdown's first step until after the lock's
+    /// release.
+    spawn_lock: Option<Flock>,
+    /// The shutdown began without the spawn lock (the model's `alone`).
+    alone: bool,
     listener: Option<Listener>,
     bound: Option<FileId>,
     pending: Vec<Pending>,
@@ -251,6 +264,8 @@ impl Host {
             },
             phase: Phase::Started,
             lock: None,
+            spawn_lock: None,
+            alone: false,
             listener: None,
             bound: None,
             pending: Vec::new(),
@@ -277,6 +292,26 @@ impl Host {
     #[must_use]
     pub fn lock_id(&self) -> Option<FileId> {
         self.lock.as_ref().map(Flock::id)
+    }
+
+    /// Whether it holds the proxies' spawn lock (from the shutdown's first step to its release).
+    #[must_use]
+    pub const fn holds_spawn_lock(&self) -> bool {
+        self.spawn_lock.is_some()
+    }
+
+    /// Keeps the spawn lock the run loop waited for (on the blocking pool, under the deadline
+    /// [`super::run::SPAWN_LOCK_WAIT`]) for the shutdown that follows: [`Host::stop`] then takes
+    /// it as held.
+    pub fn hold_spawn_lock(&mut self, lock: Flock) {
+        self.spawn_lock = Some(lock);
+    }
+
+    /// Whether its shutdown began without the spawn lock ([`Host::stop_alone`], or a spawn lock
+    /// that could not be opened): the model's `alone`.
+    #[must_use]
+    pub const fn alone(&self) -> bool {
+        self.alone
     }
 
     /// The socket file this host bound and has not unlinked.
@@ -714,17 +749,44 @@ impl Host {
     }
 
     /// The shutdown's first step (SIGTERM, the idle exit, a lost lock or socket, `jfl/stop`):
-    /// closes the listener (a connection still in the backlog is reset), and every connection
-    /// with its overlays and requests.
+    /// takes the proxies' spawn lock, unless held already ([`Host::hold_spawn_lock`]), then closes
+    /// the listener (a connection still in the backlog is reset), and every connection with its
+    /// overlays and requests. A proxy holding the spawn lock refuses the step
+    /// ([`LockError::Held`], the host still serving): the run loop waits for it instead, under a
+    /// deadline, then stops [`Host::stop_alone`]. A spawn lock that cannot be opened at all (the
+    /// state directory deleted from outside, the lost lock's shutdown) is gone without: the stop
+    /// never waits on it.
     pub fn stop(&mut self) -> Result<(), HostError> {
         self.expect("stop", &[Phase::Serving])?;
+        if self.spawn_lock.is_none() {
+            match Flock::try_acquire(&self.config.state.spawn_lock_path()) {
+                Ok(lock) => self.spawn_lock = Some(lock),
+                Err(held @ LockError::Held { .. }) => return Err(held.into()),
+                Err(LockError::Io { .. }) => self.alone = true,
+            }
+        }
+        self.close_all();
+        Ok(())
+    }
+
+    /// The shutdown's first step without the spawn lock, once the wait for it expired (its
+    /// holder suspended or wedged): the model's fault `spawnLockWaitExpires`, the shutdown as it
+    /// was before FND-18. A proxy refused from now on may spawn a daemon that fails the lock still
+    /// held: wasteful, never unsafe.
+    pub fn stop_alone(&mut self) -> Result<(), HostError> {
+        self.expect("stop", &[Phase::Serving])?;
+        self.alone = true;
+        self.close_all();
+        Ok(())
+    }
+
+    fn close_all(&mut self) {
         self.listener = None;
         self.pending.clear();
         self.conns.clear();
         self.diagnostics.clear();
         self.severed.clear();
         self.phase = Phase::Stopping;
-        Ok(())
     }
 
     /// The shutdown removes the socket file, still holding the lock: the path, when it still
@@ -742,21 +804,28 @@ impl Host {
         Ok(())
     }
 
-    /// Releases the lock (the file stays): the daemon exits 0. Allowed from `Stopping` too, so
+    /// Releases the lock (the file stays), then the spawn lock: the daemon exits 0. In that
+    /// order, so no proxy spawns while the lock is still held. Allowed from `Stopping` too, so
     /// the negative control can release before the unlink; the run loop never does
     /// ([`Host::shutdown`]).
     pub fn release(&mut self) -> Result<(), HostError> {
         self.expect("release", &[Phase::Unlinked, Phase::Stopping])?;
         self.lock = None;
+        self.spawn_lock = None;
         self.phase = Phase::Exited;
         Ok(())
     }
 
-    /// The whole shutdown, in its order: stop accepting, unlink, release (never the release
-    /// first: the next owner could bind before this unlink removed its socket).
+    /// The whole shutdown, in its order: the spawn lock and stop accepting, unlink, release (never
+    /// the release first: the next owner could bind before this unlink removed its socket).
+    /// A spawn lock held by another process never fails it: it then stops alone.
     pub fn shutdown(&mut self) -> Result<(), HostError> {
         if self.phase == Phase::Serving {
-            self.stop()?;
+            match self.stop() {
+                Ok(()) => {}
+                Err(HostError::Lock(LockError::Held { .. })) => self.stop_alone()?,
+                Err(e) => return Err(e),
+            }
         }
         self.unlink()?;
         self.release()
@@ -765,6 +834,7 @@ impl Host {
     /// An abort: every descriptor closed, none of the shutdown run. The socket file stays.
     pub fn crash(&mut self) {
         self.lock = None;
+        self.spawn_lock = None;
         self.listener = None;
         self.bound = None;
         self.pending.clear();

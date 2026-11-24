@@ -83,6 +83,11 @@ impl SteppedHost {
         self.host.stop()
     }
 
+    /// [`Host::stop_alone`] (the model's fault `spawnLockWaitExpires`).
+    pub fn stop_alone(&mut self) -> Result<(), HostError> {
+        self.host.stop_alone()
+    }
+
     /// [`Host::unlink`].
     pub fn unlink(&mut self) -> Result<(), HostError> {
         self.host.unlink()

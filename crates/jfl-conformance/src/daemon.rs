@@ -13,8 +13,9 @@
 //! (numbered in the order the driver first sees an inode) and whether it listens; the inode at
 //! `daemon.lock`; whether `sock` exists and which host bound its inode (or, with no file, which
 //! live host still holds a bound socket the path no longer names: the model's swept socket);
-//! which proxy holds the spawn lock; each accepted connection's overlays, requests and EOF; each
-//! proxy's phase, documents and request. What is the driver's record: which model slot a
+//! which proxy, or which host shutting down, holds the spawn lock; each accepted connection's
+//! overlays, requests and EOF; each proxy's phase, documents and request. What is the driver's
+//! record: which model slot a
 //! connection is (the proxy's handshake id names it, so the host is told which queued connection
 //! the model accepts), the daemon slot a proxy awaits, and the step count `t`. A connection the
 //! host has not opened is `backlog` while its host listens and `closed` once it stopped (the
@@ -61,6 +62,8 @@ pub struct DaemonObs {
     pub phase: String,
     /// The inode its lock descriptor holds, numbered; 0 for none.
     pub lock: i64,
+    /// Its shutdown began without the spawn lock (its wait for it expired).
+    pub alone: bool,
 }
 
 /// `<state>/sock`.
@@ -115,7 +118,7 @@ pub struct DaemonState {
     pub lock_file: i64,
     /// The socket file.
     pub sock: SockObs,
-    /// The proxy holding the spawn lock, or `""`.
+    /// The proxy, or the daemon slot shutting down, holding the spawn lock; `""` for none.
     pub spawn_lock: String,
     /// The connection slots.
     pub conns: BTreeMap<String, ConnObs>,
@@ -707,6 +710,20 @@ impl DaemonDriver {
                 let daemon = pick(step, "daemon")?;
                 self.shutdown_step(step, &daemon, step.action())
             }
+            "spawnLockWaitExpires" => {
+                let daemon = pick(step, "daemon")?;
+                self.slot(&daemon)?.host.stop_alone().map_err(refused)
+            }
+            "noticeSweptAlone" => {
+                let daemon = pick(step, "daemon")?;
+                let host = &mut self.slot(&daemon)?.host;
+                match host.tick().map_err(refused)? {
+                    Tick::SocketLost => host.stop_alone().map_err(refused),
+                    other => Err(refused(format!(
+                        "the tick found {other:?}, not a swept socket"
+                    ))),
+                }
+            }
             "unlink" => {
                 let daemon = pick(step, "daemon")?;
                 self.slot(&daemon)?.host.unlink().map_err(refused)
@@ -755,6 +772,7 @@ impl Driver for DaemonDriver {
                     DaemonObs {
                         phase: self.phase_of(d).to_owned(),
                         lock,
+                        alone: self.slots.get(d).is_some_and(|s| s.host.host().alone()),
                     },
                 )
             })
@@ -769,6 +787,16 @@ impl Driver for DaemonDriver {
             .iter()
             .find(|(_, p)| p.holds_spawn_lock())
             .map(|(name, _)| name.clone())
+            .or_else(|| {
+                DAEMONS
+                    .into_iter()
+                    .find(|d| {
+                        self.slots
+                            .get(*d)
+                            .is_some_and(|s| s.host.host().holds_spawn_lock())
+                    })
+                    .map(str::to_owned)
+            })
             .unwrap_or_default();
         let conns = CONNS
             .into_iter()

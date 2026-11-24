@@ -100,8 +100,9 @@ impl DaemonConfig {
 }
 
 /// Runs the daemon of `config`, serving the views ([`views::Views`], its summary store under the
-/// state directory): why it stopped, or why it failed (the process exits 1).
-pub fn serve(config: &DaemonConfig) -> Result<run::Ended, String> {
+/// state directory): why it stopped and what its shutdown handled, or why it failed (the process
+/// exits 1).
+pub fn serve(config: &DaemonConfig) -> Result<run::Stopped, String> {
     run::run(config, |state| {
         let pool = ports::TokioPool::current()
             .ok_or_else(|| "the views need the daemon's runtime".to_owned())?;

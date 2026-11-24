@@ -434,8 +434,13 @@ daemon are the closest published shapes (§16).
   client can retry, never silently dropped.
 - **No ghost buffers.** Overlays and per-connection state are keyed by connection; a closed or
   dead connection's state is dropped, and a restarted daemon starts with none.
-- **Shutdown.** SIGTERM or an idle period with no connection: stop accepting, cancel running
-  queries, stop workers, remove the socket, release the lock, exit 0.
+- **Shutdown.** SIGTERM or an idle period with no connection: take the proxies' spawn lock
+  (waiting while a proxy spawns, at most 15 s or until a second SIGTERM, then going on without
+  it: a held spawn lock delays the exit, never prevents it), stop accepting, cancel running queries, stop workers, remove
+  the socket, release the lock and then the spawn lock, exit 0; a connection's end comes after
+  the release. A proxy refused meanwhile waits for the spawn lock instead of spawning a daemon
+  that could only fail the lock still held (FND-18: it used to spawn one, and again at once, for
+  as long as the shutdown lasted, an upgrade's stop of the old daemon included).
 - Modelled in `formal/daemon.qnt` (§7.2).
 
 ### 5.3 IPC and socket security
@@ -867,7 +872,8 @@ models state the design, the state-machine tests the implementation, and both ar
   a live connection of the current daemon); `ShutdownReleases` (after stop, no socket and no
   lock remain); `OwnerReachable` (a serving owner's socket is the file at the path: the negative
   control below breaks only this); `ReconnectRestores` (a reconnected proxy's documents and
-  unanswered request are on its connection). **Liveness** (under fairness, once faults stop):
+  unanswered request are on its connection); `SpawnWaitsForShutdown` (a daemon shutting down holds
+  the spawn lock, so no proxy spawns a daemon that would fail its lock; FND-18). **Liveness** (under fairness, once faults stop):
   a proxy that keeps retrying is eventually served (`EventuallyServed`). Apalache cannot check
   it at a bound that reaches its counterexamples, so `formal-verify` (weekly in `formal.yml`)
   runs a simulation of what it reduces to (no deadlock and no livelock once faults stop), from

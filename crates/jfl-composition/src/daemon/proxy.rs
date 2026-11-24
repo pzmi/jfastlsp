@@ -613,8 +613,11 @@ impl<L: Launcher> Proxy<L> {
     }
 
     /// Asks a daemon of another major to stop (`jfl/stop`, frozen across majors, ADR 0021) on
-    /// the connection it refused, waits for its answer and the connection's end (it has stopped
-    /// accepting then), and resets: the next connect finds no daemon and spawns this build's.
+    /// the connection it refused, waits for its answer and the connection's end, and resets. The
+    /// end comes after the old daemon released its lock and its hold on the spawn lock (`run`'s
+    /// shutdown order, FND-18), so the next connect finds no daemon and spawns this build's, which
+    /// takes the free lock: the spawn is never one that fails the old daemon's lock. Pinned by
+    /// `tests/daemon.rs::should_stop_the_daemon_of_another_major_and_start_its_own_when_a_proxy_connects`.
     fn stop_incompatible(&mut self) {
         let id = self.next_id("stop");
         let stop = codec::encode(&codec::request::<Stop>(id, StopParams {})).unwrap_or_default();

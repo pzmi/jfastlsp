@@ -12,8 +12,11 @@
 //   is never removed (an unlinked lock file lets a second daemon lock a new inode).
 // - Start: try the lock (fail: report the error on the notify socket and exit), then unlink any
 //   socket file (stale: only the owner may bind), then bind, set 0600 and listen, then report
-//   ready. Shutdown: stop accepting and close every connection, unlink the socket, then release
-//   the lock and exit; never release before the unlink.
+//   ready. Shutdown: take the proxies' spawn lock (waiting for it, bounded: on expiry, the fault
+//   `spawnLockWaitExpires`, it goes on alone), stop accepting and close every
+//   connection, unlink the socket, then release the lock, then the spawn lock, and exit; never
+//   release before the unlink. Holding the spawn lock across the shutdown (FND-18) keeps every
+//   proxy refused meanwhile from spawning a daemon that could only fail the lock still held.
 // - A socket file removed by someone else while its daemon serves (a tmp cleaner, a user's `rm`;
 //   IDX-12's decision) is noticed by the daemon on its next tick, comparing the file at the path
 //   with the one it bound, and the daemon shuts down: no proxy can reach it, and a spawned
@@ -48,8 +51,9 @@ module daemon {
   // - unlinked: its socket file removed, the lock still held;
   // - exited: released the lock and exited 0; failed: the lock was held, it reported the error
   //   and exited 1; crashed: killed (the kernel dropped its flock and closed its sockets).
-  // `lock`: the inode of daemon.lock it holds an flock on, or 0.
-  type Daemon = { phase: str, lock: int }
+  // `lock`: the inode of daemon.lock it holds an flock on, or 0. `alone`: its shutdown began
+  // without the spawn lock, its bounded wait for it having expired (`spawnLockWaitExpires`).
+  type Daemon = { phase: str, lock: int, alone: bool }
   // `<state>/sock`: whether a socket file is there and which daemon bound it ("" for one left
   // by a process before this run). With no file, `owner` names a live daemon whose socket file
   // was removed from under it by someone else (`sweep`) and that has not unlinked it yet; else "".
@@ -82,7 +86,8 @@ module daemon {
   var daemons: str -> Daemon
   var lockFile: int          // the inode at <state>/daemon.lock, 0 while there is none
   var sock: Sock
-  var spawnLock: str         // the proxy holding the spawn lock's flock, or ""
+  var spawnLock: str         // who holds the spawn lock's flock: a proxy, a daemon shutting
+                             // down (FND-18), or ""
   var conns: str -> Conn
   var proxies: str -> Proxy
   var t: int                 // the steps taken since init (the driver's step index): the
@@ -101,6 +106,9 @@ module daemon {
   // A daemon listening at the socket path: the file is there and its binder is serving.
   def listening: bool = sock.present and sock.owner != "" and phaseOf(sock.owner) == "serving"
   def live(state: str): bool = state == "open" or state == "peerClosed"
+  // A daemon between its shutdown's first step and its exit: it has stopped accepting and still
+  // holds the lock.
+  def shuttingDown(d: str): bool = Set("stopping", "unlinked").contains(phaseOf(d))
   // The daemon's socket file was removed from under it: it still listens on the unlinked inode.
   def swept(d: str): bool = not(sock.present) and sock.owner == d
   // A slot is free once its process is gone and nothing refers to it.
@@ -131,7 +139,7 @@ module daemon {
   // (its flock died with it; the lock file stays). Every proxy is a client session with nothing
   // open yet.
   action initWith(stale: bool): bool = all {
-    daemons' = DAEMONS.mapBy(_ => { phase: "none", lock: 0 }),
+    daemons' = DAEMONS.mapBy(_ => { phase: "none", lock: 0, alone: false }),
     lockFile' = if (stale) 1 else 0,
     sock' = { present: stale, owner: "" },
     spawnLock' = "",
@@ -224,7 +232,8 @@ module daemon {
     }
   }
 
-  // Tries the spawn lock; while another proxy holds it, waits and connects again.
+  // Tries the spawn lock; while another proxy, or a daemon shutting down, holds it, waits and
+  // connects again.
   def spawnLockEnabled(proxy: str): bool = proxies.get(proxy).phase == "noDaemon"
   action takeSpawnLock(proxy: str): bool = {
     val x = proxies.get(proxy)
@@ -260,7 +269,7 @@ module daemon {
       } else all {
         spawnLock' = spawnLock,
         proxies' = proxies.set(proxy, { ...x, phase: "awaiting", daemon: d }),
-        daemons' = daemons.set(d, { phase: "started", lock: 0 }),
+        daemons' = daemons.set(d, { phase: "started", lock: 0, alone: false }),
       },
       lockFile' = lockFile, sock' = sock, conns' = conns, t' = t + 1,
     }
@@ -314,8 +323,8 @@ module daemon {
     all {
       lockEnabled(daemon),
       lockFile' = inode,
-      daemons' = if (held(inode)) daemons.set(daemon, { phase: "failed", lock: 0 })
-                 else daemons.set(daemon, { phase: "locked", lock: inode }),
+      daemons' = if (held(inode)) daemons.setBy(daemon, x => { ...x, phase: "failed", lock: 0 })
+                 else daemons.setBy(daemon, x => { ...x, phase: "locked", lock: inode }),
       sock' = sock, spawnLock' = spawnLock, conns' = conns, proxies' = proxies, t' = t + 1,
     }
   }
@@ -385,19 +394,23 @@ module daemon {
     daemons' = daemons, lockFile' = lockFile, sock' = sock, spawnLock' = spawnLock, proxies' = proxies, t' = t + 1,
   }
 
-  // The first step of a shutdown, on SIGTERM or idle exit: stop accepting (the listener is
-  // closed, so a connection still in the backlog is reset and a new connect is refused), cancel
-  // running queries, close every connection and drop its overlays, stop the workers. (`--mbt`
-  // records the innermost action, so the two triggers repeat the effect rather than share an
-  // action.)
+  // The first step of a shutdown, on SIGTERM or idle exit: take the proxies' spawn lock (the
+  // step waits while a proxy holds it: that proxy's spawn ends within its bounded wait), then stop
+  // accepting (the listener is closed, so a connection still in the backlog is reset and a new
+  // connect is refused), cancel running queries, close every connection and drop its overlays,
+  // stop the workers. A proxy refused from now on waits for the spawn lock until the lock is
+  // released too, so it never spawns a daemon that fails this one's lock (FND-18). (`--mbt`
+  // records the innermost action, so the triggers repeat the effect rather than share an action.)
   def stopped(daemon: str): str -> Daemon = daemons.setBy(daemon, x => { ...x, phase: "stopping" })
+  def stopEnabled(daemon: str): bool = phaseOf(daemon) == "serving" and spawnLock == ""
 
   // SIGTERM: a shutdown, whatever the connections.
   action sigterm(daemon: str): bool = all {
-    phaseOf(daemon) == "serving",
+    stopEnabled(daemon),
     daemons' = stopped(daemon),
     conns' = closedBy(daemon),
-    lockFile' = lockFile, sock' = sock, spawnLock' = spawnLock, proxies' = proxies, t' = t + 1,
+    spawnLock' = daemon,
+    lockFile' = lockFile, sock' = sock, proxies' = proxies, t' = t + 1,
   }
 
   // The idle period passed with no connection accepted and open: a shutdown. A connection
@@ -405,11 +418,12 @@ module daemon {
   // connection; its proxy reconnects).
   def idle(daemon: str): bool = CONNS.forall(c => not(live(conns.get(c).state) and conns.get(c).daemon == daemon))
   action idleExit(daemon: str): bool = all {
-    phaseOf(daemon) == "serving",
+    stopEnabled(daemon),
     idle(daemon),
     daemons' = stopped(daemon),
     conns' = closedBy(daemon),
-    lockFile' = lockFile, sock' = sock, spawnLock' = spawnLock, proxies' = proxies, t' = t + 1,
+    spawnLock' = daemon,
+    lockFile' = lockFile, sock' = sock, proxies' = proxies, t' = t + 1,
   }
 
   // Removes the socket file (the path, as the code does), while it still holds the lock.
@@ -421,24 +435,26 @@ module daemon {
     lockFile' = lockFile, spawnLock' = spawnLock, conns' = conns, proxies' = proxies, t' = t + 1,
   }
 
-  // Releases the lock (the file stays) and exits 0.
+  // Releases the lock (the file stays), then the spawn lock, and exits 0.
   def exitEnabled(daemon: str): bool = phaseOf(daemon) == "unlinked"
   action exit(daemon: str): bool = all {
     exitEnabled(daemon),
-    daemons' = daemons.set(daemon, { phase: "exited", lock: 0 }),
-    lockFile' = lockFile, sock' = sock, spawnLock' = spawnLock, conns' = conns, proxies' = proxies, t' = t + 1,
+    daemons' = daemons.setBy(daemon, x => { ...x, phase: "exited", lock: 0 }),
+    spawnLock' = if (spawnLock == daemon) "" else spawnLock,
+    lockFile' = lockFile, sock' = sock, conns' = conns, proxies' = proxies, t' = t + 1,
   }
 
   // A crash (a panic, OOM kill, SIGKILL; also a signal before the handler is installed): the
-  // kernel drops the flock and closes every socket; the socket file stays, stale; memory, and
-  // with it every overlay, is gone.
+  // kernel drops the flocks (the lock's and, mid-shutdown, the spawn lock's) and closes every
+  // socket; the socket file stays, stale; memory, and with it every overlay, is gone.
   action crash(daemon: str): bool = all {
     alive(daemon),
-    daemons' = daemons.set(daemon, { phase: "crashed", lock: 0 }),
+    daemons' = daemons.setBy(daemon, x => { ...x, phase: "crashed", lock: 0 }),
     conns' = closedBy(daemon),
     // A swept socket's inode dies with its listener: nothing at the path, nobody bound.
     sock' = if (swept(daemon)) NO_SOCK else sock,
-    lockFile' = lockFile, spawnLock' = spawnLock, proxies' = proxies, t' = t + 1,
+    spawnLock' = if (spawnLock == daemon) "" else spawnLock,
+    lockFile' = lockFile, proxies' = proxies, t' = t + 1,
   }
 
   // Someone else removes the socket file of the serving owner (a tmp cleaner on plan §5.3's
@@ -451,11 +467,43 @@ module daemon {
   }
 
   // On its tick the daemon finds that the path no longer names the socket it bound, and shuts
-  // down as on SIGTERM; its `unlink` then finds nothing to remove.
-  def noticeSweptEnabled(daemon: str): bool = phaseOf(daemon) == "serving" and swept(daemon)
+  // down as on SIGTERM (the spawn lock first); its `unlink` then finds nothing to remove.
+  def noticeSweptEnabled(daemon: str): bool = stopEnabled(daemon) and swept(daemon)
   action noticeSwept(daemon: str): bool = all {
     noticeSweptEnabled(daemon),
     daemons' = stopped(daemon),
+    conns' = closedBy(daemon),
+    spawnLock' = daemon,
+    lockFile' = lockFile, sock' = sock, proxies' = proxies, t' = t + 1,
+  }
+
+  // The same shutdown when a proxy holds the spawn lock: the daemon's wait for it has a deadline
+  // (`run::SPAWN_LOCK_WAIT`), after which it stops without it (`alone`). A system move, not a
+  // fault: the deadline always comes, so a swept daemon always gets to stop, however often the
+  // proxies retake the spawn lock between their failed spawns (with `noticeSwept` alone, weak
+  // fairness could starve it; the liveness runs found such a run). The model has no clock, so
+  // the step may come at any moment the lock is held: more than the real deadline allows, never
+  // less.
+  def noticeSweptAloneEnabled(daemon: str): bool = and {
+    phaseOf(daemon) == "serving", swept(daemon), spawnLock != "",
+  }
+  action noticeSweptAlone(daemon: str): bool = all {
+    noticeSweptAloneEnabled(daemon),
+    daemons' = daemons.setBy(daemon, x => { ...x, phase: "stopping", alone: true }),
+    conns' = closedBy(daemon),
+    lockFile' = lockFile, sock' = sock, spawnLock' = spawnLock, proxies' = proxies, t' = t + 1,
+  }
+
+  // A fault: a shutdown's wait for the spawn lock expires (its holder, a proxy that should keep it
+  // at most for its bounded spawn wait, is suspended or wedged, or another process locks the file)
+  // and the daemon stops without it, as before FND-18 (the deadline `run::SPAWN_LOCK_WAIT`, or a
+  // second SIGTERM). A proxy refused meanwhile may then spawn a daemon that fails the lock still
+  // held: wasteful, never unsafe. Whatever triggered the shutdown (SIGTERM, the idle exit, a swept
+  // socket) is the same step here.
+  action spawnLockWaitExpires(daemon: str): bool = all {
+    phaseOf(daemon) == "serving",
+    spawnLock != "",
+    daemons' = daemons.setBy(daemon, x => { ...x, phase: "stopping", alone: true }),
     conns' = closedBy(daemon),
     lockFile' = lockFile, sock' = sock, spawnLock' = spawnLock, proxies' = proxies, t' = t + 1,
   }
@@ -486,6 +534,7 @@ module daemon {
     nondet daemon = DAEMONS.oneOf() sigterm(daemon),
     nondet daemon = DAEMONS.oneOf() idleExit(daemon),
     nondet proxy = PROXIES.oneOf() spawnTimeout(proxy),
+    nondet daemon = DAEMONS.oneOf() spawnLockWaitExpires(daemon),
     sweep,
   }
 
@@ -499,6 +548,7 @@ module daemon {
     nondet daemon = DAEMONS.oneOf() unlink(daemon),
     nondet daemon = DAEMONS.oneOf() exit(daemon),
     nondet daemon = DAEMONS.oneOf() noticeSwept(daemon),
+    nondet daemon = DAEMONS.oneOf() noticeSweptAlone(daemon),
     faultStep,
   }
 
@@ -563,6 +613,18 @@ module daemon {
     }
   })
 
+  // A daemon shutting down (stopped accepting, its lock still held) holds the spawn lock, so no
+  // proxy is spawning or awaiting a spawn meanwhile: no proxy refused by the stopped listener, or
+  // finding the socket gone, starts a daemon that could only fail the lock still held (FND-18; a
+  // spawn already under way when the shutdown began holds the spawn lock, so the shutdown waits
+  // for it). The second half follows from the first, as one flock has one holder; it says why.
+  // Stated for the fault-free shutdown: one whose bounded wait expired (`alone`, the fault
+  // `spawnLockWaitExpires`) holds no spawn lock, as before FND-18.
+  val SpawnWaitsForShutdown = DAEMONS.forall(d => (shuttingDown(d) and not(daemons.get(d).alone)) implies and {
+    spawnLock == d,
+    PROXIES.forall(p => not(Set("spawning", "awaiting").contains(proxies.get(p).phase))),
+  })
+
   val allInvariants = and {
     AtMostOneOwner,
     ServedOnlyByOwner,
@@ -570,6 +632,7 @@ module daemon {
     ShutdownReleases,
     OwnerReachable,
     ReconnectRestores,
+    SpawnWaitsForShutdown,
   }
 
   // ---- Liveness (plan §7.2): a proxy that keeps retrying is eventually served ----
@@ -594,11 +657,11 @@ module daemon {
   }
   def daemonMoveEnabled(daemon: str): bool = or {
     lockEnabled(daemon), unlinkStaleEnabled(daemon), listenEnabled(daemon), unlinkEnabled(daemon),
-    exitEnabled(daemon), noticeSweptEnabled(daemon),
+    exitEnabled(daemon), noticeSweptEnabled(daemon), noticeSweptAloneEnabled(daemon),
   }
   action daemonMove(daemon: str): bool = any {
     lock(daemon), unlinkStale(daemon), listen(daemon), unlink(daemon), exit(daemon),
-    noticeSwept(daemon),
+    noticeSwept(daemon), noticeSweptAlone(daemon),
   }
   def connMoveEnabled(conn: str): bool = {
     val d = conns.get(conn).daemon
@@ -627,6 +690,7 @@ module daemon {
     not(crash("d2")), not(sigterm("d2")), not(idleExit("d2")),
     not(crash("d3")), not(sigterm("d3")), not(idleExit("d3")),
     not(spawnTimeout("p1")), not(spawnTimeout("p2")), not(sweep),
+    not(spawnLockWaitExpires("d1")), not(spawnLockWaitExpires("d2")), not(spawnLockWaitExpires("d3")),
   }))
 
   temporal servedAfterWaiting(proxy: str): bool =
@@ -764,61 +828,40 @@ module daemon {
 
   // The daemon's last connection closes and its idle period ends just as p2 connects: p2's
   // connection is still in the backlog, so the idle exit resets it. p2 is refused while the old
-  // daemon stops, and its spawn fails the lock the old daemon still holds; once the old daemon
-  // has unlinked its socket and released the lock, p2's next spawn serves it.
+  // daemon stops, and the spawn lock the old daemon took for its shutdown keeps p2 from spawning
+  // a daemon that could only fail the lock still held (FND-18; before, that spawn failed and was
+  // retried). Once the old daemon has unlinked its socket and released both locks, p2's spawn
+  // (slot d1 again) serves it. Each branch is guarded by the step count `t`, as slot d1 returns.
   action idleExitRacesConnect = any {
-    all { phaseOf("d1") == "none", ph("p1") == "disconnected", not(proxies.get("p1").want),
-          nondet proxy = Set("p1").oneOf() request(proxy) },
-    all { phaseOf("d1") == "none", ph("p1") == "disconnected", proxies.get("p1").want,
-          nondet proxy = Set("p1").oneOf() connect(proxy) },
-    all { phaseOf("d1") == "none", ph("p1") == "noDaemon", nondet proxy = Set("p1").oneOf() takeSpawnLock(proxy) },
-    all { phaseOf("d1") == "none", ph("p1") == "spawning", nondet proxy = Set("p1").oneOf() spawn(proxy) },
-    all { phaseOf("d1") == "started", phaseOf("d2") == "none", nondet daemon = Set("d1").oneOf() lock(daemon) },
-    all { phaseOf("d1") == "locked", phaseOf("d2") == "none", nondet daemon = Set("d1").oneOf() listen(daemon) },
-    all { phaseOf("d1") == "serving", phaseOf("d2") == "none", ph("p1") == "awaiting",
-          nondet proxy = Set("p1").oneOf() handshake(proxy) },
-    all { phaseOf("d1") == "serving", phaseOf("d2") == "none", ph("p1") == "disconnected", proxies.get("p1").want,
-          nondet proxy = Set("p1").oneOf() connect(proxy) },
-    all { phaseOf("d2") == "none", ph("p1") == "connecting", cs("c1") == "backlog",
-          nondet daemon = Set("d1").oneOf() nondet conn = Set("c1").oneOf() accept(daemon, conn) },
-    all { phaseOf("d2") == "none", cs("c1") == "open", conns.get("c1").inflight,
-          nondet daemon = Set("d1").oneOf() nondet conn = Set("c1").oneOf() answer(daemon, conn) },
-    all { phaseOf("d2") == "none", cs("c1") == "open", ph("p1") == "ready", not(proxies.get("p1").want),
-          nondet proxy = Set("p1").oneOf() quit(proxy) },
-    all { phaseOf("d2") == "none", cs("c1") == "peerClosed",
-          nondet daemon = Set("d1").oneOf() nondet conn = Set("c1").oneOf() reap(daemon, conn) },
-    all { phaseOf("d1") == "serving", phaseOf("d2") == "none", cs("c1") == "free", ph("p1") == "disconnected",
-          not(proxies.get("p1").want), not(proxies.get("p2").want),
-          nondet proxy = Set("p2").oneOf() request(proxy) },
-    all { phaseOf("d1") == "serving", phaseOf("d2") == "none", cs("c1") == "free", ph("p2") == "disconnected",
-          proxies.get("p2").want, nondet proxy = Set("p2").oneOf() connect(proxy) },
-    all { phaseOf("d1") == "serving", phaseOf("d2") == "none", cs("c1") == "backlog", ph("p2") == "connecting",
-          nondet daemon = Set("d1").oneOf() idleExit(daemon) },
-    all { phaseOf("d1") == "stopping", ph("p2") == "connecting", nondet proxy = Set("p2").oneOf() notice(proxy) },
-    all { phaseOf("d1") == "stopping", phaseOf("d2") == "none", ph("p2") == "disconnected",
-          nondet proxy = Set("p2").oneOf() connect(proxy) },
-    all { phaseOf("d1") == "stopping", phaseOf("d2") == "none", ph("p2") == "noDaemon",
-          nondet proxy = Set("p2").oneOf() takeSpawnLock(proxy) },
-    all { phaseOf("d1") == "stopping", phaseOf("d2") == "none", ph("p2") == "spawning",
-          nondet proxy = Set("p2").oneOf() spawn(proxy) },
-    all { phaseOf("d2") == "started", nondet daemon = Set("d2").oneOf() lock(daemon) },
-    all { phaseOf("d2") == "failed", ph("p2") == "awaiting", nondet proxy = Set("p2").oneOf() handshake(proxy) },
-    all { phaseOf("d1") == "stopping", phaseOf("d2") == "failed", ph("p2") == "disconnected",
-          nondet daemon = Set("d1").oneOf() unlink(daemon) },
-    all { phaseOf("d1") == "unlinked", nondet daemon = Set("d1").oneOf() exit(daemon) },
-    all { phaseOf("d1") == "exited", ph("p2") == "disconnected", nondet proxy = Set("p2").oneOf() connect(proxy) },
-    all { phaseOf("d1") == "exited", ph("p2") == "noDaemon", nondet proxy = Set("p2").oneOf() takeSpawnLock(proxy) },
-    all { phaseOf("d1") == "exited", ph("p2") == "spawning", nondet proxy = Set("p2").oneOf() spawn(proxy) },
-    all { phaseOf("d1") == "started", phaseOf("d2") == "failed", nondet daemon = Set("d1").oneOf() lock(daemon) },
-    all { phaseOf("d1") == "locked", phaseOf("d2") == "failed", nondet daemon = Set("d1").oneOf() listen(daemon) },
-    all { phaseOf("d1") == "serving", phaseOf("d2") == "failed", ph("p2") == "awaiting",
-          nondet proxy = Set("p2").oneOf() handshake(proxy) },
-    all { phaseOf("d1") == "serving", phaseOf("d2") == "failed", ph("p2") == "disconnected", proxies.get("p2").want,
-          nondet proxy = Set("p2").oneOf() connect(proxy) },
-    all { phaseOf("d2") == "failed", cs("c1") == "backlog",
-          nondet daemon = Set("d1").oneOf() nondet conn = Set("c1").oneOf() accept(daemon, conn) },
-    all { phaseOf("d2") == "failed", cs("c1") == "open", conns.get("c1").inflight,
-          nondet daemon = Set("d1").oneOf() nondet conn = Set("c1").oneOf() answer(daemon, conn) },
+    all { t == 0, nondet proxy = Set("p1").oneOf() request(proxy) },
+    all { t == 1, nondet proxy = Set("p1").oneOf() connect(proxy) },
+    all { t == 2, nondet proxy = Set("p1").oneOf() takeSpawnLock(proxy) },
+    all { t == 3, nondet proxy = Set("p1").oneOf() spawn(proxy) },
+    all { t == 4, nondet daemon = Set("d1").oneOf() lock(daemon) },
+    all { t == 5, nondet daemon = Set("d1").oneOf() listen(daemon) },
+    all { t == 6, nondet proxy = Set("p1").oneOf() handshake(proxy) },
+    all { t == 7, nondet proxy = Set("p1").oneOf() connect(proxy) },
+    all { t == 8, nondet daemon = Set("d1").oneOf() nondet conn = Set("c1").oneOf() accept(daemon, conn) },
+    all { t == 9, nondet daemon = Set("d1").oneOf() nondet conn = Set("c1").oneOf() answer(daemon, conn) },
+    all { t == 10, nondet proxy = Set("p1").oneOf() quit(proxy) },
+    all { t == 11, nondet daemon = Set("d1").oneOf() nondet conn = Set("c1").oneOf() reap(daemon, conn) },
+    all { t == 12, nondet proxy = Set("p2").oneOf() request(proxy) },
+    all { t == 13, nondet proxy = Set("p2").oneOf() connect(proxy) },
+    all { t == 14, nondet daemon = Set("d1").oneOf() idleExit(daemon) },
+    all { t == 15, nondet proxy = Set("p2").oneOf() notice(proxy) },
+    all { t == 16, nondet proxy = Set("p2").oneOf() connect(proxy) },
+    all { t == 17, nondet proxy = Set("p2").oneOf() takeSpawnLock(proxy) },
+    all { t == 18, nondet daemon = Set("d1").oneOf() unlink(daemon) },
+    all { t == 19, nondet daemon = Set("d1").oneOf() exit(daemon) },
+    all { t == 20, nondet proxy = Set("p2").oneOf() connect(proxy) },
+    all { t == 21, nondet proxy = Set("p2").oneOf() takeSpawnLock(proxy) },
+    all { t == 22, nondet proxy = Set("p2").oneOf() spawn(proxy) },
+    all { t == 23, nondet daemon = Set("d1").oneOf() lock(daemon) },
+    all { t == 24, nondet daemon = Set("d1").oneOf() listen(daemon) },
+    all { t == 25, nondet proxy = Set("p2").oneOf() handshake(proxy) },
+    all { t == 26, nondet proxy = Set("p2").oneOf() connect(proxy) },
+    all { t == 27, nondet daemon = Set("d1").oneOf() nondet conn = Set("c1").oneOf() accept(daemon, conn) },
+    all { t == 28, nondet daemon = Set("d1").oneOf() nondet conn = Set("c1").oneOf() answer(daemon, conn) },
   }
 
   // A crash left a stale socket file before this run: p1 is refused, spawns, and the daemon
@@ -978,15 +1021,13 @@ module daemon {
       .then(request("p2"))
       .then(connect("p2"))
       .then(all { assert(cs("c1") == "backlog" and idle("d1")), idleExit("d1") })
-      .then(all { assert(cs("c1") == "closed"), notice("p2") })
+      .then(all { assert(cs("c1") == "closed" and spawnLock == "d1"), notice("p2") })
       .then(all { assert(sock.present), connect("p2") })
       .then(all { assert(ph("p2") == "noDaemon"), takeSpawnLock("p2") })
-      .then(spawn("p2"))
-      .then(lock("d2"))
-      .then(all { assert(phaseOf("d2") == "failed" and isOwner("d1")), handshake("p2") })
-      .then(unlink("d1"))
+      // refused the spawn lock: no daemon was started to fail the lock d1 still holds
+      .then(all { assert(ph("p2") == "disconnected" and phaseOf("d2") == "none"), unlink("d1") })
       .then(exit("d1"))
-      .then(connect("p2"))
+      .then(all { assert(spawnLock == ""), connect("p2") })
       .then(all { assert(not(sock.present) and ph("p2") == "noDaemon"), takeSpawnLock("p2") })
       .then(spawn("p2"))
       .then(lock("d1"))
@@ -995,7 +1036,57 @@ module daemon {
       .then(connect("p2"))
       .then(accept("d1", "c1"))
       .then(answer("d1", "c1"))
-      .expect(and { not(proxies.get("p2").want), isOwner("d1"), phaseOf("d2") == "failed", allInvariants })
+      .expect(and {
+        not(proxies.get("p2").want), isOwner("d1"), phaseOf("d2") == "none",
+        DAEMONS.forall(d => phaseOf(d) != "failed"), allInvariants,
+      })
+
+  // The fault: the spawner hangs before its handshake, holding the spawn lock; the daemon's
+  // bounded wait for it expires and it shuts down alone, the spawn lock still the proxy's. No
+  // invariant breaks; the proxy's handshake then finds it stopping.
+  run spawnLockWaitExpiresTest =
+    initWith(false)
+      .then(connect("p1"))
+      .then(takeSpawnLock("p1"))
+      .then(spawn("p1"))
+      .then(lock("d1"))
+      .then(listen("d1"))
+      .then(all { assert(not(stopEnabled("d1"))), spawnLockWaitExpires("d1") })
+      .then(all { assert(allInvariants and spawnLock == "p1" and daemons.get("d1").alone), handshake("p1") })
+      .then(unlink("d1"))
+      .then(exit("d1"))
+      .expect(and { phaseOf("d1") == "exited", spawnLock == "", not(held(1)), allInvariants })
+
+  // A swept daemon whose proxies keep the spawn lock busy stops alone once its wait expires: the
+  // starvation the liveness runs found with `noticeSwept` alone, as a cycle cut short.
+  run noticeSweptAloneTest =
+    initWith(false)
+      .then(connect("p1"))
+      .then(takeSpawnLock("p1"))
+      .then(spawn("p1"))
+      .then(lock("d1"))
+      .then(listen("d1"))
+      .then(handshake("p1"))
+      .then(sweep)
+      .then(connect("p2"))
+      .then(takeSpawnLock("p2"))
+      .then(all { assert(not(noticeSweptEnabled("d1")) and noticeSweptAloneEnabled("d1")), noticeSweptAlone("d1") })
+      .then(spawn("p2"))
+      .then(lock("d2"))
+      .expect(and { daemons.get("d1").alone, phaseOf("d1") == "stopping", phaseOf("d2") == "failed", allInvariants })
+
+  // A daemon's shutdown waits while a proxy holds the spawn lock (here its own spawner, before
+  // the handshake), and takes it once the proxy releases it.
+  run stopWaitsForTheSpawnLockTest =
+    initWith(false)
+      .then(connect("p1"))
+      .then(takeSpawnLock("p1"))
+      .then(spawn("p1"))
+      .then(lock("d1"))
+      .then(listen("d1"))
+      .then(all { assert(spawnLock == "p1" and not(stopEnabled("d1"))), handshake("p1") })
+      .then(sigterm("d1"))
+      .expect(and { phaseOf("d1") == "stopping", spawnLock == "d1", allInvariants })
 
   // The idle exit is refused while a connection is open (accepted).
   run idleExitWaitsForOpenConnectionsTest =
@@ -1113,10 +1204,10 @@ module daemon {
       if (held(inode)) all {
         inode < MAX_INODE,
         lockFile' = inode + 1,
-        daemons' = daemons.set(daemon, { phase: "locked", lock: inode + 1 }),
+        daemons' = daemons.setBy(daemon, x => { ...x, phase: "locked", lock: inode + 1 }),
       } else all {
         lockFile' = inode,
-        daemons' = daemons.set(daemon, { phase: "locked", lock: inode }),
+        daemons' = daemons.setBy(daemon, x => { ...x, phase: "locked", lock: inode }),
       },
       sock' = sock, spawnLock' = spawnLock, conns' = conns, proxies' = proxies, t' = t + 1,
     }
@@ -1135,7 +1226,7 @@ module daemon {
   // the next daemon to restore), keyed by connections that no longer exist.
   action crashKeepingOverlays(daemon: str): bool = all {
     alive(daemon),
-    daemons' = daemons.set(daemon, { phase: "crashed", lock: 0 }),
+    daemons' = daemons.setBy(daemon, x => { ...x, phase: "crashed", lock: 0 }),
     conns' = CONNS.mapBy(c => {
       val k = conns.get(c)
       if (k.state == "free" or k.daemon != daemon) k
@@ -1155,7 +1246,7 @@ module daemon {
   // Exits from the shutdown without removing the socket (a `process::exit` in the signal path).
   action exitWithoutUnlink(daemon: str): bool = all {
     phaseOf(daemon) == "stopping",
-    daemons' = daemons.set(daemon, { phase: "exited", lock: 0 }),
+    daemons' = daemons.setBy(daemon, x => { ...x, phase: "exited", lock: 0 }),
     lockFile' = lockFile, sock' = sock, spawnLock' = spawnLock, conns' = conns, proxies' = proxies, t' = t + 1,
   }
 
@@ -1171,14 +1262,26 @@ module daemon {
   // can lock, unlink the old file and bind; the old daemon's unlink then removes the new socket.
   action releaseBeforeUnlink(daemon: str): bool = all {
     phaseOf(daemon) == "stopping",
-    daemons' = daemons.set(daemon, { phase: "released", lock: 0 }),
-    lockFile' = lockFile, sock' = sock, spawnLock' = spawnLock, conns' = conns, proxies' = proxies, t' = t + 1,
+    daemons' = daemons.setBy(daemon, x => { ...x, phase: "released", lock: 0 }),
+    spawnLock' = if (spawnLock == daemon) "" else spawnLock,
+    lockFile' = lockFile, sock' = sock, conns' = conns, proxies' = proxies, t' = t + 1,
   }
   action unlinkAfterRelease(daemon: str): bool = all {
     phaseOf(daemon) == "released",
     sock' = NO_SOCK,
     daemons' = daemons.setBy(daemon, x => { ...x, phase: "exited" }),
     lockFile' = lockFile, spawnLock' = spawnLock, conns' = conns, proxies' = proxies, t' = t + 1,
+  }
+
+  // The shutdown as it was before FND-18: SIGTERM stops accepting without taking the spawn lock.
+  // A proxy refused meanwhile takes the spawn lock and spawns a daemon that can only fail the lock
+  // the stopping daemon still holds (a wasted spawn, and a busy retry for as long as the shutdown
+  // lasts).
+  action stopWithoutSpawnLock(daemon: str): bool = all {
+    phaseOf(daemon) == "serving",
+    daemons' = stopped(daemon),
+    conns' = closedBy(daemon),
+    lockFile' = lockFile, sock' = sock, spawnLock' = spawnLock, proxies' = proxies, t' = t + 1,
   }
 
   // Accepts a reconnecting proxy without its documents and its request re-sent.
@@ -1199,7 +1302,7 @@ module daemon {
     phaseOf(daemon) == "locked",
     if (sock.present) all {
       sock' = sock,
-      daemons' = daemons.set(daemon, { phase: "failed", lock: 0 }),
+      daemons' = daemons.setBy(daemon, x => { ...x, phase: "failed", lock: 0 }),
     } else all {
       sock' = { present: true, owner: daemon },
       daemons' = daemons.setBy(daemon, x => { ...x, phase: "serving" }),
@@ -1267,6 +1370,7 @@ module daemon {
       .then(spawn("p1"))
       .then(lock("d1"))
       .then(listen("d1"))
+      .then(handshake("p1"))
       .then(sigterm("d1"))
       .then(exitWithoutUnlink("d1"))
       .expect(not(ShutdownReleases))
@@ -1278,6 +1382,7 @@ module daemon {
       .then(spawn("p1"))
       .then(lock("d1"))
       .then(listen("d1"))
+      .then(handshake("p1"))
       .then(sigterm("d1"))
       .then(unlink("d1"))
       .then(exitLeakingLock("d1"))
@@ -1302,8 +1407,9 @@ module daemon {
       .then(all { assert(allInvariants), unlinkAfterRelease("d1") })
       .expect(not(OwnerReachable))
 
-  // The same interleaving in the real order: the new daemon cannot lock until the old one has
-  // removed its socket, so the old one never removes the new socket.
+  // The same interleaving in the real order: no new daemon starts until the old one has removed
+  // its socket and released its lock (the spawn lock it holds across its shutdown), so the old
+  // one never removes the new socket.
   run unlinkBeforeReleaseKeepsOwnerReachableTest =
     initWith(false)
       .then(connect("p1"))
@@ -1315,17 +1421,34 @@ module daemon {
       .then(sigterm("d1"))
       .then(connect("p2"))
       .then(takeSpawnLock("p2"))
-      .then(spawn("p2"))
-      .then(lock("d2"))
-      .then(all { assert(phaseOf("d2") == "failed"), unlink("d1") })
+      .then(all { assert(ph("p2") == "disconnected"), unlink("d1") })
       .then(exit("d1"))
-      .then(handshake("p2"))
       .then(connect("p2"))
       .then(takeSpawnLock("p2"))
       .then(spawn("p2"))
       .then(lock("d1"))
       .then(listen("d1"))
       .expect(and { OwnerReachable, allInvariants })
+
+  run stopWithoutSpawnLockViolatesSpawnWaitsForShutdownTest =
+    initWith(false)
+      .then(connect("p1"))
+      .then(takeSpawnLock("p1"))
+      .then(spawn("p1"))
+      .then(lock("d1"))
+      .then(listen("d1"))
+      .then(handshake("p1"))
+      .then(request("p2"))
+      .then(all { assert(allInvariants), stopWithoutSpawnLock("d1") })
+      .then(connect("p2"))
+      .then(takeSpawnLock("p2"))
+      .then(spawn("p2"))
+      .then(lock("d2"))
+      .expect(and {
+        not(SpawnWaitsForShutdown), phaseOf("d2") == "failed", phaseOf("d1") == "stopping",
+        // the behavioural half, not only the mechanism: a proxy spawned while d1 shuts down
+        ph("p2") == "awaiting", not(daemons.get("d1").alone),
+      })
 
   run acceptWithoutResendViolatesReconnectRestoresTest =
     initWith(false)
