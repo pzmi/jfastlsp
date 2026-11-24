@@ -4,8 +4,7 @@ Date: 2026-11-16
 
 ## Status
 
-Accepted (owner, 2026-11-17); amended 2026-11-17 (as built), 2026-11-17 (owner: testing and
-comparison only) and 2026-11-17 (owner: the proxy removed; stock jdtls a comparison arm only).
+Retired 2026-11-24 (owner): detail lives in plan §1.3 and the BENCH-03 and EVAL-06 cards
 
 ## Context
 

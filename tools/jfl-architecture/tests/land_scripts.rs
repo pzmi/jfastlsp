@@ -1126,6 +1126,102 @@ fn should_fail_the_adr_index_check_when_a_status_claims_more_than_the_files_supp
     Ok(())
 }
 
+/// Writes records 1 and 3 into `dir`, record 1 with `file_status` in its file and `row_status`
+/// in its index row.
+fn write_adr_pair(dir: &Path, file_status: &str, row_status: &str) -> TestResult {
+    if dir.try_exists()? {
+        fs::remove_dir_all(dir)?;
+    }
+    fs::create_dir_all(dir)?;
+    let rows = [
+        (1, "one", "One", file_status),
+        (3, "three", "Three", "Proposed"),
+    ];
+    for (path, content) in adr_files(&rows) {
+        fs::write(dir.join(path.trim_start_matches("doc/adr/")), content)?;
+    }
+    let readme = dir.join("README.md");
+    let text = fs::read_to_string(&readme)?;
+    fs::write(
+        &readme,
+        text.replacen(
+            &format!("| {file_status} |"),
+            &format!("| {row_status} |"),
+            1,
+        ),
+    )?;
+    Ok(())
+}
+
+#[test]
+fn should_pass_the_adr_index_check_when_a_record_is_retired_into_a_named_document() -> TestResult {
+    // given
+    let lab = Lab::new("adr-index-retired")?;
+    let dir = lab.base.join("adr");
+    let status = "Retired 2026-11-24 (owner): detail lives in plan §16";
+    write_adr_pair(&dir, status, status)?;
+
+    // when
+    let output = adr_index(&lab, "check", &dir)?;
+
+    // then
+    succeeded(&output)?;
+    Ok(())
+}
+
+#[test]
+fn should_fail_the_adr_index_check_when_a_retired_status_is_malformed_or_its_row_differs()
+-> TestResult {
+    let lab = Lab::new("adr-index-retired-bad")?;
+    let dir = lab.base.join("adr");
+    let good = "Retired 2026-11-24 (owner): detail lives in plan §16";
+    let malformed = "without \"YYYY-MM-DD (owner): detail lives in <where>\"";
+    let cases: [(&str, &str, &str); 6] = [
+        ("Retired", "Retired", malformed),
+        (
+            "Retired 2026-11-24: detail lives in plan §16",
+            "Retired 2026-11-24: detail lives in plan §16",
+            malformed,
+        ),
+        (
+            "Retired 2026-11-24 (owner)",
+            "Retired 2026-11-24 (owner)",
+            malformed,
+        ),
+        (
+            "Retired 24-11-2026 (owner): detail lives in plan §16",
+            "Retired 24-11-2026 (owner): detail lives in plan §16",
+            malformed,
+        ),
+        (
+            good,
+            "Retired 2026-11-24 (owner): detail lives in plan §5",
+            "but the file says",
+        ),
+        (
+            good,
+            "Accepted (owner, 2026-11-17)",
+            "differs from the file",
+        ),
+    ];
+    for (file_status, row_status, expected) in cases {
+        // given: file and row agree except where the case says otherwise
+        write_adr_pair(&dir, file_status, row_status)?;
+
+        // when
+        let output = adr_index(&lab, "check", &dir)?;
+
+        // then
+        let text = printed(&output);
+        assert!(
+            !output.status.success(),
+            "{file_status} / {row_status}: passed:\n{text}"
+        );
+        assert!(text.contains(expected), "{expected} not in:\n{text}");
+    }
+    Ok(())
+}
+
 #[test]
 fn should_refuse_before_any_just_when_the_merged_tree_s_mise_toml_has_a_payload() -> TestResult {
     // given: the FND-08 re-verification's F3, a lane commit whose mise.toml sources a script

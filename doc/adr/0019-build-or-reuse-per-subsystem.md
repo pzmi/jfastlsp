@@ -4,8 +4,7 @@ Date: 2026-11-16
 
 ## Status
 
-Accepted (owner, 2026-11-17); amended 2026-11-17 (twice) and 2026-11-18 (FORMAL-02's and
-IDX-06's amendments accepted by the owner 2026-11-18).
+Retired 2026-11-24 (owner): detail lives in plan §16
 
 ## Context
 

@@ -560,8 +560,27 @@ are a per-generation table built on the first query after a publish (72 ms on sp
 and scanned in order: 4.5 ms for a prefix query's scan, about 12 ms p95 with the default 100
 symbols' files read (`just bench-queries`). An `fst` set of the same names built in 91–122 ms for
 prefix lookups of 0.13 ms, and the camel-hump search IDX-10 asks for is a scan either way.
-`fst` stays ADR 0025's choice where a set is built once and kept: immutable segments, such as a
+`fst` stays the choice where a set is built once and kept: immutable segments, such as a
 library JAR's names (PROJ-04).
+
+**The storage crates** (ADR 0025 recorded them; retired into this section and §16 on
+2026-11-24). Every tier draws on the same four crates, which belong to `jfl-adapter-store` and
+are wrapped to it by `deny.toml` as each arrives (`blake3` also to `jfl-bench`, which hashes the
+corpus on its own; `jfl-domain` takes no digest crate):
+
+- **`blake3`** for every content key, with the grammar, schema and crate versions hashed in
+  (§5.4).
+- **`postcard`** for per-file summary blobs (a stable wire specification since 1.0), in a
+  content-addressed blob directory of our own: `objects/ab/cdef…`, each entry written to a
+  temporary file and renamed over its name, an LRU size cap; cacache's layout, not the crate.
+- **`fst`** for name sets built once and kept, not for the per-generation tables above (IDX-08,
+  IDX-10).
+- **`rusqlite`** (`bundled`, WAL) for manifests and postings, one database per state directory,
+  only once a tier needs more than the blob directory; DEC-03's tier does not.
+
+Every format carries a version and is discarded and rebuilt on a mismatch, never migrated (fnd
+§6). `bincode` is unmaintained (RUSTSEC-2025-0141); the runner-up and the other rejected options
+are in §16.3.
 
 ### 5.6 Resolver
 
@@ -604,6 +623,26 @@ multi-release selection are our own. The JDK's own API comes from the runtime im
 FND-10), and older `--release` APIs from `$JAVA_HOME/lib/ct.sym`, which stubs only earlier
 releases; Temurin 24 and later ship no `jmods/` (ADR 0023, amended). Class files and JARs are
 untrusted input (§11).
+
+The detail (ADR 0023 recorded it; retired into this section and §16 on 2026-11-24):
+
+- **`cafebabe`** is `#![forbid(unsafe_code)]`, about 5k lines, zero-copy over `&[u8]`, read-only,
+  and parses Record, PermittedSubclasses, Module and the raw Signature attribute. Its git pin is
+  a per-crate exception to the crates.io-only source rules (`deny.toml` `[sources]` and the source
+  check), marked temporary; DEP-01 switches to the first crates.io release with the 2026-11-13
+  hostile-input fix as soon as one exists, and the orchestrator checks pinned git dependencies
+  for a release at every ⛳ checkpoint.
+- **Our own generic-signature parser** (JVMS §4.7.9.1, about 300 lines, fuzzed) and **our own
+  multi-release selection** (about 50 lines: `Multi-Release: true`, then the highest
+  `META-INF/versions/N/` entry not above the environment's `--release`); no crate does either.
+- **`zip`** without default features, `deflate` on, reads JARs and `ct.sym` (and a `jmods/*.jmod`
+  after its 4-byte `JM` header, where a JDK still ships one).
+- **`ristretto_jimage`** is the only pure-Rust reader of `lib/modules`; if it stalls or its MSRV
+  races ahead of ours, our own reader (about 500 lines) replaces it.
+- The runner-up to cafebabe is `ristretto_classfile` (the image reader's project: full fidelity,
+  but about 62k lines and monthly API churn) if cafebabe's fidelity or maintenance falls short.
+  kmp-lsp's JAR indexer and ktlsp's `jar.rs` (MIT) are read for layout, never linked. The class
+  file and zip fuzz targets (ver §8) cover our parser and cafebabe on hostile input.
 
 ### 5.9 Resource limits
 
@@ -1093,10 +1132,22 @@ models plus `proptest-state-machine` tests (ADR 0007).
 
 ## 16. Reuse and dependencies
 
-The owner's rule: don't reinvent the wheel (ADR 0019). A survey on 2026-11-16 read crates.io, the
+The owner's rule: don't reinvent the wheel. Reuse by default; build only what nothing maintained
+does. This section holds the rule and the survey behind it (ADR 0019 recorded them; the owner
+retired it into this section on 2026-11-24). A survey on 2026-11-16 read crates.io, the
 projects' repositories and their release pages; versions and dates below are from that day and
 are re-checked by the task that adds each dependency (a version is never invented). Every task
-that adds a subsystem says on its card what reuse it considered.
+that adds a subsystem says on its card what reuse it considered (a **`Reuse considered:`**
+line), and a hand-built subsystem that has a maintained alternative records why (the commit
+message, or an ADR when the context is worth keeping). Licences stay permissive in the binary:
+GPL code is never linked, and EPL-2.0 jdtls runs only as a separate process (§16.2). Where an
+upstream is a one-maintainer fork or a 0.x crate that breaks on minors, it is pinned exactly and
+its risk is listed in §13.
+
+The survey also found that nothing published shares indexes across Git worktrees
+([codebase-memory-mcp](https://github.com/DeusData/codebase-memory-mcp/discussions/436) treats
+worktrees as separate projects; jdtls shares library indexes only) and that subagents do not
+share a language server (§9.2), which makes the shared daemon the part to build.
 
 ### 16.1 Build or reuse
 
@@ -1108,7 +1159,7 @@ that adds a subsystem says on its card what reuse it considered.
 | Java syntax | reuse `tree-sitter` + `tree-sitter-java-orchard`; own queries | 0022 |
 | Class files and the JDK API | reuse `cafebabe` + `zip`, `ristretto_jimage` for `lib/modules`; `ct.sym`; own signature parser | 0023 |
 | Git | reuse the `git` CLI; stat-only hot path | 0024 |
-| Watching and walking | reuse `notify` 8.2 + `notify-debouncer-mini`, `ignore` 0.4; turborepo's cookie file for `jfl sync` | 0019 |
+| Watching and walking | reuse `notify` 8.2 (without `notify-debouncer-mini`, §16.2), `ignore` 0.4; turborepo's cookie file for `jfl sync` | 0019, 0037 |
 | Storage | reuse `rusqlite`, `fst`, `postcard`, `blake3`; own CAS directory | 0025 |
 | Gradle model | **wrap** microsoft/build-server-for-gradle | 0026 |
 | javac worker | **build** a small worker with one warm javac context; scip-java plugin | 0036 |
@@ -1123,15 +1174,15 @@ that adds a subsystem says on its card what reuse it considered.
 
 | Crate | Version (date) | Licence | Used by | Note |
 |:--|:--|:--|:--|:--|
-| `lsp-server` | 0.10.0 (2026-07-16) | MIT OR Apache-2.0 | `jfl-adapter-lsp`, `-ipc` | rust-analyzer's; `Connection::memory()` for tests |
+| `lsp-server` | 0.10.0 (2026-07-16) | MIT OR Apache-2.0 | `jfl-adapter-lsp`, `-ipc` | rust-analyzer's; its message types only, none of its I/O (below) |
 | `gen-lsp-types` | 0.11.0 (2026-07-28) | MIT | `jfl-adapter-lsp` | LSP 3.18 metamodel; exact pin |
-| `line-index` | 0.1.2 | MIT OR Apache-2.0 | `jfl-domain` or its tests | UTF-8 ↔ UTF-16 |
+| `line-index` | 0.1.2 | MIT OR Apache-2.0 | `jfl-domain`'s tests and benches | UTF-8 ↔ UTF-16; the property-test oracle |
 | `tokio`, `tokio-util` | 1.54, 0.7.20 | MIT | daemon side only | `peer_cred()`, `CancellationToken` |
 | `rustix` | 1.1.6 | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT | `jfl-process`, `jfl-adapter-ipc`, daemon start | safe `setsid`, uid and mode checks; the group kill, `waitid`, pidfd and `poll(2)` of the child runner |
 | `tree-sitter`, `tree-sitter-java-orchard` | 0.27.2, 0.5.25 (2026-11-15) | MIT | `jfl-adapter-java` | C via `cc` |
 | `cafebabe`, `zip` | 0.9.0 (then the fix commit, ADR 0023), 9.6.1 | 0BSD, MIT | `jfl-adapter-classfile` | `zip` without default features, `deflate` on |
 | `ristretto_jimage` | =0.35.0 | Apache-2.0 OR MIT | `jfl-adapter-classfile` | `lib/modules`; needs Rust 1.99.1 (FND-10) |
-| `notify`, `ignore` | 8.2.2, 0.4.34 | CC0-1.0 (its Linux backend `inotify`: ISC, a per-crate exception), Unlicense OR MIT | `jfl-adapter-fs` | `notify` 9 when final; `notify-debouncer-mini` not taken (ADR 0019, amended 2026-11-18) |
+| `notify`, `ignore` | 8.2.2, 0.4.34 | CC0-1.0 (its Linux backend `inotify`: ISC, a per-crate exception), Unlicense OR MIT | `jfl-adapter-fs` | `notify` 9 when final; `notify-debouncer-mini` not taken (IDX-06, 2026-11-18): its path-keyed map drops the backend's overflow event, its channel is unbounded and it carries `tempfile`; a bounded, coalescing hint queue in `jfl-application` (`hints.rs`) replaces it |
 | `rusqlite` (bundled), `fst`, `postcard`, `blake3` | 0.43.0, 0.4.7, 1.1.3, 1.8.7 | MIT, Unlicense OR MIT, MIT OR Apache-2.0, CC0-1.0 OR Apache-2.0 | `jfl-adapter-store` | tier by DEC-03 |
 | `scip` | 0.10.0 | Apache-2.0 | `jfl-oracle`, SEM-08 | pins `protobuf` =3.7.2 exactly |
 | `clap`, `serde`, `serde_json`, `schemars`, `camino`, `thiserror`, `anyhow` | 4.6, 1, 1, 1.2, 1.2, 2, 1 | MIT OR Apache-2.0 (schemars MIT) | CLI, protocol | `anyhow` only in binaries and tools |
@@ -1146,11 +1197,38 @@ or bundled): our own javac worker (MIT), scip-java's plugin (Apache-2.0), build-
 (MIT), and jdtls (EPL-2.0, a separate process only, started by `jfl-bench`'s comparison arm, for
 testing and comparison).
 
+**The LSP stack** (ADR 0020 recorded it; retired into this section 2026-11-24). `jfl lsp` must
+control the order of `didChange` against requests, per-operation deadlines and cancellation, and
+needs correct LSP types:
+
+- **`lsp-server`** gives the scheduler shape of rust-analyzer and ruff: a synchronous main loop
+  that applies notifications in order and runs requests on a pool against an immutable snapshot.
+  Only its message types are used (`Request`, `Notification`, `RequestId`; §5.3): its
+  `Message::read` and `write` and its `Connection` transports read without a length limit and
+  pass every message's text to `log::debug!`, which bridged into `tracing` would log source
+  text (fnd §5), so the root `clippy.toml` denies those calls in every crate and frames go
+  through `jfl-protocol`. Cancellation is ours: `$/cancelRequest` sets a token the query engine
+  checks; `RequestCancelled` (-32800), and `ContentModified` (-32801) for a stale generation.
+- **`gen-lsp-types`** is generated from the official LSP 3.18 metamodel and tells `null` from
+  absent (rust-analyzer and ruff moved to it in 2026). Pinned exactly: every spec change is a
+  breaking release, so a bump is its own commit. We advertise only the LSP 3.17 features §2.5
+  lists.
+- **`line-index`** converts UTF-8 offsets to UTF-16 positions. The conversions stay in
+  `jfl-domain` (§2.3); `line-index` is not `#![no_std]`, so the domain keeps its own conversion
+  and `line-index` is its property-test oracle.
+- Both protocol crates live in `jfl-adapter-lsp`, wrapped there by `deny.toml` (which lets the
+  IPC adapter use `lsp-server` too, ADR 0021). The in-process tests keep rust-analyzer's slow-tests shape (a server in
+  process, a client sending and receiving) on a bounded in-memory byte pipe
+  (`jfl_adapter_lsp::memory`) through the same reader and writer as stdio, not
+  `Connection::memory()`, whose `Value` results would leave the typed path and whose channels
+  are unbounded (LSP-01; `crates/jfl-adapter-lsp/tests/server.rs`); black-box transcripts run
+  against the built binary (ver §2).
+
 ### 16.3 Rejected, and why
 
 | Option | Why not |
 |:--|:--|
-| `lsp-types` 0.97, `tower-lsp` 0.20 | stalled (2024) and unmaintained (2023); runner-up `tower-lsp-server` 0.24 when final |
+| `lsp-types` 0.97, `tower-lsp` 0.20 | stalled (2024) and unmaintained (2023); runner-up `tower-lsp-server` 0.24 (async, on gen-lsp-types, used by Biome and Oxc) when final, after testing notification order under load |
 | `async-lsp` | pinned to `lsp-types` 0.95; its design is copied |
 | `jsonrpsee`, `tarpc` | heavy, or a second protocol no LSP tool can read |
 | `fs2`, `fd-lock`, `fs4`, `daemonize`, `single-instance` | std file locks since Rust 1.89; `fork()` in a threaded process |
@@ -1159,9 +1237,14 @@ testing and comparison).
 | `ristretto_classfile`, `noak`, `classfile-parser`, `jimage` | heavy (the runner-up to cafebabe); `unsafe`; incomplete; Windows FFI |
 | forking java-language-server's compiler core | its `ReusableCompiler.java` is GPL-2.0 with the Classpath Exception; its body erasure serves autocomplete (ADR 0036) |
 | `gix`, `git2` | linked-worktree gap; C build |
-| `bincode`, `bitcode`, `tantivy`, `salsa` | unmaintained (RUSTSEC-2025-0141); no format stability; overkill; experimental persistence |
+| `bincode`, `bitcode`, `tantivy`, `salsa` | unmaintained (RUSTSEC-2025-0141); no format stability; overkill for symbol names; experimental persistence and a database per process |
+| `redb` | the storage runner-up (pure Rust; MVCC snapshots map onto pinned generations) if SQLite write contention or WAL checkpoints show up |
+| `rkyv` | a measured optimisation only, never adopted for its own sake |
+| `cacache` | quiet and SHA-based; its layout is copied for our own blob directory (§5.5) |
 | Stack Graphs | archived 2025-09 |
 | Serena's application | GPL-3.0; ideas only |
+| forking kmp-lsp (MIT, Rust) as the product | no worktree handling, Kotlin-first; kept as an E0 arm and a §13 fallback if it converges on this niche |
+| our own E0 harness, or `claude plugin eval` as the main one | rebuilds what Harbor has; two arms only, a 120 s scaffold, no custom graders (ver §11) |
 | the IntelliJ LSP | proprietary, no headless launcher yet (plan §13) |
 | `cargo-make`, `cargo-bylaw` | stale; too young (ADR 0030). mayfly's `xtask`, rejected by ADR 0030, is ported after all (ADR 0035) |
 

@@ -943,7 +943,7 @@ immediately, by a new commit. Before FND-03 the orchestrator did the same by han
 
 Nygard format in `doc/adr/NNNN-kebab-title.md`: `# NNNN. Title`, `Date:`, `## Status`
 (`Proposed`, `Accepted (owner, YYYY-MM-DD)`, `Rejected (owner, YYYY-MM-DD)`,
-`Superseded by NNNN`), `## Context`, `## Decision`,
+`Superseded by NNNN`, `Retired YYYY-MM-DD (owner): detail lives in <doc §>`), `## Context`, `## Decision`,
 `## Consequences`, optional `## Alternatives considered`. Records are created with `adrs new`
 (ADR 0030; `cargo xtask adr new` from XT-04, ADR 0035); the index `doc/adr/README.md` is checked against the files by the `docs` stage
 (`just adr-index`, FND-03). ADR 0038 (superseding 0001) records the practice; the ADR number is
@@ -951,7 +951,9 @@ the decision id. Only the owner moves a decision to Accepted or decides a `DEC-`
 written only for an important decision whose context is worth recalling later; everything else is
 recorded in the commit message and code comments. An Accepted ADR's text is never edited except
 its Status line: a changed decision is a new ADR that supersedes it, and a detail goes in this
-document, the plan or the card (ADR 0038).
+document, the plan or the card (ADR 0038). A record that never needed to be one is retired by
+the owner into the document that holds its detail (`doc/adr/README.md`, BOOT-05): the decision
+stands as that document records it, and the record is history.
 
 ---
 
@@ -1010,3 +1012,41 @@ The final report states, in this order:
 Code, tests and models agree; the architecture rules and their fixtures pass; the gate is green
 on the merged tree; affected documents and ADRs are updated; the report above is complete. An
 exception needs the owner's explicit approval and a follow-up task, with no false green signal.
+
+### 11.6 The agent sandbox
+
+Agents run with broad shell access in one shared sandbox (4 CPUs, about 15 GB RAM), several at
+once. A force-push, a pattern kill or a gate left running in the background can destroy another
+lane's work, and a missing tool skipped silently makes a red tree look green. So (retired ADR
+0018; the owner, 2026-11-17 and 2026-11-24):
+
+1. **Agents never push, by any means.** `scripts/land.sh`, run as a script by the orchestrator,
+   is the only pusher (§10.2, [`sdlc.md`](sdlc.md) §5). `.claude/settings.json` denies the forms
+   of `git push` an agent types directly (`git push …`, `git -C <dir> push …`,
+   `git -c <k=v> push …`, `git --no-pager push …`, `git --git-dir=… push …`,
+   `git --work-tree=… push …`) and, in every form it can match, force-pushes, `+refspec`, tag
+   pushes and remote deletions. A deny rule matches the command an agent writes, so it guards
+   against a mistake and is not a sandbox: a form it does not catch is still forbidden, and the
+   rule binds by review.
+2. **The deny list** also covers `--no-verify`, `git reset --hard` (the orchestrator uses its
+   `-C` worktree form), `git add -A` and `git add .`, `rm -rf` of `/`, the home directory and
+   the system directories, `docker`, `pkill` and `killall`. It allows what the process mandates
+   (the gate, `cargo add`, `git cat-file`, `setpriv`, `bash scripts/*.sh`, `rm -rf` under the
+   session scratchpad), since a background agent cannot answer a permission prompt.
+3. **Hooks are bootstrap-safe**, each a no-op until its prerequisite exists, and report rather
+   than block: SessionStart installs the pinned toolchain, mise and just
+   (`scripts/bootstrap-tools.sh`, checksum-verified) and runs `mise install --locked`; every
+   edited `*.rs` is formatted; Stop runs `just quick` with `CARGO_BUILD_JOBS=2` when code,
+   manifests, the policy, tool pins, the gate's configuration, scripts, workflows, a model or a
+   fixture changed, and fails when the justfile has `quick` and `just` is missing. Stop guards
+   only the checkout the session started in; a lane worktree is guarded by the work skill's ship
+   station (the gate on the exact tree) and by the gate on the merged tree when landing.
+4. **Tools fail closed** with an install hint (§8 rule 4); a skipped check is never green.
+5. **At most two lanes**, each with its own `CARGO_TARGET_DIR` on disk under the session
+   scratchpad, `CARGO_BUILD_JOBS=2` and `CARGO_INCREMENTAL=0`, deleted when the lane is done.
+   Processes are stopped by PID only, never by pattern; nothing runs in the background when a
+   turn ends.
+
+`CLAUDE.md` and `.claude/` belong to the orchestrator: a task agent reports a needed change, and a
+change to the deny list or the hooks is reviewed as a change of the gate (the hooks are pinned in
+`.config/gate.sha256`, §3.6).

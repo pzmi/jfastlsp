@@ -42,6 +42,11 @@ enough that its context is worth recalling, and otherwise its commit message say
 - `Superseded by NNNN`: replaced. The new record says what it supersedes; when only part is
   replaced, the old status says which part (`Accepted (owner, …); partly superseded by NNNN
   (...)`).
+- `Retired YYYY-MM-DD (owner): detail lives in <doc §>`: the owner judged that the record never
+  needed to be an ADR (a crate pick, a survey, a sandbox setting). The decision stands as the
+  named document now records it, and changes there like any other detail; the record is history.
+  Only the owner retires a record, and only its Status line changes (ADR 0038). `just adr-index`
+  checks the form and that the index row repeats it exactly.
 
 **Changing a decision** (the owner, 2026-11-18, ADR 0038): "you amend by creating a new adr. If
 you need to amend a lot it may mean you wrote too many ADRs for small things."
@@ -52,8 +57,10 @@ you need to amend a lot it may mean you wrote too many ADRs for small things."
   a narrowed mechanism) goes in plan, foundation, verification or the card, and in the commit
   message, not in an ADR.
 - No `## Amended` section is written any more. Those written before 2026-11-18 stay; their
-  annotations (`amended YYYY-MM-DD`) remain in the statuses below as history. An audit of the
-  existing records (keep, retire into the docs, consolidate) is with the owner (BOOT-04).
+  annotations (`amended YYYY-MM-DD`) remain in the statuses below as history. The owner decided
+  the audit of the existing records (BOOT-04) on 2026-11-24 (BOOT-05): the detail records 0018,
+  0019, 0020, 0023, 0025, 0028 and 0029 are retired into the documents their status names; the
+  others are consolidated into a new superseding record only when each decision next changes.
 
 **Ids.** The ADR number is the decision's id; there are no separate D-ids. Numbers are reserved by
 the orchestrator at dispatch; a lane that finds its number taken when it lands renumbers its
@@ -79,18 +86,18 @@ for the owner's decisions.
 | [0015](0015-no-jvm-and-no-build-on-the-request-path.md) | No JVM and no build on the request path | Accepted (owner, 2026-11-17) |
 | [0016](0016-one-daemon-per-user-with-thin-proxies.md) | One daemon per user with thin per-client proxies | Accepted (owner, 2026-11-17) |
 | [0017](0017-bind-views-per-request-uri-exclude-nested-worktrees.md) | Bind views per request URI; exclude nested worktrees | Accepted (owner, 2026-11-17); amended 2026-11-18 (accepted 2026-11-18) |
-| [0018](0018-agent-sandbox-and-fail-closed-tools.md) | Agent sandbox and fail-closed tools | Accepted (owner, 2026-11-17); amended 2026-11-16 (twice) and 2026-11-17 |
-| [0019](0019-build-or-reuse-per-subsystem.md) | Build or reuse, per subsystem | Accepted (owner, 2026-11-17); amended 2026-11-17 (twice) and 2026-11-18 (accepted 2026-11-18) |
-| [0020](0020-lsp-stack-lsp-server-gen-lsp-types-line-index.md) | LSP stack: lsp-server, gen-lsp-types and line-index | Accepted (owner, 2026-11-17); amended 2026-11-17 (LSP-01; accepted 2026-11-18) |
+| [0018](0018-agent-sandbox-and-fail-closed-tools.md) | Agent sandbox and fail-closed tools | Retired 2026-11-24 (owner): detail lives in fnd §11.6 and sdlc §5 |
+| [0019](0019-build-or-reuse-per-subsystem.md) | Build or reuse, per subsystem | Retired 2026-11-24 (owner): detail lives in plan §16 |
+| [0020](0020-lsp-stack-lsp-server-gen-lsp-types-line-index.md) | LSP stack: lsp-server, gen-lsp-types and line-index | Retired 2026-11-24 (owner): detail lives in plan §16.2 and §5.3 |
 | [0021](0021-daemon-ipc-lsp-framing-over-a-unix-socket.md) | Daemon IPC: LSP framing over a Unix socket, single owner by a std file lock | Accepted (owner, 2026-11-17); amended 2026-11-17 (accepted 2026-11-18) |
 | [0022](0022-java-grammar-tree-sitter-java-orchard-with-own-queries.md) | Java grammar: tree-sitter-java-orchard with our own queries | Accepted (owner, 2026-11-17); amended 2026-11-17 and 2026-11-18 (accepted 2026-11-18) |
-| [0023](0023-class-files-cafebabe-and-ct-sym.md) | Class files: cafebabe and zip; the JDK API from ct.sym | Accepted (owner, 2026-11-17); amended 2026-11-17 |
+| [0023](0023-class-files-cafebabe-and-ct-sym.md) | Class files: cafebabe and zip; the JDK API from ct.sym | Retired 2026-11-24 (owner): detail lives in plan §5.8 and §16 |
 | [0024](0024-git-cli-on-the-reconcile-path-not-gitoxide.md) | Git: the git CLI on the reconcile path, stat-only freshness, not gitoxide | Accepted (owner, 2026-11-17); amended 2026-11-18 (accepted 2026-11-18) |
-| [0025](0025-storage-rusqlite-fst-postcard-blake3.md) | Storage crates: rusqlite, fst, postcard and blake3 | Accepted (owner, 2026-11-17) |
+| [0025](0025-storage-rusqlite-fst-postcard-blake3.md) | Storage crates: rusqlite, fst, postcard and blake3 | Retired 2026-11-24 (owner): detail lives in plan §5.5 and §16 |
 | [0026](0026-gradle-model-by-wrapping-build-server-for-gradle.md) | Gradle model: wrap microsoft/build-server-for-gradle | Accepted (owner, 2026-11-17) |
 | [0027](0027-javac-worker-forked-from-java-language-server-with-scip-java.md) | javac worker: fork java-language-server's compiler core, load scip-java's plugin | Superseded by 0036 |
-| [0028](0028-jdtls-behind-our-multiplexing-proxy-baseline-and-fallback.md) | jdtls behind our multiplexing proxy: the baseline, for testing and comparison only | Accepted (owner, 2026-11-17); amended 2026-11-17 (three times) |
-| [0029](0029-e0-on-harbor-with-a-multi-swe-bench-java-control.md) | E0 on Harbor, with a Multi-SWE-bench Java control | Accepted (owner, 2026-11-17) |
+| [0028](0028-jdtls-behind-our-multiplexing-proxy-baseline-and-fallback.md) | jdtls behind our multiplexing proxy: the baseline, for testing and comparison only | Retired 2026-11-24 (owner): detail lives in plan §1.3 and the BENCH-03 and EVAL-06 cards |
+| [0029](0029-e0-on-harbor-with-a-multi-swe-bench-java-control.md) | E0 on Harbor, with a Multi-SWE-bench Java control | Retired 2026-11-24 (owner): detail lives in ver §11 and plan §9.2 |
 | [0030](0030-foundation-from-maintained-tools.md) | Foundation from maintained tools: just, mise, cargo-deny, no_std and a thin test layer | Superseded by 0035 |
 | [0031](0031-benchmark-early-on-a-pinned-real-corpus.md) | Benchmark early on a pinned real-repository corpus; regressions over 10 % block | Accepted (owner, 2026-11-17); amended 2026-11-16 and 2026-11-17 |
 | [0032](0032-evaluation-target-spring-framework-at-the-bench-pin.md) | Evaluation target: spring-framework at the bench pin | Accepted (owner, 2026-11-17) |

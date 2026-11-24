@@ -37,6 +37,7 @@ CLI carrier), **SEM-07** (M4),
 | FND-06 | Coverage, changed lines, mutation in the diff | FND-05 | standard | M |  | EVAL-03, EVAL-10, BENCH-03 |
 | DEC-07 | (owner) Confirm the Proposed defaults | FND-05 | light | S |  | DEC-08 |
 | DEC-08 | (owner) Shared skills plugin or repo-local skills | FND-05 | light | S |  | DEC-07 |
+| BOOT-05 | Record the owner's decisions of 2026-11-24: retire seven ADRs, IDX-10's speed sign-off | IDX-10 | light | S |  | IDX-12 |
 | FND-10 | Toolchain 1.99.1 | FND-08 | standard | S |  | XT-01 |
 | FND-11 | Remove the private-names hashes and check | FND-04, XT-02 | standard | S |  | EVAL lane |
 | FND-12 | Delete the jdtls proxy; keep stock jdtls as a bench arm | FND-11, BENCH-03 | standard | M |  | EVAL lane |
@@ -444,6 +445,31 @@ foundation piece by piece (ADR 0035).
   `pzmi/claude-plugins` plugin is deferred. No ADR (ADR 0001, amended): this line is the record.
 - **Impact:** none (decision).
 
+#### BOOT-05: Record the owner's decisions of 2026-11-24
+- **Depends on:** IDX-10. **Model:** light. **Size:** S. **Parallel with:** IDX-12.
+- **Cites:** [`adr/README.md`](adr/README.md); plan §1.3, §5.5, §5.8, §9.2, §16; fnd §3.6, §10.3,
+  §11; ver §11; [`sdlc.md`](sdlc.md) §5; ADR 0031, ADR 0038.
+- The owner decided BOOT-04's ADR audit, option a: retire the detail records now, and consolidate
+  the others into a new superseding record only when each decision next changes. Before each
+  record is retired, its target section is checked to say what the record decided, and completed
+  where it did not. A new status, `Retired YYYY-MM-DD (owner): detail lives in <doc §>`, which
+  `scripts/adr-index.sh` checks (its pin moved, fnd §3.6). ADR 0010, also proposed for retirement,
+  is superseded instead by IDX-12's new record. ADR 0038 stands as written. IDX-10's slower
+  definition is accepted.
+- **Accept:**
+  - [x] 0018 retired into fnd §11.6 (new: the sandbox, "agents never push", `land.sh` the only pusher) and sdlc §5
+  - [x] 0019 retired into plan §16 (the rule, the recorded reason, the licence rule, the survey's findings; the debouncer row corrected)
+  - [x] 0020 retired into plan §16.2 (new: the LSP stack) and §5.3
+  - [x] 0023 retired into plan §5.8 (new: the cafebabe pin and DEP-01, our parsers, the runner-ups) and §16
+  - [x] 0025 retired into plan §5.5 (new: the storage crates, `fst` narrowed by IDX-08 and IDX-10) and §16.3 (`redb`, `rkyv`, `cacache`)
+  - [x] 0028 retired into plan §1.3 and the BENCH-03 card (new: the pinned stock jdtls and its launcher) and EVAL-06
+  - [x] 0029 retired into ver §11 (new: the stream-json fallback, `plugin eval`'s limits, owner-side only, the committed control set) and plan §9.2
+  - [x] `just adr-index` accepts a well-formed `Retired` status and refuses a malformed one or a row that differs (`land_scripts.rs`: `should_pass_the_adr_index_check_when_a_record_is_retired_into_a_named_document`, `should_fail_the_adr_index_check_when_a_retired_status_is_malformed_or_its_row_differs`)
+  - [x] `doc/adr/README.md` and fnd §10.3 say what `Retired` means; the "an ADR only for an important decision" rule kept
+  - [x] IDX-10's speed sign-off recorded on its card and in `doc/bench/README.md`; the tree cache stays a named item
+- **Decided:** 2026-11-24 (owner).
+- **Impact:** none (docs, the ADR index check).
+
 #### FND-10: Toolchain 1.99.1
 - **Depends on:** FND-08. **Model:** standard. **Size:** S. **Parallel with:** XT-01.
 - **Cites:** fnd §3.6, §4.1, §7.2, §8; ADR 0023 (amended 2026-11-17), ADR 0035.
@@ -842,6 +868,15 @@ dispatch jobs or `(owner)` items.
   against the incremental rows of plan §1.7 (*proposed*).
 - **Reuse considered:** kmp-lsp as shipped; jdtls's own sharing options (`sharedIndexLocation`,
   the syntax server).
+- **The jdtls arm, as it stands** (ADR 0028 recorded the proxy and its removal; the owner retired
+  it into plan §1.3 and this card on 2026-11-24): stock jdtls is a comparison arm and the
+  kill-criterion baseline only, never part of anything jfastlsp ships, and nothing of ours sits
+  between the client and it. The pinned release is 1.61.0, the newest that runs on Java 21,
+  fetched and checksum-verified by `scripts/jdtls-fetch.sh`; `jfl-bench`'s own launcher
+  (`tools/jfl-bench/src/jdtls.rs`) starts it with a fresh `-data` and configuration per run, a
+  heap cap, argv only, a cleared environment and a deadline. jdtls is EPL-2.0, so it only ever
+  runs as a separate process, never linked or bundled. E4 measures it alone (EVAL-06); E0's
+  jdtls arm is the stock `jdtls-lsp` plugin (EVAL-03).
 - **Accept:**
   - [x] the baseline report committed; an arm that cannot run is recorded with the reason, never dropped
   - [x] the incremental suite runs on medium and lombok, each row marked "proxy" or "full", with the pinned commit pairs (branch switch, rebase) and the widely used types chosen named in `doc/bench/baseline.md`; its proxy numbers go into DEC-02's inputs
@@ -2196,9 +2231,10 @@ but follow in lane CLI (M2). Starts after the go decision.
   sites and 232 of the corpus's 922 are `exact`, none wrong. Mutation checks, each made by hand
   and reverted: listed in the slice's commit. On medium, 34 of the 200 sampled reference sites are
   `exact` (small 37), 89 possible only, 33 outside, 44 unresolved (`just bench-queries`).
-- **Proposed (IDX-10 slice 2): the facts are read at query time, (a), not kept in the summary,
-  (b). Pending owner sign-off (ADR 0031: a definition is slower than slice 1's by more than
-  10 %).** Medians of three runs, 2026-11-23, the 4 vCPU VM: a definition takes 1.0 ms p50 and
+- **IDX-10 slice 2: the facts are read at query time, (a), not kept in the summary, (b).
+  Accepted (owner, 2026-11-24), as the speed sign-off ADR 0031 requires for a regression over
+  10 %: a definition at about 1.1 ms p50 and 8.0 ms p95 on medium, against slice 1's 0.21 and
+  2.3 ms without the exact proof (BOOT-05).** Medians of three runs, 2026-11-23, the 4 vCPU VM: a definition takes 1.0 ms p50 and
   7.5 ms p95 alone on medium, 1.35 and 8.1 ms with its request, hover 0.94 and 8.1 ms (small 0.83
   and 6.5 / 1.18 and 6.9 / 0.75 and 6.8 ms), against slice 1's 0.21 and 2.3 ms alone and 0.55 and
   2.7 ms with its request; the slice's first version took 3.1 and 15.4 ms before the walk was made

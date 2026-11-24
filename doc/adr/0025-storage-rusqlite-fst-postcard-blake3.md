@@ -4,8 +4,7 @@ Date: 2026-11-16
 
 ## Status
 
-Accepted (owner, 2026-11-17). The storage
-*tier* stays DEC-03's decision (plan §5.5); this record chooses the crates every tier uses.
+Retired 2026-11-24 (owner): detail lives in plan §5.5 and §16
 
 ## Context
 

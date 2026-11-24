@@ -4,7 +4,7 @@ Date: 2026-11-16
 
 ## Status
 
-Accepted (owner, 2026-11-17); amended 2026-11-16 (twice) and 2026-11-17 (owner).
+Retired 2026-11-24 (owner): detail lives in fnd §11.6 and sdlc §5
 
 ## Context
 

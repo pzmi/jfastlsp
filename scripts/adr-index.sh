@@ -11,11 +11,14 @@
 #
 # `check` fails on: a file without a row or a row without a file, two rows (or files) with one
 # number, a row out of order, a link that is not the file's name, a title that is not the file's
-# `# NNNN. Title`, a status keyword (Proposed, Accepted, Rejected, Superseded) that differs from
-# the file's `## Status`, an `(owner, DATE)` that differs, an Accepted or Rejected record with no
-# `(owner, DATE)` (only the owner decides), and a Superseded one whose file or row lacks
-# `by NNNN` or whose successor has no file. A gap in the numbers is fine: a lane may hold a reserved number for a
-# while. Plain bash 3.2 and awk, so it runs on macOS as well.
+# `# NNNN. Title`, a status keyword (Proposed, Accepted, Rejected, Superseded, Retired) that
+# differs from the file's `## Status`, an `(owner, DATE)` that differs, an Accepted or Rejected
+# record with no `(owner, DATE)` (only the owner decides), a Superseded one whose file or row lacks
+# `by NNNN` or whose successor has no file, and a Retired one whose file does not read
+# `Retired YYYY-MM-DD (owner): detail lives in <where>` or whose row does not repeat that line
+# exactly (BOOT-05: the owner retires a record whose detail a named document now holds). A gap in
+# the numbers is fine: a lane may hold a reserved number for a while. Plain bash 3.2 and awk, so
+# it runs on macOS as well.
 #
 # Pinned by: tools/jfl-architecture/tests/land_scripts.rs (adr_index cases)
 set -euo pipefail
@@ -61,14 +64,15 @@ awk -F' [|] ' '
   }' "$readme" >>"$records"
 
 awk -F'\t' '
-  function keyword(s) { return (match(s, /^(Proposed|Accepted|Rejected|Superseded)/)) ? substr(s, 1, RLENGTH) : "" }
+  function keyword(s) { return (match(s, /^(Proposed|Accepted|Rejected|Superseded|Retired)/)) ? substr(s, 1, RLENGTH) : "" }
+  function retired(s) { return s ~ /^Retired [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9] \(owner\): detail lives in [^ ]/ }
   function owner(s) { return (match(s, /\(owner, [0-9-]+\)/)) ? substr(s, RSTART, RLENGTH) : "" }
   function successor(s) { return (match(s, /Superseded by \[?[0-9]+/)) ? substr(s, RSTART + RLENGTH - 4, 4) : "" }
   function bad(msg) { print "adr-index: " msg > "/dev/stderr"; failed = 1 }
   $1 == "F" {
     if ($2 in file) bad("two files numbered " $2 ": " file[$2] " and " $3)
     file[$2] = $3; ftitle[$2] = $4; fstatus[$2] = $5
-    if (keyword($5) == "") bad($3 ": the status \"" $5 "\" starts with none of Proposed, Accepted, Rejected, Superseded")
+    if (keyword($5) == "") bad($3 ": the status \"" $5 "\" starts with none of Proposed, Accepted, Rejected, Superseded, Retired")
   }
   $1 == "R" {
     if ($2 in row) bad("two index rows numbered " $2)
@@ -86,6 +90,10 @@ awk -F'\t' '
       if (owner(rstatus[n]) != owner(fstatus[n])) bad("index row " n " owner decision \"" owner(rstatus[n]) "\" differs from the file'\''s \"" owner(fstatus[n]) "\"")
       k = keyword(fstatus[n])
       if ((k == "Accepted" || k == "Rejected") && owner(fstatus[n]) == "") bad(file[n] ": " k " without \"(owner, DATE)\": only the owner decides")
+      if (k == "Retired") {
+        if (!retired(fstatus[n])) bad(file[n] ": Retired without \"YYYY-MM-DD (owner): detail lives in <where>\"")
+        else if (rstatus[n] != fstatus[n]) bad("index row " n " says \"" rstatus[n] "\" but the file says \"" fstatus[n] "\"")
+      }
       if (k == "Superseded") {
         by = successor(fstatus[n])
         if (by == "") bad(file[n] ": Superseded without \"by NNNN\"")

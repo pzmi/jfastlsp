@@ -353,11 +353,20 @@ at the end (ADR 0031, BENCH lane).
    trajectories and transcripts to extract per run: success (the test command after the run),
    tool calls by kind, tokens, edits that broke compilation and whether pushed diagnostics caught
    them, the LSP operation histogram, and the reaction to empty references. A smoke task first
-   proves language servers start under `claude -p`; otherwise a thin `stream-json` runner
-   replaces Harbor. `claude plugin eval` is used only for skill-trigger regressions.
+   proves language servers start under `claude -p`; otherwise a thin
+   `claude -p --output-format stream-json` runner of our own (about 1 to 2 days) replaces Harbor
+   with the same task format. `claude plugin eval` is used only for skill-trigger regressions
+   (did the agent call `jfl refs` before changing a signature), once its LSP behaviour is known:
+   it compares only "with plugin" against "no plugin", in a temporary HOME with a scaffold of at
+   most 120 s and a run of at most 3600 s and 200 turns, and allows no custom-code graders.
+   Harbor and Docker are dev-time only, on the owner's machine, never in the gate; a private
+   target's images are built owner-side and its tasks stay outside this repository (ADR 0004).
+   (ADR 0029 recorded this choice; the owner retired it into this section and plan §9.2 on
+   2026-11-24.)
 2. **Runs** are owner-run (Claude Code sessions cost money and need the target repository): 3
    runs per task per arm, on the target's tasks and on 10 to 20 Multi-SWE-bench Java (Gradle)
-   instances as an external control (EVAL-12). The harness produces an aggregated report; if the
+   instances as an external control (EVAL-12), so E0 is not fitted to one repository; being
+   public, the control set is committed. The harness produces an aggregated report; if the
    target repository is private, only the report enters this repository (plan §9.1).
 3. **Regression use:** a fixed task subset reruns at each milestone gate (LSP-06, IDX-15,
    SEM-07, REL-06); results are stored with the `jfl` version and the Claude Code version.

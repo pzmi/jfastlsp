@@ -4,7 +4,7 @@ Date: 2026-11-16
 
 ## Status
 
-Accepted (owner, 2026-11-17).
+Retired 2026-11-24 (owner): detail lives in ver §11 and plan §9.2
 
 ## Context
 

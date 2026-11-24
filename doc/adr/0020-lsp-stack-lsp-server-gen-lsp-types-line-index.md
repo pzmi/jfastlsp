@@ -4,8 +4,7 @@ Date: 2026-11-16
 
 ## Status
 
-Accepted (owner, 2026-11-17); amended 2026-11-17 (LSP-01: the in-process harness runs on byte
-pipes, not `Connection::memory()`; see the amendment below; accepted by the owner 2026-11-18).
+Retired 2026-11-24 (owner): detail lives in plan §16.2 and §5.3
 
 ## Context
 

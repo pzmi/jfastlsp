@@ -119,8 +119,11 @@ tracked metric that regresses by more than 10 % (plan §1.7, fnd §9).
 - **Direct on `main`** (ADR 0002). No pull-request flow and no branch protection for the plan;
   a pull-request flow may follow only through a new ADR.
 - **One signed-off commit per task**, subject `<ID>: <summary>` (ADR 0003).
-- **Only the orchestrator pushes.** Implementing agents never push, tag or change remote
-  settings. Checkpoint tags (`checkpoint-<ID>`) are annotated, local and never pushed.
+- **Agents never push, by any means.** `scripts/land.sh`, run as a script by the orchestrator,
+  is the only pusher; `.claude/settings.json` denies the common forms of `git push`, a guard
+  against a mistake that does not make another form allowed (fnd §11.6). Implementing agents
+  never push, tag or change remote settings. Checkpoint tags (`checkpoint-<ID>`) are annotated,
+  local and never pushed.
 - **No force-push.** A rejected push is fetched and landed again. History on `main` is never
   rewritten.
 - **Red CI on `main` is fixed immediately, on `main`,** by a new commit carrying the task id
