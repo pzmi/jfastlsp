@@ -50,7 +50,7 @@ A suite is a TOML file (`tools/jfl-bench/suites/`, embedded in the binary; or an
 | `incremental` | syntax-tier **proxies** for an index kept fresh (BENCH-03): one edit, a rebase and a switch between the pinned commit pairs of `doc/bench-corpus.md`, the fan-out of the most-imported types, a warm reopen | `jfl-bench`, `git` | `<case>/proxy/...`: `edit/proxy/{rehash,reparse,decl_diff,total}_ms/{p50,p95}` (over edits of 20 seed-picked files), `{rebase,switch}/proxy/diff_ms`, `t4/reparse_ms`, `t4/total_ms`, `changed_files`, `deleted_files`; `fanout/kNN/proxy/{dependants,importers,mentions,scan_ms,t4/reparse_ms}`; `reopen/proxy/{walk_ms,stat_ms,t4/rehash_ms,t4/cold/rehash_ms}` |
 | `kmp-lsp` | the kmp-lsp arm at its pinned release (`scripts/kmp-lsp-fetch.sh`): `kmp-lsp index` with an empty cache and with its cache, `refs` and `find` for the first 10 of `rg-floor`'s picks | hyperfine 2.0.0 | `index_ms`, `index_rss_peak`, `index_cached_ms`; `refs/p50`, `refs/p95`, `find/p50`, `find/p95` (median over queries), `refs/rss_peak`, `find/rss_peak`; `refs/qNN/matches`, `find/qNN/matches` (result lines of one untimed run; an exit that is neither a result nor kmp-lsp's "nothing found" fails the run) |
 | `jdtls` | the pinned stock jdtls (`scripts/jdtls-fetch.sh`, checksum-verified; started by `src/jdtls.rs` with a fresh `-data` per run, nothing of ours in between) over LSP: `initialize`, time to `ServiceReady`, then `definition`, `references`, `hover`, `workspace/symbol` at usage sites of seed-picked types; only `fixture` in the sandbox | `jfl-bench` (an LSP client) | `initialize_ms`, `ready_ms` (one session); per operation `p50`, `p95` (over all requests), `found`; `backend_rss_peak`, `backend_rss` (the JVM, found as the `timeout`'s child in `/proc`, bounded by the configured heap: `-Xms` is the cap up to 1 GiB), `backend_heap_used`, `backend_heap_committed` (`jcmd GC.heap_info`) |
-| `jfl-lsp` | the built `jfl lsp` (LSP-02; `just bench jfl-lsp SIZE` builds it, release) over LSP from a fresh state directory: a cold session (`initialize`, then the first `textDocument/definition` at a usage site, which starts the daemon and opens the view), definition round trips at the usage sites of seed-picked types, and a warm session against the same daemon | `jfl-bench` (an LSP client) | `initialize_ms`, `first_definition_ms` (both from the process's start), `initialize_warm_ms`, `first_definition_warm_ms`; `definition/p50`, `definition/p95` (over all timed requests), `definition/found` |
+| `jfl-lsp` | the built `jfl lsp` (LSP-02; `just bench jfl-lsp SIZE` builds it, release) over LSP from a fresh state directory: a cold session (`initialize`, then the first `textDocument/definition` at a usage site, which starts the daemon and opens the view), definition round trips at the usage sites of seed-picked types, a warm session against the same daemon, and pushed diagnostics in the cold session (LSP-04: a breaking `didChange` to its `publishDiagnostics`, over `diagnostics` files spread over the corpus and its largest) | `jfl-bench` (an LSP client) | `initialize_ms`, `first_definition_ms` (both from the process's start), `initialize_warm_ms`, `first_definition_warm_ms`; `definition/p50`, `definition/p95` (over all timed requests), `definition/found`; `diagnostics/p50`, `diagnostics/p95`, `diagnostics/largest_ms` |
 | `e1` | the E1 pipeline in process, stage by stage (`jfl-bench parse`, one process per measurement) | `jfl-bench` | per thread count `tN` and stage `read`, `hash`, `parse`, `extract` (cumulative): `work_ms`, `total_ms`; for the full index also `list_ms`, `files_per_s`, `mb_per_s`, `file_p50_ms`, `file_p95_ms`, `file_max_ms`, `rss_peak_mib`, `rss_steady_mib`, and the counts `files`, `err_files`, `failed_files`, `decls`; `cold/<stage>/work_ms` and `total_ms` |
 
 **Queries are picked from the corpus by seed**, not by hand, and **series are keyed by slot**
@@ -565,9 +565,9 @@ per file, on one thread: opens it in `jfl-application`'s diagnostics coordinator
 first compile, then times an edit that breaks it (an unclosed class appended) from the
 coordinator's `did_change` to the publication it decides: the job's start, the syntax pass
 (`jfl-adapter-java`'s parse, summary and diagnostics) and the reply's delivery. The same cycle
-without the parse is the coordinator's own share. **In process, no transport:** the publication
-path through the daemon and `jfl lsp` is LSP-04's next slice, so this is the compute part of
-didChange to `publishDiagnostics`, not what a client waits.
+without the parse is the coordinator's own share. **In process, no transport:** the compute part
+of didChange to `publishDiagnostics`; what a client waits, through `jfl lsp` and the daemon, is
+the next section.
 
 Measured 2026-11-24 (LSP-04) on the 4 vCPU Xeon VM (Intel Xeon @ 2.10GHz, 15 GB), another lane
 building beside it (load average about 2); one run each:
@@ -586,6 +586,35 @@ building beside it (load average about 2); one run each:
   loaded VM, not reproduced on medium (max 0.58 ms).
 - A large file costs its parse: 61 ms for medium's largest, about 12 ms for small's
   (`Assertions.java`, 0.14 MB). The edit re-parses the whole file (no incremental parse yet).
+
+### Pushed diagnostics through `jfl lsp` (LSP-04, `just bench jfl-lsp`)
+
+The `jfl-lsp` suite's cold session declares `textDocument.publishDiagnostics`, and after its
+definitions takes `diagnostics` (200) files spread evenly over the corpus's sorted `.java` list,
+then its largest: each is opened (its first publication awaited), then a `didChange` that appends
+an unclosed class is timed from its write to the publication of version 2 (the proxy's link, the
+daemon's coordinator, the syntax pass on its blocking pool, the publication frame and the way
+back), then closed (the empty set awaited). What a client waits after an edit.
+
+Measured 2026-11-24 (LSP-04, second slice) on the 4 vCPU Xeon VM (Intel Xeon @ 2.10GHz, 15 GB),
+another lane building beside it (load average about 3); release build, one run each on the final
+code (a first run, before the disk check at each change became a stat, in brackets):
+
+| | small (junit-framework, 182 files) | medium (spring-framework, 198 files) |
+|:--|--:|--:|
+| didChange to `publishDiagnostics`, p50 | 0.82 ms (0.98) | 1.08 ms (1.00) |
+| didChange to `publishDiagnostics`, p95 | 3.42 ms (4.08) | 5.19 ms (5.79) |
+| the largest file | 15.0 ms (24.5), `Assertions.java`, 0.14 MB | 76.3 ms (95.3), `SpelCompilationCoverageTests.java`, 0.32 MB |
+
+- The parse is the cost, as in process (the previous section): the transport adds about half a
+  millisecond at the median. Plan §1.7 has no row for syntax diagnostics; after a `didChange` they
+  are inside the per-file parse row's maximum (200 ms), the freshness lag's p95 (100 ms) and far
+  inside single-file semantic diagnostics' p95 (3 s, E3). A shell edit is another path, not
+  measured here: the daemon sees it at its next tick (2 s) or the document's next notification, so
+  its lag is up to a tick plus these times.
+- Medium's largest file takes about 15 ms more than its in-process parse (61 ms). Not broken down:
+  the loaded VM, and a background step of the cold session's daemon (a settle or write-back slice
+  runs to its end once started) are candidates.
 
 ## Adding a suite
 

@@ -94,9 +94,6 @@ fn main() -> Result<(), String> {
     );
 
     let mut coordinator: Coordinator<usize> = Coordinator::new(1, []);
-    coordinator
-        .worker_started(jfl_application::diagnostics::Incarnation(1))
-        .map_err(|e| e.to_string())?;
     let mut edits = Vec::with_capacity(files.len());
     let mut own = Vec::with_capacity(files.len());
     let mut published = 0_usize;
@@ -108,6 +105,11 @@ fn main() -> Result<(), String> {
         let _opened = coordinator
             .did_open(doc, 1, Text::new(stamp, text.clone()))
             .map_err(|e| e.to_string())?;
+        if coordinator.needs_worker() {
+            coordinator
+                .worker_started(jfl_application::diagnostics::Incarnation(1))
+                .map_err(|e| e.to_string())?;
+        }
         let _first = cycle(&mut coordinator, &indexer, doc, Some(bytes))?;
 
         let mut broken = bytes.clone();

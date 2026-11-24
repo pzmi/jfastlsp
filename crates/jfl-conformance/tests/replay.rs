@@ -650,6 +650,37 @@ fn should_replay_the_diagnostics_generated_traces_when_its_driver_has_landed() -
 const DIAGNOSTICS_REVERSE: &str =
     "formal/traces/regression/diagnostics-two-quick-edits-reverse-order.itf.json";
 
+const DIAGNOSTICS_CRASH: &str = "formal/traces/regression/diagnostics-crash-mid-compile.itf.json";
+
+#[test]
+fn should_diverge_when_the_coordinator_keeps_a_job_the_worker_lost() -> TestResult {
+    // given
+    let text = fs::read_to_string(root().join(DIAGNOSTICS_CRASH))?;
+    let context = Context {
+        model: "diagnostics",
+        seed: "0x3",
+        trace: DIAGNOSTICS_CRASH,
+    };
+
+    // when
+    let faulty = replay::replay(
+        diagnostics::crash_untold(),
+        &context,
+        trace::parse(DIAGNOSTICS_CRASH, &text)?,
+    );
+
+    // then: the worker is observed with an incarnation the model never has, at the crash
+    let Err(Failure::Diverged(divergence)) = faulty else {
+        return Err(format!("a coordinator that kept lost jobs conformed: {faulty:?}").into());
+    };
+    assert_eq!(divergence.action.as_str(), "crash", "{divergence}");
+    assert!(
+        divergence.diff().contains("+        inc: -1,"),
+        "{divergence}"
+    );
+    Ok(())
+}
+
 #[test]
 fn should_diverge_at_the_stale_reply_when_the_diagnostics_control_publishes_every_reply()
 -> TestResult {

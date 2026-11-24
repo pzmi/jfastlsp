@@ -10,6 +10,11 @@
 //! - `{"send_raw": "…"}`: the string's UTF-8 bytes, written as they are (a malformed header).
 //! - `{"send_oversized": N}`: a header declaring `N` bytes, then `N` bytes of spaces.
 //! - `{"expect": {…}}`: a message the server must send.
+//! - `{"await": {…}}`: a message the server must send, and before which the client sends nothing
+//!   more: the run writes the input so far, waits until the server sent it (normalised as below,
+//!   after the message an earlier `await` matched), then goes on. For what the server sends
+//!   unasked and at a time of its own (pushed diagnostics, LSP-04): a client that sent its next
+//!   change at once could see the first publication or not, and the transcript would hold a race.
 //! - `{"exit": N}`: the server's exit code once its input ended; when no line says, the code is not
 //!   checked (LSP-02 states it in its lifecycle transcripts: 0 after `shutdown`, 1 without).
 //!
@@ -18,7 +23,8 @@
 //! frame's length is the substituted one.
 //!
 //! **Running.** Every client line goes into a file that becomes the server's standard input, so
-//! the input ends after the last one; standard output and standard error go to files. The server
+//! the input ends after the last one (with an `await`, a pipe written as the run goes, closed after
+//! the last line); standard output and standard error go to files. The server
 //! must exit within the deadline (it is killed otherwise and the run fails), and its output is then
 //! read whole. Files rather than pipes, so no thread is needed and a server that writes more than a
 //! pipe holds cannot deadlock the run. The scratch directory is the caller's
@@ -71,6 +77,8 @@ pub struct Transcript {
     pub expected: Vec<Value>,
     /// The exit code the server must end with, when the transcript says.
     pub exit: Option<i32>,
+    /// Each `await`: how many bytes of `input` come before it, and the message waited for.
+    pub awaits: Vec<(usize, Value)>,
 }
 
 /// A transcript that cannot be read, or a run that did not match.
@@ -93,6 +101,7 @@ fn fail(message: impl Into<String>) -> Failure {
 pub fn parse(name: &str, text: &str) -> Result<Transcript, Failure> {
     let mut input = Vec::new();
     let mut expected = Vec::new();
+    let mut awaits = Vec::new();
     let mut exit = None;
     for (number, line) in text.lines().enumerate() {
         let at = || format!("{name}:{}", number.saturating_add(1));
@@ -129,6 +138,10 @@ pub fn parse(name: &str, text: &str) -> Result<Transcript, Failure> {
                 input.resize(input.len().saturating_add(len), b' ');
             }
             ("expect", message @ Value::Object(_)) => expected.push(message.clone()),
+            ("await", message @ Value::Object(_)) => {
+                expected.push(message.clone());
+                awaits.push((input.len(), message.clone()));
+            }
             ("exit", Value::Number(n)) if exit.is_none() => {
                 let code = n
                     .as_i64()
@@ -144,6 +157,7 @@ pub fn parse(name: &str, text: &str) -> Result<Transcript, Failure> {
         input,
         expected,
         exit,
+        awaits,
     })
 }
 
@@ -222,11 +236,16 @@ pub fn run_with_env(
     fs::create_dir_all(&dir).map_err(|e| io("creating the scratch directory", e))?;
     let (stdin, stdout, stderr) = (dir.join("stdin"), dir.join("stdout"), dir.join("stderr"));
     fs::write(&stdin, &transcript.input).map_err(|e| io("writing the input", e))?;
+    let input = if transcript.awaits.is_empty() {
+        Stdio::from(File::open(&stdin).map_err(|e| io("stdin", e))?)
+    } else {
+        Stdio::piped()
+    };
     let mut child = Command::new(program)
         .args(args)
         .env_clear()
         .envs(env.iter().copied())
-        .stdin(Stdio::from(File::open(&stdin).map_err(|e| io("stdin", e))?))
+        .stdin(input)
         .stdout(Stdio::from(
             File::create(&stdout).map_err(|e| io("stdout", e))?,
         ))
@@ -235,6 +254,15 @@ pub fn run_with_env(
         ))
         .spawn()
         .map_err(|e| io("starting the server", e))?;
+    if let Some(pipe) = child.stdin.take() {
+        let fed = feed(pipe, transcript, &stdout, deadline);
+        if let Err(failure) = fed {
+            let _ = child.kill();
+            let _ = child.wait();
+            let err = fs::read_to_string(&stderr).unwrap_or_default();
+            return Err(fail(format!("{failure}; stderr:\n{err}")));
+        }
+    }
     let mut status = None;
     let waited = wait_until(
         deadline,
@@ -268,6 +296,43 @@ pub fn run_with_env(
         ))),
         (None, _) => Ok(()),
     }
+}
+
+/// Writes `transcript`'s input to the server's `pipe` up to each `await`, waiting each time until
+/// the server's output (the file `output`) holds the awaited message after the one the previous
+/// `await` matched; then the rest, and closes the pipe.
+fn feed(
+    mut pipe: ChildStdin,
+    transcript: &Transcript,
+    output: &Path,
+    deadline: Duration,
+) -> Result<(), Failure> {
+    let name = &transcript.name;
+    let mut written = 0;
+    let mut after = 0;
+    for (at, want) in &transcript.awaits {
+        let chunk = transcript.input.get(written..*at).unwrap_or_default();
+        pipe.write_all(chunk)
+            .map_err(|e| fail(format!("{name}: writing to the server: {e}")))?;
+        written = *at;
+        let mut found = None;
+        let reason = format!("{name}: the server to send {want}");
+        wait_until(deadline, &reason, || {
+            let bytes = fs::read(output).unwrap_or_default();
+            found = complete_frames(&bytes)
+                .iter()
+                .enumerate()
+                .skip(after)
+                .find(|(_, got)| matches(want, got))
+                .map(|(i, _)| i);
+            found.is_some()
+        })
+        .map_err(|e| fail(e.to_string()))?;
+        after = found.map_or(after, |i| i.saturating_add(1));
+    }
+    let rest = transcript.input.get(written..).unwrap_or_default();
+    pipe.write_all(rest)
+        .map_err(|e| fail(format!("{name}: writing to the server: {e}")))
 }
 
 /// A server driven step by step: its input a pipe the test writes as it goes, its output a file
@@ -522,6 +587,23 @@ mod tests {
         );
         assert_eq!(transcript.expected, [json!({"id": 1, "result": null})]);
         assert_eq!(transcript.exit, Some(1));
+    }
+
+    #[test]
+    fn should_expect_an_awaited_message_and_mark_where_the_input_pauses_when_parsed() {
+        // given
+        let text = r#"{"send": {"id": 1}}
+{"await": {"method": "pushed"}}
+{"send": {"id": 2}}
+"#;
+
+        // when
+        let transcript = parse("t", text).unwrap();
+
+        // then: the input pauses after the first frame (29 bytes), and the message is expected
+        assert_eq!(transcript.awaits, [(29, json!({"method": "pushed"}))]);
+        assert_eq!(transcript.expected, [json!({"method": "pushed"})]);
+        assert_eq!(transcript.input.len(), 58);
     }
 
     #[test]

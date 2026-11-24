@@ -14,6 +14,8 @@
 //!   classified as `lsp_server::Message`s; results written by the caller on the typed path.
 //! - [`client`]: the proxy's connection (std only, so a CLI call starts fast), every wait under a
 //!   deadline the caller computes.
+//! - [`bell`]: an anonymous socket pair that wakes a thread waiting on a connection and on its
+//!   own work queue at once (`jfl lsp`'s link, for pushed diagnostics).
 //! - [`notify`]: sccache's readiness handshake: the proxy binds a datagram socket in the state
 //!   directory and the spawned daemon reports `ready` or why it failed.
 //!
@@ -23,6 +25,7 @@
 //! `tests/endpoint.rs::should_open_every_descriptor_close_on_exec_when_the_daemon_side_is_up`.
 //! The notify socket is a path, not an inherited descriptor, so there is no exception.
 
+pub mod bell;
 pub mod client;
 pub mod lock;
 pub mod message;
@@ -32,6 +35,7 @@ pub mod socket;
 pub mod state;
 mod wait;
 
+pub use bell::{Bell, Ringer, Woken};
 pub use client::{ClientConn, ConnectError, Received, RecvError};
 pub use lock::{FileId, Flock, LockError};
 pub use message::{Call, End, Incoming, Malformed, Note};

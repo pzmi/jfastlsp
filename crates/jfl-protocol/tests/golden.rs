@@ -18,10 +18,11 @@ use jfl_protocol::messages::{
     self, CallDirection, CallsParams, Cancel, CancelParams, ClientInfo, ClientKind, ContentChange,
     DaemonStatus, DiagnosticSource, Diagnostics, DiagnosticsParams, DiagnosticsResult, DidChange,
     DidChangeParams, DidClose, DidCloseParams, DidOpen, DidOpenParams, Handshake, HandshakeParams,
-    HandshakeResult, Hover, HoverResult, NOTIFICATION_METHODS, PositionParams, REQUEST_METHODS,
-    ReferenceSummary, References, ReferencesParams, ServerInfo, Severity, Status, StatusParams,
-    StatusResult, Stop, StopParams, StopResult, SymbolFilter, SymbolKind, Symbols, SymbolsParams,
-    SymbolsResult, Sync, SyncParams, SyncResult, ViewStatus, WireDiagnostic, WireSymbol,
+    HandshakeResult, Hover, HoverResult, NOTIFICATION_METHODS, PositionParams, PublishDiagnostics,
+    PublishDiagnosticsParams, REQUEST_METHODS, ReferenceSummary, References, ReferencesParams,
+    ServerInfo, Severity, Status, StatusParams, StatusResult, Stop, StopParams, StopResult,
+    SymbolFilter, SymbolKind, Symbols, SymbolsParams, SymbolsResult, Sync, SyncParams, SyncResult,
+    ViewStatus, WatchDiagnostics, WatchDiagnosticsParams, WireDiagnostic, WireSymbol,
 };
 use jfl_protocol::{
     ClaimedCompleteness, DocumentUri, ErrorCode, ErrorObject, Method, Notify, Outcome,
@@ -83,6 +84,9 @@ mod support {
         golden!("jfl.didChange.notification"),
         golden!("jfl.didClose.notification"),
         golden!("cancelRequest.notification"),
+        golden!("jfl.watchDiagnostics.notification"),
+        golden!("jfl.publishDiagnostics.notification"),
+        golden!("jfl.publishDiagnostics.notification.disk"),
         golden!("error.version-mismatch"),
         golden!("error.method-not-found"),
         golden!("error.no-symbol"),
@@ -654,6 +658,54 @@ fn should_match_the_golden_when_document_sync_and_cancellation_are_encoded() {
             "cancelRequest.notification",
             CancelParams {
                 id: RequestId::Number(5),
+            },
+        ),
+    ];
+
+    // then
+    assert_goldens(&cases);
+}
+
+#[test]
+fn should_match_the_golden_when_pushed_diagnostics_are_encoded() {
+    // given
+    let diagnostic = |r: Range, code: &str, message: &str| WireDiagnostic {
+        range: WireRange(r),
+        severity: Severity::Error,
+        source: DiagnosticSource::Syntax,
+        code: Some(code.into()),
+        message: message.into(),
+    };
+
+    // when
+    let cases = [
+        notification_case::<WatchDiagnostics>(
+            "jfl.watchDiagnostics.notification",
+            WatchDiagnosticsParams {
+                position_encoding: PositionEncoding::Utf16,
+            },
+        ),
+        notification_case::<PublishDiagnostics>(
+            "jfl.publishDiagnostics.notification",
+            PublishDiagnosticsParams {
+                uri: uri(BILL),
+                version: Some(3),
+                seq: 5,
+                position_encoding: PositionEncoding::Utf16,
+                diagnostics: vec![
+                    diagnostic(range(4, 28, 4, 28), "missing", "';' expected"),
+                    diagnostic(range(8, 16, 8, 17), "unexpected", "unexpected text"),
+                ],
+            },
+        ),
+        notification_case::<PublishDiagnostics>(
+            "jfl.publishDiagnostics.notification.disk",
+            PublishDiagnosticsParams {
+                uri: uri(BILL),
+                version: None,
+                seq: 9,
+                position_encoding: PositionEncoding::Utf8,
+                diagnostics: Vec::new(),
             },
         ),
     ];

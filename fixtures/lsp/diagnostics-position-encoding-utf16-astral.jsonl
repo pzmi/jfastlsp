@@ -1,0 +1,10 @@
+{"comment": "Diagnostic ranges count in the negotiated encoding, on the text the daemon compiled (LSP-04): two emoji (each a surrogate pair, two UTF-16 code units, four UTF-8 bytes) before the missing semicolon put it at UTF-16 column 21 of line 3; the client did not offer utf-8, so utf-16 is negotiated."}
+{"send": {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"capabilities": {"textDocument": {"publishDiagnostics": {"versionSupport": true}}}}}}
+{"send": {"jsonrpc": "2.0", "method": "initialized", "params": {}}}
+{"expect": {"jsonrpc": "2.0", "id": 1, "result": {"capabilities": {"positionEncoding": "utf-16", "textDocumentSync": {"openClose": true, "change": 2}, "definitionProvider": true}, "serverInfo": {"name": "jfl", "version": "<any>"}}}}
+{"send": {"jsonrpc": "2.0", "method": "textDocument/didOpen", "params": {"textDocument": {"uri": "file://{{root}}/src/demo/Astral.java", "languageId": "java", "version": 1, "text": "package demo;\n\n/** 😀 */ class Astral {\n    String s = \"😀😀\"\n}\n"}}}}
+{"await": {"jsonrpc": "2.0", "method": "textDocument/publishDiagnostics", "params": {"uri": "file://{{root}}/src/demo/Astral.java", "diagnostics": [{"range": {"start": {"line": 3, "character": 21}, "end": {"line": 3, "character": 21}}, "severity": 1, "code": "missing", "source": "jfl syntax", "message": "';' expected"}], "version": 1}}}
+{"send": {"jsonrpc": "2.0", "id": 2, "method": "shutdown"}}
+{"send": {"jsonrpc": "2.0", "method": "exit"}}
+{"expect": {"jsonrpc": "2.0", "id": 2, "result": null}}
+{"exit": 0}

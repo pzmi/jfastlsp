@@ -12,7 +12,7 @@ use std::thread::{self, JoinHandle};
 
 use jfl_adapter_lsp::memory::{PipeReader, PipeWriter, pipe};
 use jfl_adapter_lsp::transport::End;
-use jfl_adapter_lsp::{Config, Dispatch, Ended, Handler, Job, Reply, serve};
+use jfl_adapter_lsp::{Config, Dispatch, Ended, Handler, Job, Notifier, Reply, serve};
 use jfl_protocol::frame::{FrameDecoder, FrameError};
 use jfl_protocol::rpc::ErrorCode;
 use lsp_server::{Notification, Request, RequestId};
@@ -40,9 +40,14 @@ mod support {
         pub(crate) started: SyncSender<RequestId>,
         pub(crate) broken_snapshot: bool,
         pub(crate) exited: bool,
+        pub(crate) attached: SyncSender<Notifier>,
     }
 
     impl Handler for Probe {
+        fn attach(&mut self, notifier: Notifier) {
+            let _ = self.attached.send(notifier);
+        }
+
         fn cancelled(&mut self, id: &RequestId) {
             self.log.push(format!("cancelled {id}"));
         }
@@ -102,6 +107,7 @@ mod support {
         pub(crate) gate: SyncSender<()>,
         pub(crate) started: Receiver<RequestId>,
         pub(crate) server: JoinHandle<Ended>,
+        pub(crate) notifier: Receiver<Notifier>,
     }
 
     pub(crate) fn config(max_frame_len: usize) -> Config {
@@ -118,7 +124,9 @@ mod support {
             let (server_out, from_server) = pipe();
             let (gate, gate_rx) = sync_channel(16);
             let (started_tx, started) = sync_channel(16);
+            let (attached, notifier) = sync_channel(1);
             let probe = Probe {
+                attached,
                 log: Vec::new(),
                 counter: 0,
                 gate: Arc::new(Mutex::new(gate_rx)),
@@ -135,6 +143,7 @@ mod support {
                 gate,
                 started,
                 server,
+                notifier,
             }
         }
 
@@ -255,6 +264,32 @@ fn should_end_the_session_and_answer_what_is_in_flight_when_the_handler_ends_it(
     assert_eq!(ended.input, End::Exit);
     assert_eq!(ended.output, None);
     drop(session.to_server);
+}
+
+#[test]
+fn should_write_the_handlers_notifications_and_refuse_them_when_the_session_has_ended() {
+    // given
+    let mut session = Session::start(Config::default());
+    let notifier = session.notifier.recv().unwrap();
+    let from_another_thread = notifier.clone();
+
+    // when
+    let sent = thread::spawn(move || from_another_thread.notify("x/pushed", &json!({"n": 1})))
+        .join()
+        .unwrap();
+    let pushed = session.recv();
+    let (ended, tail) = session.finish();
+    let after = notifier.notify("x/pushed", &json!({"n": 2}));
+
+    // then: the session ended though the notifier outlived it
+    assert!(sent);
+    assert_eq!(
+        pushed,
+        json!({"jsonrpc": "2.0", "method": "x/pushed", "params": {"n": 1}})
+    );
+    assert_eq!(ended.input, End::Eof);
+    assert!(tail.is_empty(), "{tail:?}");
+    assert!(!after, "a notification after the session ended is refused");
 }
 
 #[test]

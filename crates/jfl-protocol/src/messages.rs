@@ -17,6 +17,14 @@
 //! | `jfl/didChange` | notification | [`DidChangeParams`] | — |
 //! | `jfl/didClose` | notification | [`DidCloseParams`] | — |
 //! | `$/cancelRequest` | notification | [`CancelParams`] | — |
+//! | `jfl/watchDiagnostics` | notification | [`WatchDiagnosticsParams`] | — |
+//! | `jfl/publishDiagnostics` | notification, daemon to proxy | [`PublishDiagnosticsParams`] | — |
+//!
+//! **Pushed diagnostics** (LSP-04, plan §3.2) are the one message the daemon sends unasked, and
+//! only to a connection that asked for them with `jfl/watchDiagnostics`: a proxy of an older minor
+//! never asks, so it never reads a frame it does not expect, and a daemon of an older minor
+//! ignores the unknown notification (no diagnostics, nothing misread). Each connection asks again
+//! after its handshake: a watch dies with its connection, like its overlays.
 //!
 //! The handshake opens every connection (plan §5.3, §6.6): the proxy sends its
 //! [`PROTOCOL_VERSION`](crate::PROTOCOL_VERSION) and kind, and a daemon of another major answers
@@ -184,6 +192,16 @@ notification!(
     /// `$/cancelRequest`: answer `id` with [`ErrorCode::RequestCancelled`] unless already done.
     Cancel, "$/cancelRequest", CancelParams
 );
+notification!(
+    /// `jfl/watchDiagnostics`: push the diagnostics of this connection's open documents to it
+    /// (`jfl/publishDiagnostics`), their ranges in the params' encoding.
+    WatchDiagnostics, "jfl/watchDiagnostics", WatchDiagnosticsParams
+);
+notification!(
+    /// `jfl/publishDiagnostics`, from the daemon: a document's diagnostics, replacing the ones
+    /// published before (LSP's `textDocument/publishDiagnostics`).
+    PublishDiagnostics, "jfl/publishDiagnostics", PublishDiagnosticsParams
+);
 
 /// Every request method name, in catalogue order.
 pub const REQUEST_METHODS: [&str; 11] = [
@@ -201,8 +219,14 @@ pub const REQUEST_METHODS: [&str; 11] = [
 ];
 
 /// Every notification method name, in catalogue order.
-pub const NOTIFICATION_METHODS: [&str; 4] =
-    [DidOpen::NAME, DidChange::NAME, DidClose::NAME, Cancel::NAME];
+pub const NOTIFICATION_METHODS: [&str; 6] = [
+    DidOpen::NAME,
+    DidChange::NAME,
+    DidClose::NAME,
+    Cancel::NAME,
+    WatchDiagnostics::NAME,
+    PublishDiagnostics::NAME,
+];
 
 /// Who opened the connection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -699,6 +723,37 @@ pub struct CancelParams {
     pub id: RequestId,
 }
 
+/// `jfl/watchDiagnostics` params.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WatchDiagnosticsParams {
+    /// The encoding of the ranges the daemon publishes to this connection: the one the client
+    /// negotiated, since only the daemon holds the text a range counts in (the disk's, when the
+    /// disk has overtaken the overlay).
+    #[serde(with = "encoding")]
+    pub position_encoding: PositionEncoding,
+}
+
+/// `jfl/publishDiagnostics` params: one document's whole set of one input epoch (plan §3.2).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PublishDiagnosticsParams {
+    /// The document, as the connection sent it in `jfl/didOpen`.
+    pub uri: DocumentUri,
+    /// The client's version whose text the diagnostics were computed from; `null` for the disk's
+    /// content, newer than the overlay, and for the empty set a close publishes (plan §3.2).
+    pub version: Option<i32>,
+    /// How many document notifications of this connection (`jfl/didOpen`, `jfl/didChange`,
+    /// `jfl/didClose`) the daemon had applied when the compile took its inputs (for a close's
+    /// empty set: when it applied the close). A proxy that has since sent a newer notification of
+    /// the document drops the publication: it was computed before the newer text arrived, and the
+    /// change made a compile of that text pending, whose publication follows.
+    pub seq: u64,
+    /// The encoding of every range: the one `jfl/watchDiagnostics` asked for.
+    #[serde(with = "encoding")]
+    pub position_encoding: PositionEncoding,
+    /// The diagnostics, in source order; empty clears the document's.
+    pub diagnostics: Vec<WireDiagnostic>,
+}
+
 plain_payload!(
     PositionParams,
     ReferencesParams,
@@ -713,6 +768,8 @@ plain_payload!(
     DidChangeParams,
     DidCloseParams,
     CancelParams,
+    WatchDiagnosticsParams,
+    PublishDiagnosticsParams,
 );
 
 impl Payload for HandshakeParams {

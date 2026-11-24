@@ -15,13 +15,14 @@
 use std::collections::HashMap;
 
 use gen_lsp_types::{
-    DidChangeTextDocumentParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams, Location,
-    Position, Range, TextDocumentContentChangeEvent, TextDocumentPositionParams, Uri,
+    Code, Diagnostic, DiagnosticSeverity, DidChangeTextDocumentParams, DidCloseTextDocumentParams,
+    DidOpenTextDocumentParams, Location, Position, PublishDiagnosticsParams, Range,
+    TextDocumentContentChangeEvent, TextDocumentPositionParams, Uri,
 };
 use jfl_domain::{ByteOffset, FileUri, LineIndex, PositionEncoding, PositionError, UriError};
 use jfl_protocol::DocumentUri;
 use jfl_protocol::envelope::{WireEnvelope, WireLocation, WireRange, WireTargetStatus};
-use jfl_protocol::messages::PositionParams;
+use jfl_protocol::messages::{self, DiagnosticSource, PositionParams, Severity, WireDiagnostic};
 use serde_json::Value;
 
 /// The client's spelling of each document it opened (`didOpen`), by the file it names.
@@ -183,6 +184,70 @@ pub fn negotiate(initialize: &Value) -> PositionEncoding {
         .map(|names| names.iter().filter_map(Value::as_str).collect::<Vec<_>>())
         .unwrap_or_default();
     PositionEncoding::negotiate(offered)
+}
+
+/// Whether the client takes pushed diagnostics: its `initialize` declares
+/// `textDocument.publishDiagnostics` (LSP 3.17's `PublishDiagnosticsClientCapabilities`). A client
+/// that declares nothing gets none, so a session that never asked for diagnostics is sent no
+/// notification it did not expect (LSP-04's decision; Claude Code's capabilities are E0's to
+/// confirm, plan §9.2).
+///
+/// Pinned by: `translate::tests::should_want_diagnostics_only_when_the_client_declares_them`.
+#[must_use]
+pub fn wants_diagnostics(initialize: &Value) -> bool {
+    initialize
+        .pointer("/capabilities/textDocument/publishDiagnostics")
+        .is_some_and(Value::is_object)
+}
+
+/// `textDocument/publishDiagnostics`'s params for the daemon's publication: the URI as the
+/// client opened it ([`Echo`]), the version as the daemon tagged it (none for the disk's
+/// content), and each diagnostic with its range as computed (the daemon counts columns in the
+/// negotiated encoding, on the very text it compiled).
+///
+/// Pinned by: `translate::tests::should_carry_the_version_and_ranges_when_diagnostics_are_published`.
+#[must_use]
+pub fn publish_diagnostics(
+    published: &messages::PublishDiagnosticsParams,
+    echo: &Echo<'_>,
+) -> PublishDiagnosticsParams {
+    let diagnostics = published.diagnostics.iter().map(diagnostic).collect();
+    PublishDiagnosticsParams::new(
+        Uri(echo.text(&published.uri).to_owned()),
+        published.version,
+        diagnostics,
+    )
+}
+
+/// `textDocument/publishDiagnostics`'s params that clear `uri`'s diagnostics (a close, plan
+/// §3.2): the URI as the client sent it, no version, no diagnostic.
+///
+/// Pinned by: `translate::tests::should_carry_the_version_and_ranges_when_diagnostics_are_published`.
+#[must_use]
+pub fn cleared(uri: &DocumentUri) -> PublishDiagnosticsParams {
+    PublishDiagnosticsParams::new(Uri(uri.as_str().to_owned()), None, Vec::new())
+}
+
+fn diagnostic(d: &WireDiagnostic) -> Diagnostic {
+    let severity = match d.severity {
+        Severity::Error => DiagnosticSeverity::Error,
+        Severity::Warning => DiagnosticSeverity::Warning,
+        Severity::Information => DiagnosticSeverity::Information,
+        Severity::Hint | Severity::Other => DiagnosticSeverity::Hint,
+    };
+    let source = match d.source {
+        DiagnosticSource::Syntax => "jfl syntax",
+        DiagnosticSource::Javac => "javac",
+        DiagnosticSource::Other => "jfl",
+    };
+    Diagnostic {
+        range: range(d.range),
+        severity: Some(severity),
+        code: d.code.clone().map(Code::String),
+        source: Some(source.to_owned()),
+        message: d.message.clone().into(),
+        ..Diagnostic::default()
+    }
 }
 
 /// What the server can do, as `initialize` answers it: capabilities only for what exists (the
@@ -449,5 +514,85 @@ mod tests {
             Err(PositionError::InsideSurrogatePair { .. })
         ));
         assert!(matches!(past_text, Err(PositionError::LinePastEnd { .. })));
+    }
+    #[test]
+    fn should_want_diagnostics_only_when_the_client_declares_them() {
+        // given
+        let declared = serde_json::json!({"capabilities": {"textDocument": {"publishDiagnostics": {"versionSupport": true}}}});
+        let bare = serde_json::json!({"capabilities": {"textDocument": {}}});
+        let none = serde_json::json!({"capabilities": {}});
+
+        // when
+        let wanted = [declared, bare, none].map(|p| wants_diagnostics(&p));
+
+        // then
+        assert_eq!(wanted, [true, false, false]);
+    }
+
+    #[test]
+    fn should_carry_the_version_and_ranges_when_diagnostics_are_published() {
+        // given
+        let sent = DocumentUri::parse("file:///w/a+b/A.java").unwrap();
+        let mut book = UriBook::default();
+        book.open(&sent);
+        let at = |a, b, c, d| {
+            WireRange(
+                jfl_domain::Range::new(
+                    jfl_domain::Position::new(a, b),
+                    jfl_domain::Position::new(c, d),
+                )
+                .unwrap(),
+            )
+        };
+        let published = messages::PublishDiagnosticsParams {
+            uri: DocumentUri::parse("file:///w/a%2Bb/A.java").unwrap(),
+            version: Some(4),
+            seq: 3,
+            position_encoding: PositionEncoding::Utf16,
+            diagnostics: vec![WireDiagnostic {
+                range: at(2, 3, 2, 3),
+                severity: Severity::Error,
+                source: DiagnosticSource::Syntax,
+                code: Some("missing".to_owned()),
+                message: "';' expected".to_owned(),
+            }],
+        };
+        let disk = messages::PublishDiagnosticsParams {
+            version: None,
+            diagnostics: Vec::new(),
+            ..published.clone()
+        };
+        let echo = Echo {
+            named: None,
+            opened: Some(&book),
+        };
+
+        // when
+        let with = serde_json::to_value(publish_diagnostics(&published, &echo)).unwrap();
+        let without = serde_json::to_value(publish_diagnostics(&disk, &echo)).unwrap();
+
+        // then
+        assert_eq!(
+            with,
+            serde_json::json!({
+                "uri": "file:///w/a+b/A.java",
+                "version": 4,
+                "diagnostics": [{
+                    "range": {"start": {"line": 2, "character": 3}, "end": {"line": 2, "character": 3}},
+                    "severity": 1,
+                    "code": "missing",
+                    "source": "jfl syntax",
+                    "message": "';' expected"
+                }]
+            })
+        );
+        assert_eq!(
+            without,
+            serde_json::json!({"uri": "file:///w/a+b/A.java", "diagnostics": []})
+        );
+        assert_eq!(
+            serde_json::to_value(cleared(&sent)).unwrap(),
+            serde_json::json!({"uri": "file:///w/a+b/A.java", "diagnostics": []})
+        );
     }
 }

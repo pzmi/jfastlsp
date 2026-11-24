@@ -43,6 +43,19 @@
 //!   queued behind others is answered by its deadline too (theirs come no later). Pinned by
 //!   `lsp::tests::should_answer_server_cancelled_without_asking_when_the_deadline_passed_in_the_queue`.
 //!
+//! - **Pushed diagnostics** (LSP-04, plan §2.5, §3.2). A client whose `initialize` declares
+//!   `textDocument.publishDiagnostics` ([`translate::wants_diagnostics`]) gets its open documents'
+//!   syntax diagnostics as `textDocument/publishDiagnostics`, with the version they were computed
+//!   for (none for the disk's content) and ranges in the negotiated encoding, counted by the daemon
+//!   on the very text it compiled. The link asks the daemon for them on every connection
+//!   (`jfl/watchDiagnostics`) and connects, starting the daemon, at the first `didOpen` rather than
+//!   the first request. Between items it waits on the daemon's connection and on its queue at
+//!   once ([`jfl_adapter_ipc::Bell`]: the session rings it with every item it queues), and hands on
+//!   each publication the proxy did not find stale through the session's [`Notifier`]. It clears a
+//!   closed document itself, whether or not the close reached a daemon. Pinned by the transcripts
+//!   `fixtures/lsp/diagnostics-*.jsonl` and
+//!   `tests/pushed_diagnostics.rs::should_publish_the_empty_set_when_a_document_closes_and_no_daemon_can_be_reached`.
+//!
 //! `textDocument/definition` is the one navigation method served here; its LSP result is the
 //! `exact` locations, or a proved owner's overload set, or nothing ([`translate::definition`]).
 //! Hover, references and the others are LSP-03's, and no capability is announced for them.
@@ -53,16 +66,16 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
-use std::sync::mpsc::{Receiver, SyncSender, sync_channel};
+use std::sync::mpsc::{Receiver, SyncSender, TryRecvError, sync_channel};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use jfl_adapter_ipc::{SocketPath, StateDir};
+use jfl_adapter_ipc::{Bell, Ringer, SocketPath, StateDir};
 use jfl_adapter_lsp::document::Document;
 use jfl_adapter_lsp::translate::{self, Echo, UriBook};
 use jfl_adapter_lsp::transport::End;
 use jfl_adapter_lsp::{
-    Config, Dispatch, Ended, Handler, Job, Notification, Reply, Request, RequestId, serve,
+    Config, Dispatch, Ended, Handler, Job, Notification, Notifier, Reply, Request, RequestId, serve,
 };
 use jfl_domain::{FileUri, PositionEncoding};
 use jfl_protocol::messages::{ClientKind, Definition, PositionParams};
@@ -120,6 +133,22 @@ pub trait Daemon {
         params: PositionParams,
         budget: Duration,
     ) -> Result<WireEnvelope, Failure>;
+
+    /// The client takes pushed diagnostics, ranges in `encoding`, sent through `notifier`. None
+    /// by default.
+    fn watch(&mut self, encoding: PositionEncoding, notifier: Notifier) {
+        let _ = (encoding, notifier);
+    }
+
+    /// Hands on the diagnostics the daemon published since the last call, without waiting. None
+    /// by default.
+    fn publish(&mut self) {}
+
+    /// Waits until the session queues an item or the daemon sends something; `false` when this
+    /// daemon cannot wait so (the link then waits on its queue alone). `false` by default.
+    fn idle(&mut self) -> bool {
+        false
+    }
 }
 
 /// What the main loop hands the link, in the order the client sent it.
@@ -130,6 +159,8 @@ pub enum Item {
     Change(DocumentUri, i32, String),
     /// A document closed.
     Close(DocumentUri),
+    /// The client takes pushed diagnostics.
+    Watch(PositionEncoding, Notifier),
     /// A definition: its params, its deadline, its cancel flag, and where the answer goes.
     Definition {
         /// The daemon's params.
@@ -143,36 +174,56 @@ pub enum Item {
     },
 }
 
-/// The link's loop: every item in order, until the session drops its end of the queue.
+/// The link's loop: every item in order, until the session drops its end of the queue; between
+/// items, the daemon's publications handed on ([`Daemon::publish`]), waiting on the queue and the
+/// daemon at once where the daemon can ([`Daemon::idle`]).
 pub fn link<D: Daemon>(items: &Receiver<Item>, daemon: &mut D) {
-    for item in items {
-        match item {
-            Item::Open(uri, version, text) => daemon.open(uri, version, text),
-            Item::Change(uri, version, text) => daemon.change(uri, version, text),
-            Item::Close(uri) => daemon.close(&uri),
-            Item::Definition {
-                params,
-                deadline,
-                cancel,
-                reply,
-            } => {
-                let left = deadline.saturating_duration_since(Instant::now());
-                let answer = if cancel.load(Ordering::Acquire) {
-                    Err(Failure::new(
-                        ErrorCode::RequestCancelled,
-                        "the request was cancelled",
-                    ))
-                } else if left.is_zero() {
-                    Err(Failure::new(
-                        SERVER_CANCELLED,
-                        "the request's deadline passed while it waited for the daemon: ask again",
-                    ))
-                } else {
-                    daemon.definition(params, left)
-                };
-                // A job that is gone was cancelled before it ran: nobody waits.
-                let _ = reply.send(answer);
+    loop {
+        loop {
+            match items.try_recv() {
+                Ok(item) => apply(item, daemon),
+                Err(TryRecvError::Empty) => break,
+                Err(TryRecvError::Disconnected) => return,
             }
+        }
+        daemon.publish();
+        if !daemon.idle() {
+            match items.recv() {
+                Ok(item) => apply(item, daemon),
+                Err(_) => return,
+            }
+        }
+    }
+}
+
+fn apply<D: Daemon>(item: Item, daemon: &mut D) {
+    match item {
+        Item::Open(uri, version, text) => daemon.open(uri, version, text),
+        Item::Change(uri, version, text) => daemon.change(uri, version, text),
+        Item::Close(uri) => daemon.close(&uri),
+        Item::Watch(encoding, notifier) => daemon.watch(encoding, notifier),
+        Item::Definition {
+            params,
+            deadline,
+            cancel,
+            reply,
+        } => {
+            let left = deadline.saturating_duration_since(Instant::now());
+            let answer = if cancel.load(Ordering::Acquire) {
+                Err(Failure::new(
+                    ErrorCode::RequestCancelled,
+                    "the request was cancelled",
+                ))
+            } else if left.is_zero() {
+                Err(Failure::new(
+                    SERVER_CANCELLED,
+                    "the request's deadline passed while it waited for the daemon: ask again",
+                ))
+            } else {
+                daemon.definition(params, left)
+            };
+            // A job that is gone was cancelled before it ran: nobody waits.
+            let _ = reply.send(answer);
         }
     }
 }
@@ -231,6 +282,10 @@ pub struct Session {
     /// The cancel flag and the answer's way back of each request queued for the link, by id
     /// (pruned once the link and the job let theirs go).
     flags: HashMap<RequestId, Waiting>,
+    /// Rung after every item queued, for a link that waits on the daemon too.
+    ringer: Option<Ringer>,
+    /// The session's own notifications, once the adapter hands it over.
+    notifier: Option<Notifier>,
 }
 
 /// A request queued for the link, as the main loop can still reach it.
@@ -261,7 +316,16 @@ impl Session {
             book: Arc::new(UriBook::default()),
             link,
             flags: HashMap::new(),
+            ringer: None,
+            notifier: None,
         }
+    }
+
+    /// The same session ringing `ringer` after every item it queues for the link.
+    #[must_use]
+    pub fn with_ringer(mut self, ringer: Ringer) -> Self {
+        self.ringer = Some(ringer);
+        self
     }
 
     fn phase(&self) -> Phase {
@@ -273,7 +337,11 @@ impl Session {
     }
 
     fn send(&self, item: Item) -> bool {
-        self.link.send(item).is_ok()
+        let sent = self.link.send(item).is_ok();
+        if let Some(ringer) = &self.ringer {
+            ringer.ring();
+        }
+        sent
     }
 
     fn definition(&mut self, id: RequestId, params: serde_json::Value) -> Dispatch<UriBook> {
@@ -395,6 +463,10 @@ impl Session {
 impl Handler for Session {
     type Snapshot = UriBook;
 
+    fn attach(&mut self, notifier: Notifier) {
+        self.notifier = Some(notifier);
+    }
+
     fn snapshot(&self) -> Arc<UriBook> {
         Arc::clone(&self.book)
     }
@@ -405,6 +477,11 @@ impl Handler for Session {
         match (self.phase(), method) {
             (Phase::Starting, "initialize") => {
                 self.encoding = translate::negotiate(&request.params);
+                if translate::wants_diagnostics(&request.params)
+                    && let Some(notifier) = self.notifier.clone()
+                {
+                    self.send(Item::Watch(self.encoding, notifier));
+                }
                 self.set(Phase::Running);
                 Dispatch::Now(Reply::result(&translate::initialize_result(
                     self.encoding,
@@ -473,6 +550,10 @@ pub struct ProxyDaemon {
     name: String,
     proxy: Option<Proxy<ProcessLauncher>>,
     docs: BTreeMap<DocumentUri, (i32, String)>,
+    /// Pushed diagnostics: their encoding and the session's notifier.
+    watch: Option<(PositionEncoding, Notifier)>,
+    bell: Option<Bell>,
+    retry: Backoff,
 }
 
 impl std::fmt::Debug for ProxyDaemon {
@@ -495,6 +576,45 @@ impl ProxyDaemon {
             name: name.to_owned(),
             proxy: None,
             docs: BTreeMap::new(),
+            watch: None,
+            bell: None,
+            retry: Backoff::default(),
+        }
+    }
+
+    /// The same daemon, its link waiting on `bell` and the daemon's connection at once.
+    #[must_use]
+    pub fn with_bell(mut self, bell: Bell) -> Self {
+        self.bell = Some(bell);
+        self
+    }
+
+    /// With diagnostics watched and a document open, connects (starting the daemon) so the
+    /// daemon has the documents and publishes: at the first `didOpen`, and again after the
+    /// daemon went away. A daemon that cannot be reached is tried again at an item after a
+    /// backoff ([`ATTACH_BACKOFF`], doubled at each failure up to [`ATTACH_BACKOFF_MAX`], reset by
+    /// a success), so a daemon that cannot start does not cost every edit a whole wait. The
+    /// backoff is a deadline compared at the next item, never a sleep.
+    ///
+    /// Pinned by: `lsp::tests::should_back_off_doubling_and_reset_when_attaching_fails_then_succeeds`.
+    fn attach(&mut self) {
+        if self.watch.is_none() || self.docs.is_empty() {
+            return;
+        }
+        if self.retry.blocks(Instant::now()) {
+            return;
+        }
+        let Ok(proxy) = self.proxy() else {
+            return;
+        };
+        if proxy.phase() == super::proxy::ProxyPhase::Ready {
+            return;
+        }
+        if proxy.attach(CALL_BUDGET).is_ok() {
+            self.retry.succeeded();
+        } else {
+            proxy.abandon();
+            self.retry.failed(Instant::now());
         }
     }
 
@@ -518,6 +638,9 @@ impl ProxyDaemon {
             };
             let mut proxy =
                 Proxy::new(&self.name, ClientKind::Lsp, state, socket, launcher, budget);
+            if let Some((encoding, _)) = &self.watch {
+                proxy = proxy.with_diagnostics(*encoding);
+            }
             for (uri, (version, text)) in &self.docs {
                 proxy.did_open(uri.clone(), *version, text.clone());
             }
@@ -535,6 +658,7 @@ impl Daemon for ProxyDaemon {
         if let Some(proxy) = &mut self.proxy {
             proxy.did_open(uri, version, text);
         }
+        self.attach();
     }
 
     fn change(&mut self, uri: DocumentUri, version: i32, text: String) {
@@ -548,6 +672,12 @@ impl Daemon for ProxyDaemon {
         self.docs.remove(uri);
         if let Some(proxy) = &mut self.proxy {
             proxy.did_close(uri);
+        }
+        // Whether or not the close reached a daemon (it may be down, or the link between
+        // connections), the client's diagnostics of the document are cleared now (plan §3.2); the
+        // daemon's own empty set is dropped by the proxy, which prunes the document at its close.
+        if let Some((_, notifier)) = &self.watch {
+            let _ = notifier.notify("textDocument/publishDiagnostics", &translate::cleared(uri));
         }
     }
 
@@ -576,7 +706,87 @@ impl Daemon for ProxyDaemon {
             }
         }
     }
+
+    fn watch(&mut self, encoding: PositionEncoding, notifier: Notifier) {
+        self.watch = Some((encoding, notifier));
+        self.attach();
+    }
+
+    fn publish(&mut self) {
+        let Some((encoding, notifier)) = &self.watch else {
+            return;
+        };
+        let Some(proxy) = &mut self.proxy else {
+            return;
+        };
+        proxy.poll();
+        for published in proxy.take_published() {
+            if published.position_encoding != *encoding {
+                continue;
+            }
+            let echo = Echo {
+                named: Some(&published.uri),
+                opened: None,
+            };
+            let params = translate::publish_diagnostics(&published, &echo);
+            // A session that has ended takes nothing more: nobody reads it.
+            let _ = notifier.notify("textDocument/publishDiagnostics", &params);
+        }
+        if proxy.phase() == super::proxy::ProxyPhase::Disconnected {
+            self.attach();
+        }
+    }
+
+    fn idle(&mut self) -> bool {
+        let Some(bell) = &self.bell else {
+            return false;
+        };
+        let fd = self.proxy.as_ref().and_then(Proxy::fd);
+        // A wait that fails cannot be trusted to block: the link waits on its queue instead, and
+        // publications are handed on after the next item.
+        bell.wait(fd, IDLE_WAIT).is_ok()
+    }
 }
+
+/// The first wait after a failed attach before the next is tried.
+pub const ATTACH_BACKOFF: Duration = Duration::from_millis(250);
+
+/// The longest wait between attaches.
+pub const ATTACH_BACKOFF_MAX: Duration = Duration::from_secs(30);
+
+/// When the next attach may be tried: deadlines only, compared when an item comes.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Backoff {
+    until: Option<Instant>,
+    wait: Duration,
+}
+
+impl Backoff {
+    /// Whether an attach at `now` must wait.
+    #[must_use]
+    pub fn blocks(&self, now: Instant) -> bool {
+        self.until.is_some_and(|until| now < until)
+    }
+
+    /// An attach failed at `now`: the next waits twice as long as the last, within the bounds.
+    pub fn failed(&mut self, now: Instant) {
+        self.wait = if self.wait.is_zero() {
+            ATTACH_BACKOFF
+        } else {
+            self.wait.saturating_mul(2).min(ATTACH_BACKOFF_MAX)
+        };
+        self.until = now.checked_add(self.wait);
+    }
+
+    /// An attach succeeded: the next failure starts from the first wait.
+    pub fn succeeded(&mut self) {
+        *self = Self::default();
+    }
+}
+
+/// The longest single wait of an idle link: it wakes earlier for any item or frame; a wait that
+/// ends with neither is only a look around.
+const IDLE_WAIT: Duration = Duration::from_secs(3600);
 
 /// What `jfl lsp` runs with.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -615,6 +825,9 @@ pub fn run(config: &LspConfig) -> u8 {
         Err(_) => PathBuf::from("jfl"),
     };
     let (items, queue) = sync_channel(LINK_QUEUE);
+    let Ok((ringer, bell)) = jfl_adapter_ipc::bell::bell() else {
+        return 1;
+    };
     let owned = config.clone();
     // Not joined: when the session ends the link stops after its current call; the process
     // exits meanwhile. The proxy is made on the link's thread, which alone uses it.
@@ -622,14 +835,15 @@ pub fn run(config: &LspConfig) -> u8 {
         .name("jfl-lsp-link".to_owned())
         .spawn(move || {
             let name = format!("lsp{}", std::process::id());
-            let mut daemon = ProxyDaemon::new(owned, &program, &name);
+            let mut daemon = ProxyDaemon::new(owned, &program, &name).with_bell(bell);
             link(&queue, &mut daemon);
         });
     if started.is_err() {
         return 1;
     }
     let phase = Arc::new(AtomicU8::new(Phase::Starting as u8));
-    let session = Session::new(items, Arc::clone(&phase), env!("CARGO_PKG_VERSION"));
+    let session =
+        Session::new(items, Arc::clone(&phase), env!("CARGO_PKG_VERSION")).with_ringer(ringer);
     let ended = serve(io::stdin(), io::stdout(), session, &Config::default());
     exit_code(Phase::of(phase.load(Ordering::Acquire)), &ended)
 }
@@ -695,6 +909,35 @@ mod tests {
             input,
             output: None,
         }
+    }
+
+    #[test]
+    fn should_back_off_doubling_and_reset_when_attaching_fails_then_succeeds() {
+        // given
+        let t0 = Instant::now();
+        let mut retry = Backoff::default();
+        let free = !retry.blocks(t0);
+
+        // when
+        let mut waits = Vec::new();
+        for _ in 0..10 {
+            retry.failed(t0);
+            waits.push(retry.wait);
+        }
+        let blocked = retry.blocks(t0);
+        let after = t0.checked_add(ATTACH_BACKOFF_MAX).map(|t| retry.blocks(t));
+        retry.succeeded();
+
+        // then
+        assert!(free);
+        assert_eq!(
+            waits[..3],
+            [ATTACH_BACKOFF, ATTACH_BACKOFF * 2, ATTACH_BACKOFF * 4]
+        );
+        assert_eq!(waits.last(), Some(&ATTACH_BACKOFF_MAX));
+        assert!(blocked);
+        assert_eq!(after, Some(false));
+        assert!(!retry.blocks(t0));
     }
 
     #[test]

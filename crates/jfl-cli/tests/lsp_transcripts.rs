@@ -58,6 +58,10 @@ fn should_pass_every_transcript_when_run_against_jfl_lsp() {
         "oversized-frame",
         "unknown-request",
         "unknown-notification",
+        "diagnostics-broken-syntax-errors",
+        "diagnostics-broken-string-template",
+        "diagnostics-position-encoding-utf16-astral",
+        "diagnostics-position-encoding-utf8",
     ] {
         assert!(
             names.contains(&scenario),

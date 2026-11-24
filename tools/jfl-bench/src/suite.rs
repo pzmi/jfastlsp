@@ -155,6 +155,10 @@ pub struct JflLsp {
     pub sites: usize,
     /// Each session's deadline (`timeout`), seconds.
     pub deadline_secs: u64,
+    /// Files whose pushed diagnostics are timed (LSP-04): a breaking `didChange` to its
+    /// `publishDiagnostics`, plus the corpus's largest file; 0 skips the phase.
+    #[serde(default)]
+    pub diagnostics: usize,
 }
 
 /// One suite.

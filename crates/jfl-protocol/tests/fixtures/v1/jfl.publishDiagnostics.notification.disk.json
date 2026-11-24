@@ -1,0 +1,1 @@
+{"jsonrpc":"2.0","method":"jfl/publishDiagnostics","params":{"uri":"file:///repo/.claude/worktrees/a/src/main/java/com/acme/Billing.java","version":null,"seq":9,"position_encoding":"utf-8","diagnostics":[]}}

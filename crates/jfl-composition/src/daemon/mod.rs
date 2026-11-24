@@ -9,12 +9,14 @@
 //!   notify handshake, the version handshake, re-sent documents and request.
 //! - [`service`]: the request seam; [`views`] serves the views and their queries through it.
 //! - [`lsp`]: `jfl lsp`, the stdio language server over a proxy (LSP-02).
+//! - [`diagnostics`]: pushed syntax diagnostics, a coordinator per watching connection (LSP-04).
 //! - [`ports`]: the blocking pool and the clock the adapters and the view service run on.
 //!
 //! **The state directory** is [`DaemonConfig::state_dir`], `--state-dir` or [`default_state_dir`];
 //! [`run::run`] hands its service factory the checked [`StateDir`] once the lock is held, so the
 //! summary store (and any other cache) opens under `StateDir::path()` only in the owner.
 
+pub mod diagnostics;
 pub mod host;
 pub mod lsp;
 pub mod ports;

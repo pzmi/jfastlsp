@@ -251,9 +251,9 @@ mod tests {
         // given
         let mut coordinator: Coordinator<String> = Coordinator::new(3, []);
         let mut worker = ScriptedWorker::new();
+        let _ = coordinator.did_open("a".to_owned(), 1, Text::new(1, "1"));
         let inc = worker.spawn().expect("spawns");
         coordinator.worker_started(inc).expect("up");
-        let _ = coordinator.did_open("a".to_owned(), 1, Text::new(1, "1"));
         let first = coordinator.start(&"a".to_owned()).expect("starts");
         worker.submit(&first).expect("taken");
         worker.complete(first.id).expect("finishes");

@@ -16,6 +16,12 @@
 //! and the kernel drops the lock (obligation 6). Overlays and requests are keyed by connection
 //! and die with it (obligation 7): on its EOF's reap, on stop and on a crash; nothing persists.
 //!
+//! **Pushed diagnostics** (LSP-04): a connection that sends `jfl/watchDiagnostics` gets its open
+//! documents' syntax diagnostics as `jfl/publishDiagnostics`, through [`super::diagnostics`]: each
+//! document notification is counted (the publications' `seq`) and handed on, the compiles run on
+//! the blocking pool and come back through [`Host::take_compiled`]'s channel, and each publication
+//! is queued like a reply. The watch dies with its connection.
+//!
 //! Pinned by the daemon conformance driver (`crates/jfl-conformance/src/daemon.rs`, every
 //! regression trace and `conformance-replay`'s generated ones) and by
 //! `tests/daemon.rs`.
@@ -34,12 +40,13 @@ use jfl_protocol::codec;
 use jfl_protocol::messages::{
     Cancel, CancelParams, DidChange, DidChangeParams, DidClose, DidCloseParams, DidOpen,
     DidOpenParams, Handshake, HandshakeParams, HandshakeResult, Method, Notify, ServerInfo, Stop,
-    version_mismatch,
+    WatchDiagnostics, WatchDiagnosticsParams, version_mismatch,
 };
 use jfl_protocol::rpc::{ErrorCode, ErrorObject, Outcome, RequestId, Response};
 use jfl_protocol::{DocumentUri, PROTOCOL_VERSION};
 use tokio::sync::mpsc;
 
+use super::diagnostics::{COMPILED_QUEUE, Change, Compiled, Diagnostics, Outgoing, PoolRunner};
 use super::service::{Context, Overlay, Service, error_body, result_body};
 
 /// Where a daemon lives.
@@ -148,6 +155,9 @@ pub struct Conn {
     peer_closed: bool,
     overlays: BTreeMap<DocumentUri, Overlay>,
     requests: VecDeque<Call>,
+    /// The document notifications applied (`jfl/didOpen`, `jfl/didChange`, `jfl/didClose`): the
+    /// `seq` of pushed diagnostics.
+    applied: u64,
 }
 
 impl Conn {
@@ -222,13 +232,18 @@ pub struct Host {
     severed: Vec<ConnId>,
     next: u64,
     refused_peers: u64,
+    diagnostics: Diagnostics,
+    compiled: Option<mpsc::Receiver<Compiled>>,
 }
 
 impl Host {
     /// A started daemon (it has called `setsid`, if it is a process of its own).
     #[must_use]
     pub fn new(config: HostConfig) -> Self {
+        let (done, compiled) = mpsc::channel(COMPILED_QUEUE);
         Self {
+            diagnostics: Diagnostics::new(Box::new(PoolRunner::new(done))),
+            compiled: Some(compiled),
             config,
             server: ServerInfo {
                 version: env!("CARGO_PKG_VERSION").to_owned(),
@@ -464,6 +479,7 @@ impl Host {
                 peer_closed: false,
                 overlays: BTreeMap::new(),
                 requests: VecDeque::new(),
+                applied: 0,
             },
         );
         Ok(id)
@@ -490,6 +506,7 @@ impl Host {
     /// Drops `conn` at once, overlays and requests with it (a peer that does not read its
     /// replies); the run loop closes its socket by ending its tasks ([`Host::take_severed`]).
     pub(crate) fn sever(&mut self, conn: ConnId) {
+        self.diagnostics.gone(conn);
         if self.conns.remove(&conn).is_some() {
             self.severed.push(conn);
         }
@@ -519,6 +536,7 @@ impl Host {
             .conns
             .get_mut(&conn)
             .ok_or(HostError::NoConnection(conn))?;
+        let mut noted = Noted::Nothing;
         let (received, reply) = match incoming {
             Incoming::Call(call) if state.mismatched && call.method != Stop::NAME => {
                 let response: Response<()> = Response {
@@ -537,13 +555,21 @@ impl Host {
             }
             Incoming::Note(_) if state.mismatched => (Received::Applied, None),
             Incoming::Note(note) => {
-                let reply = note_into(state, note).map(|cancelled| {
-                    error_body(
-                        Some(cancelled),
+                if matches!(
+                    note.method.as_str(),
+                    DidOpen::NAME | DidChange::NAME | DidClose::NAME
+                ) {
+                    state.applied = state.applied.saturating_add(1);
+                }
+                noted = note_into(state, note);
+                let reply = match &noted {
+                    Noted::Cancelled(cancelled) => Some(error_body(
+                        Some(cancelled.clone()),
                         ErrorCode::RequestCancelled,
                         "cancelled by $/cancelRequest",
-                    )
-                });
+                    )),
+                    _ => None,
+                };
                 (Received::Applied, reply)
             }
             Incoming::Malformed(malformed) => (
@@ -568,13 +594,70 @@ impl Host {
             Incoming::End(_) => {
                 state.peer_closed = true;
                 state.requests.clear();
+                self.diagnostics.gone(conn);
                 (Received::Closed, None)
             }
         };
         if let Some(body) = reply {
             self.deliver(conn, body).await;
         }
+        for (to, body) in self.noted(conn, noted) {
+            self.deliver(to, body).await;
+        }
         Ok(received)
+    }
+
+    /// Hands a document notification or a watch to the diagnostics; what to publish now.
+    fn noted(&mut self, conn: ConnId, noted: Noted) -> Vec<Outgoing> {
+        let Some(state) = self.conns.get(&conn) else {
+            return Vec::new();
+        };
+        let diagnostics = &mut self.diagnostics;
+        match noted {
+            Noted::Watch(encoding) => diagnostics.watch(
+                conn,
+                encoding,
+                state.applied,
+                state
+                    .overlays
+                    .iter()
+                    .map(|(uri, o)| (uri, o.version, o.text.as_str())),
+            ),
+            Noted::Document(uri, kind) => {
+                let overlay = state.overlays.get(&uri);
+                let change = match (kind, overlay) {
+                    (DocNote::Open, Some(o)) => Change::Open {
+                        version: o.version,
+                        text: &o.text,
+                    },
+                    (DocNote::Change, Some(o)) => Change::Edit {
+                        version: o.version,
+                        text: &o.text,
+                    },
+                    (DocNote::Close, _) => Change::Close,
+                    (DocNote::Open | DocNote::Change, None) => return Vec::new(),
+                };
+                diagnostics.document(conn, state.applied, &uri, change)
+            }
+            Noted::Cancelled(_) | Noted::Nothing => Vec::new(),
+        }
+    }
+
+    /// The channel the run loop reads finished compiles from (once).
+    pub(crate) fn take_compiled(&mut self) -> Option<mpsc::Receiver<Compiled>> {
+        self.compiled.take()
+    }
+
+    /// A compile came back: its publication, if current, is queued on its connection.
+    pub(crate) async fn diagnosed(&mut self, compiled: Compiled) {
+        for (to, body) in self.diagnostics.compiled(compiled) {
+            self.deliver(to, body).await;
+        }
+    }
+
+    /// The disk of every watched open document, seen again (the run loop's tick).
+    pub(crate) fn observe_disk(&mut self) {
+        self.diagnostics.observe_disk();
     }
 
     /// Answers the oldest request of `conn` through `service`. Returns whether it was
@@ -615,6 +698,7 @@ impl Host {
             Some(state) if !state.peer_closed => Err(HostError::StillOpen(conn)),
             Some(_) => {
                 self.conns.remove(&conn);
+                self.diagnostics.gone(conn);
                 Ok(())
             }
         }
@@ -637,6 +721,7 @@ impl Host {
         self.listener = None;
         self.pending.clear();
         self.conns.clear();
+        self.diagnostics.clear();
         self.severed.clear();
         self.phase = Phase::Stopping;
         Ok(())
@@ -684,6 +769,7 @@ impl Host {
         self.bound = None;
         self.pending.clear();
         self.conns.clear();
+        self.diagnostics.clear();
         self.phase = Phase::Crashed;
     }
 
@@ -741,22 +827,43 @@ fn disk_time(uri: &jfl_protocol::DocumentUri) -> Option<std::time::SystemTime> {
         .ok()
 }
 
-/// Applies a notification to a connection's state; returns the id of a request it cancelled.
-fn note_into(state: &mut Conn, note: Note) -> Option<RequestId> {
+/// Which document notification was applied.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DocNote {
+    Open,
+    Change,
+    Close,
+}
+
+/// What a notification did, beyond the connection's overlays.
+#[derive(Debug)]
+enum Noted {
+    Nothing,
+    /// A request it cancelled.
+    Cancelled(RequestId),
+    /// A document notification, applied.
+    Document(DocumentUri, DocNote),
+    /// `jfl/watchDiagnostics`.
+    Watch(jfl_domain::PositionEncoding),
+}
+
+/// Applies a notification to a connection's state.
+fn note_into(state: &mut Conn, note: Note) -> Noted {
     match note.method.as_str() {
         DidOpen::NAME => {
             if let Ok(params) = codec::payload_from_value::<DidOpenParams>(note.params) {
                 let disk = disk_time(&params.uri);
                 state.overlays.insert(
-                    params.uri,
+                    params.uri.clone(),
                     Overlay {
                         version: params.version,
                         text: params.text,
                         disk,
                     },
                 );
+                return Noted::Document(params.uri, DocNote::Open);
             }
-            None
+            Noted::Nothing
         }
         DidChange::NAME => {
             if let Ok(params) = codec::payload_from_value::<DidChangeParams>(note.params)
@@ -769,20 +876,27 @@ fn note_into(state: &mut Conn, note: Note) -> Option<RequestId> {
                     overlay.text = full.text;
                     overlay.disk = disk_time(&params.uri);
                 }
+                return Noted::Document(params.uri, DocNote::Change);
             }
-            None
+            Noted::Nothing
         }
         DidClose::NAME => {
             if let Ok(params) = codec::payload_from_value::<DidCloseParams>(note.params) {
                 state.overlays.remove(&params.uri);
+                return Noted::Document(params.uri, DocNote::Close);
             }
-            None
+            Noted::Nothing
         }
         Cancel::NAME => {
-            let params = codec::payload_from_value::<CancelParams>(note.params).ok()?;
-            let at = state.requests.iter().position(|c| c.id == params.id)?;
-            state.requests.remove(at).map(|call| call.id)
+            let Ok(params) = codec::payload_from_value::<CancelParams>(note.params) else {
+                return Noted::Nothing;
+            };
+            let at = state.requests.iter().position(|c| c.id == params.id);
+            at.and_then(|at| state.requests.remove(at))
+                .map_or(Noted::Nothing, |call| Noted::Cancelled(call.id))
         }
-        _ => None,
+        WatchDiagnostics::NAME => codec::payload_from_value::<WatchDiagnosticsParams>(note.params)
+            .map_or(Noted::Nothing, |p| Noted::Watch(p.position_encoding)),
+        _ => Noted::Nothing,
     }
 }

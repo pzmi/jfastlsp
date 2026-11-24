@@ -25,4 +25,4 @@ pub mod translate;
 pub mod transport;
 
 pub use lsp_server::{Notification, Request, RequestId};
-pub use server::{Cancel, Config, Dispatch, Ended, Handler, Job, Reply, serve};
+pub use server::{Cancel, Config, Dispatch, Ended, Handler, Job, Notifier, Reply, serve};

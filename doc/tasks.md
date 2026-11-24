@@ -2916,30 +2916,80 @@ plugin; LSP-06 is M1's gate and makes the bench gate blocking.
   where a reply is read after the close).
 - **Decided (LSP-04):** the coordinator keeps a closed document's entry (its session and epoch
   counters, and the last version), so a reopened document never repeats a key; plan §5.9's bound
-  on documents applies to it with the daemon's overlays (Left below).
+  on documents applies to it with the daemon's overlays (Left below). *Amended by the second
+  slice:* the shell drops a closed document once no job names it (`Coordinator::forget_closed`,
+  not a model action): with no job left, no reply can match the reopened document's restarted
+  counters.
+- **As built (LSP-04, second slice, 2026-11-24): the publication path.** The daemon
+  (`jfl-composition`'s `daemon::diagnostics`, hooked into `daemon::host` and one arm of the run
+  loop): a connection that sends `jfl/watchDiagnostics` gets a `Coordinator<FileUri>` of its open
+  documents; every `jfl/didOpen`/`didChange`/`didClose` it sends is counted (`seq`) and handed on
+  (the client's version as sent: obligation 11); the syntax pass runs on the blocking pool as the
+  worker, compiling only the job's recorded input (`Work::compile`, obligation 7), its ranges
+  counted in the watch's encoding on that very text through `jfl-domain`'s `LineIndex`; a
+  finished compile comes back to the loop on a channel and its publication is queued on the
+  connection's outbox like a reply (`try_send`: the loop never waits; a full outbox severs).
+  Stamps are a counter, one per observation; the disk of an open document is read just before
+  each overlay is applied and at every tick (stat, with git's racy rule), its content compared
+  with the text seen last, so a shell edit is seen within a tick and wins, and an unchanged file
+  never does. `jfl/publishDiagnostics` (daemon to proxy) carries the URI as sent, the version
+  (none for the disk's content and a close's empty set), `seq` and the encoding. The proxy asks
+  for the watch after every handshake, keeps publications aside whatever it was reading, and
+  drops one whose `seq` is below its count at the document's last notification (it raced the
+  client's newer text: `tests/pushed_diagnostics.rs`); a notification it could not send (no
+  connection: an abandoned call, a daemon down) drops what it holds of the document until the next
+  handshake re-sends it, and a close prunes it. `jfl lsp`'s link publishes the empty set itself at
+  every close of a watched document, whether or not the close reached a daemon (the daemon's own is
+  dropped). Attaching backs off after a failure (250 ms doubling to 30 s, deadlines compared at the
+  next item, never a sleep). `jfl-adapter-lsp`'s `serve` hands the
+  handler a `Notifier` (server-initiated notifications through the one writer, refused once the
+  session ends); `jfl lsp`'s link waits on its queue and the daemon's connection at once
+  (`jfl_adapter_ipc::Bell`, an anonymous socket pair the session rings) and forwards each
+  publication as `textDocument/publishDiagnostics`. The transcript runner gained `await` (send
+  nothing more until the server sent that message). From the slice-1 review: `worker_started`
+  refuses a spawn with nothing pending; the driver observes the coordinator's worker and jobs
+  against the scripted worker's (a coordinator that keeps a lost job diverges at the crash:
+  `tests/replay.rs::should_diverge_when_the_coordinator_keeps_a_job_the_worker_lost`).
+- **Decided (LSP-04, second slice):** one coordinator per watching connection, in the daemon host,
+  not per view: overlays and publications belong to the connection (plan §4.4), and the syntax
+  pass reads only the document. SEM-05's javac jobs read the view's other files and bind the view
+  then.
+- **Decided (LSP-04, second slice):** pushed diagnostics are opt-in per connection
+  (`jfl/watchDiagnostics`), so a proxy of an older minor never reads a frame it does not expect and
+  a daemon of an older minor ignores the watch; no protocol minor is bumped (pre-release, as
+  LSP-02's `clamp`). The daemon counts ranges, not the proxy: only the daemon holds the text
+  compiled (the disk's, when it overtook the overlay; an older overlay, when a newer change is in
+  flight).
+- **Decided (LSP-04, second slice):** `jfl lsp` pushes diagnostics only to a client whose
+  `initialize` declares `textDocument.publishDiagnostics` (LSP 3.17's client capability), and
+  then connects at the first `didOpen`; a client that declares nothing gets no notification it did
+  not ask for. That Claude Code declares it is E0's to confirm (plan §9.2); if it does not, this
+  changes to push always.
 - **Accept:**
   - [x] `conformance-replay` green for `diagnostics`; the negative control fails at its step (the seven regression traces conform; generated: 100 traces at `0x2a`, 1,000 at `0x5eed`, 40,949 states; `tests/replay.rs::should_diverge_at_the_stale_reply_when_the_diagnostics_control_publishes_every_reply`, step 12; each of six coordinator mutants (publish every reply, track only the document's own file, a crash or a timeout that does not re-queue, the client's version on disk content, a reply published after the close) diverges and fails the reference machine)
-  - [ ] a transcript with two quick edits whose results arrive in reverse order publishes only the newer (in process today: `crates/jfl-application/tests/diagnostics_machine.rs::should_publish_only_the_newest_when_two_quick_edits_reply_in_reverse_order`; the transcript needs the publication path, Left below)
+  - [x] a transcript with two quick edits whose results arrive in reverse order publishes only the newer: forced in process, since a black-box transcript cannot order the replies (as LSP-02's cancellation): `crates/jfl-composition/src/daemon/diagnostics.rs::tests::should_publish_only_the_newest_when_two_quick_edits_reply_in_reverse_order` (the daemon's shell, the real coordinator and syntax pass, the publication frames) and `crates/jfl-application/tests/diagnostics_machine.rs::should_publish_only_the_newest_when_two_quick_edits_reply_in_reverse_order`; a publication that raced a newer change on the way to the client is dropped by the proxy (`crates/jfl-composition/tests/pushed_diagnostics.rs::should_drop_a_publication_when_it_is_older_than_the_documents_last_notification`); the black-box transcripts publish, edit and close in order (`fixtures/lsp/diagnostics-*.jsonl`)
   - [x] a `proptest-state-machine` test of the coordinator (open, edit, result, close in any order) against a reference machine (ADR 0007, amended; ver §6.4), over plain `proptest` (Decided above), with `EventuallyUpToDate`'s reduction (60 system moves after the random prefix, then nothing enabled and every open document up to date): `crates/jfl-application/tests/diagnostics_machine.rs`
-  - [ ] syntax errors in the corpus's `broken/` files are published with correct UTF-16 ranges
-  - [ ] runs on the bench corpus (small at least, `just bench`) and reports the metrics it affects; its correctness tests also run against the real-corpus cases that apply (BENCH-05) (in process today: `just bench-diagnostics small` and `medium`, `doc/bench/README.md`; didChange to `publishDiagnostics` through `jfl lsp` comes with the publication path)
-- **Left after LSP-04's first slice:**
-  - **the publication path:** a coordinator per view in the daemon (`daemon::views`), the syntax
-    pass on the blocking pool as the worker, `see_disk` from the view service's stat and watch,
-    stamps from mtimes; a daemon-to-proxy notification (`jfl/publishDiagnostics`, protocol golden
-    first, an additive minor); a server-initiated notification in `jfl-adapter-lsp`'s `serve` (it
-    has none: every frame today answers a request); the proxy forwarding it as
-    `textDocument/publishDiagnostics` with `version`, the ranges in the negotiated encoding
-    through `jfl-domain`'s `LineIndex`; the transcripts (two quick edits in reverse order, close
-    publishes the empty set; a reply order a transcript cannot hold is forced in process, as
-    LSP-02's cancellation is) and the `broken/` goldens; didChange to `publishDiagnostics` p50
-    and p95 through `jfl lsp` on small and medium;
-  - obligation 11 in that path (a re-sent document opened at the client's version: the
-    coordinator takes any version, the daemon must pass it on); obligations 2 and 8 (what javac
-    read, and one publication per epoch when javac's results join the syntax ones) and 12
-    (`jfl diag`) are SEM-05's;
-  - the coordinator's documents, like the daemon's overlays, are not bounded in number (plan
-    §5.9);
+  - [x] syntax errors in the corpus's `broken/` files are published with correct UTF-16 ranges: `fixtures/lsp/diagnostics-broken-syntax-errors.jsonl` and `diagnostics-broken-string-template.jsonl` (the ranges of `fixtures/java/summaries/orchard/broken/`, 0-based), and astral characters before an error in `diagnostics-position-encoding-utf16-astral.jsonl` and `-utf8.jsonl`
+  - [x] runs on the bench corpus (small at least, `just bench`) and reports the metrics it affects; its correctness tests also run against the real-corpus cases that apply (BENCH-05): `just bench jfl-lsp small` and `medium` time a breaking `didChange` to its `publishDiagnostics` through `jfl lsp` (`jfl-lsp/<size>/diagnostics/p50`, `p95`, `largest_ms`; `doc/bench/README.md`); the in-process cycle stays `just bench-diagnostics SIZE`; no BENCH-05 case is about diagnostics yet
+- **Left after LSP-04's second slice:**
+  - `see_disk` from the view service's watcher and per-request stat (plan §4.3): today the daemon
+    reads an open document's disk before each of its notifications and at every tick (2 s), so a
+    shell edit is published within a tick, not at the watcher's event;
+  - the coordinator's crash and timeout paths have no production use for the syntax pass (bounded
+    work; a pass that fails replies with a `not-checked` warning instead of crashing a worker):
+    SEM-05's javac workers use them, with plan §3.4's backoff;
+  - obligations 2 and 8 (what javac read; one publication per epoch when javac's results join the
+    syntax ones) and 12 (`jfl diag`) are SEM-05's;
+  - the documents of one connection are bounded by what its client opens (each is forgotten once
+    closed and no job names it); plan §5.9's cap on open documents and overlays is REL-02's;
+  - protocol additions keep version 1.0 while nothing is released (`jfl/watchDiagnostics`,
+    `jfl/publishDiagnostics`, as LSP-02's `clamp`); plan §6.6 says minors are additive, so the
+    first release either bumps the minor for them or plan §6.6 records that pre-release additions
+    keep 1.0 (the owner's call);
+  - that Claude Code declares `textDocument.publishDiagnostics` in its `initialize` (else `jfl lsp`
+    pushes it nothing) is E0's to confirm; it belongs on LSP-05's or LSP-06's Accept;
+  - `jfl lsp`'s idle link wakes once an hour to look around (`IDLE_WAIT`), where an unbounded wait
+    would do; harmless, left;
   - `jfl-conformance`'s pending path (a model read, not replayed) has no real pending model now:
     `tests/replay.rs::should_warn_of_each_pending_model_when_the_traces_are_replayed` passes over
     an empty list, and the read-only path of generated traces is untested until a model is pending

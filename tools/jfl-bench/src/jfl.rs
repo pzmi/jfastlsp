@@ -11,6 +11,13 @@
 //!   `initialize` (plan §1.7's "`initialize` against a warm daemon", < 200 ms, reported and never
 //!   asserted) and its first definition, the daemon already holding the view.
 //!
+//! - **Pushed diagnostics** (LSP-04), in the cold session, which declares
+//!   `textDocument.publishDiagnostics`: for `diagnostics` files spread evenly over the corpus's
+//!   sorted list, and its largest file, the file is opened and its first publication awaited, then
+//!   a `didChange` that appends an unclosed class is timed from its write to the publication of
+//!   its version (the proxy, the daemon's syntax pass and the way back), then it is closed and the
+//!   empty set awaited. Metrics `diagnostics/p50`, `diagnostics/p95`, `diagnostics/largest_ms`.
+//!
 //! Each session runs under coreutils `timeout`, so a server that hangs cannot hang the harness.
 //! The daemon is started with a one-second idle period and exits on its own once the warm
 //! session closes (it holds no connection then); the harness has no grant to wait for it.
@@ -133,10 +140,15 @@ fn definition(site: &Site) -> Value {
     })
 }
 
-fn initialize(client: &mut Session) -> Result<()> {
+fn initialize(client: &mut Session, diagnostics: bool) -> Result<()> {
+    let capabilities = if diagnostics {
+        json!({"textDocument": {"publishDiagnostics": {"versionSupport": true}}})
+    } else {
+        json!({})
+    };
     let (result, _) = client.client.request(
         "initialize",
-        json!({"processId": std::process::id(), "capabilities": {}}),
+        json!({"processId": std::process::id(), "capabilities": capabilities}),
     )?;
     if result.get("capabilities").is_none() {
         return Err(BenchError::new("initialize answered without capabilities"));
@@ -176,7 +188,7 @@ pub fn jfl_lsp_suite(
 
     let t0 = Instant::now();
     let mut cold = Session::start(r, j, &state, "cold")?;
-    initialize(&mut cold)?;
+    initialize(&mut cold, j.diagnostics > 0)?;
     let initialize_ms = ms(t0);
     let (answer, _) = cold
         .client
@@ -203,12 +215,17 @@ pub fn jfl_lsp_suite(
     // The warm session starts before the cold one ends, so the daemon is certainly still up.
     let t1 = Instant::now();
     let mut warm = Session::start(r, j, &state, "warm")?;
-    initialize(&mut warm)?;
+    initialize(&mut warm, false)?;
     let initialize_warm_ms = ms(t1);
     let _ = warm
         .client
         .request("textDocument/definition", definition(first))?;
     let first_definition_warm_ms = ms(t1);
+    let pushed = if j.diagnostics > 0 {
+        Some(diagnostics(&mut cold, r.root, j.diagnostics)?)
+    } else {
+        None
+    };
     cold.end()?;
     warm.end()?;
 
@@ -256,12 +273,124 @@ pub fn jfl_lsp_suite(
         Better::Info,
         found as f64,
     ));
+    if let Some(pushed) = pushed {
+        let what = format!(
+            "breaking didChange to publishDiagnostics ({} files)",
+            pushed.times.len()
+        );
+        for (label, p) in [("p50", 0.5), ("p95", 0.95)] {
+            metrics.push(Metric::percentile_over(
+                format!("jfl-lsp/{size}/diagnostics/{label}"),
+                "ms",
+                Better::Smaller,
+                pushed.times.clone(),
+                p,
+                label,
+                &what,
+            ));
+        }
+        metrics.push(Metric::single(
+            format!("jfl-lsp/{size}/diagnostics/largest_ms"),
+            "ms",
+            Better::Smaller,
+            pushed.largest_ms,
+        ));
+        notes.push(format!(
+            "jfl-lsp: diagnostics timed over LSP from a breaking didChange to its publishDiagnostics; \
+             the largest file is {} ({} bytes)",
+            pushed.largest_name, pushed.largest_bytes
+        ));
+    }
     notes.push(
         "jfl-lsp: one cold session from a fresh state directory (no daemon, no stored summary), \
          then a warm one against its daemon; definition timed per request over LSP"
             .to_string(),
     );
     Ok((metrics, slots))
+}
+
+/// What the diagnostics phase measured.
+struct Pushed {
+    times: Vec<f64>,
+    largest_ms: f64,
+    largest_name: String,
+    largest_bytes: usize,
+}
+
+/// Appended by the timed edit: a class left open, so every file gets an error.
+const BREAK: &str = "\nclass Broken {\n";
+
+/// The publication for `uri`, at `version` (`None`: no version, a close's empty set).
+fn published(session: &mut Session, uri: &str, version: Option<i64>) -> Result<Value> {
+    session.client.wait_notification(|method, params| {
+        method == "textDocument/publishDiagnostics"
+            && params.get("uri").and_then(Value::as_str) == Some(uri)
+            && params.get("version").and_then(Value::as_i64) == version
+    })
+}
+
+/// One file's cycle: open, the breaking edit timed to its publication, close. Milliseconds.
+fn cycle(session: &mut Session, path: &Path, text: &str) -> Result<f64> {
+    let uri = lsp::file_uri(path);
+    session.client.notify(
+        "textDocument/didOpen",
+        json!({"textDocument": {"uri": uri, "languageId": "java", "version": 1, "text": text}}),
+    )?;
+    published(session, &uri, Some(1))?;
+    let t = Instant::now();
+    session.client.notify(
+        "textDocument/didChange",
+        json!({"textDocument": {"uri": uri, "version": 2}, "contentChanges": [{"text": format!("{text}{BREAK}")}]}),
+    )?;
+    let params = published(session, &uri, Some(2))?;
+    let took = t.elapsed().as_secs_f64() * 1e3;
+    if params
+        .get("diagnostics")
+        .and_then(Value::as_array)
+        .is_none_or(Vec::is_empty)
+    {
+        return Err(BenchError::new(format!(
+            "{}: the breaking edit was published without a diagnostic",
+            path.display()
+        )));
+    }
+    session.client.notify(
+        "textDocument/didClose",
+        json!({"textDocument": {"uri": uri}}),
+    )?;
+    published(session, &uri, None)?;
+    Ok(took)
+}
+
+/// The diagnostics phase over `n` files spread over the corpus, and its largest.
+fn diagnostics(session: &mut Session, root: &Path, n: usize) -> Result<Pushed> {
+    let files: Vec<(PathBuf, String)> = crate::e1::list_java(root)
+        .into_iter()
+        .filter_map(|p| std::fs::read_to_string(&p).ok().map(|t| (p, t)))
+        .collect();
+    let largest = files
+        .iter()
+        .max_by_key(|(_, t)| t.len())
+        .cloned()
+        .context("the corpus holds no readable .java file")?;
+    let step = files.len().div_ceil(n.max(1)).max(1);
+    let mut times = Vec::new();
+    for (path, text) in files.iter().step_by(step) {
+        times.push(cycle(session, path, text)?);
+    }
+    let largest_ms = cycle(session, &largest.0, &largest.1)?;
+    let largest_name = largest
+        .0
+        .strip_prefix(root)
+        .unwrap_or(&largest.0)
+        .display()
+        .to_string();
+    Ok(Pushed {
+        times,
+        largest_ms,
+        largest_name,
+        largest_bytes: largest.1.len(),
+    })
 }
 
 #[cfg(test)]

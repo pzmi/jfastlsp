@@ -1109,6 +1109,20 @@ read and obligation 8's merge of syntax and javac results (SEM-05; the merge goe
 model first), obligation 11 in the daemon's publication path and obligation 12 with `jfl diag`
 (LSP-04's next slice and SEM-05).
 
+The daemon's publication path (LSP-04, second slice: `jfl-composition`'s `daemon::diagnostics`)
+is the coordinator's shell for the syntax pass. Obligation 7 holds there too: the worker compiles
+the job's recorded input and never reads the disk
+(`daemon::diagnostics::tests::should_compile_the_jobs_input_and_never_the_disk_when_the_disk_differs`).
+Obligation 11 holds end to end: the proxy re-sends a document at the client's version and the
+daemon passes it on (`crates/jfl-composition/tests/pushed_diagnostics.rs::should_publish_at_the_clients_version_when_a_restarted_daemon_gets_the_document_again`).
+The stamps that order an overlay against the disk are a counter, one per observation, never mtimes
+(two writes in one clock tick cannot tie), and the disk is compared by content. One step the
+model does not have: a publication can race a newer change of the client's on its way, so it
+carries the connection's count of document notifications when its compile took its inputs, and
+the proxy drops it when it has sent a newer notification of that document since
+(`FreshAfterEdit` kept past the daemon). The driver now also checks its observation of the worker
+against the coordinator's own record of it (incarnation and jobs).
+
 ### Not modelled
 
 - **Time:** deadlines, the worker's backoff and idle eviction, the pool's LRU cap (plan §7.4:

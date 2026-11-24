@@ -201,6 +201,9 @@ enum Fault {
     None,
     /// Every reply is published as it arrives (plan §7.3's control).
     PublishEveryReply,
+    /// A crash is not told to the coordinator, which keeps the jobs it lost: a check of the
+    /// driver's own observation of the worker ([`DiagnosticsDriver::worker_obs`]).
+    CrashUntold,
 }
 
 /// Drives the coordinator, the scripted worker, disk and client by `diagnostics.qnt`'s actions.
@@ -481,8 +484,13 @@ impl DiagnosticsDriver {
             "crash" => {
                 let lost = self.worker.crash().map_err(|e| Self::refused(step, e))?;
                 self.slots.retain(|_, id| !lost.contains(id));
+                let told = if self.fault == Fault::CrashUntold {
+                    Vec::new()
+                } else {
+                    lost
+                };
                 self.coordinator
-                    .worker_lost(lost)
+                    .worker_lost(told)
                     .map_err(|e| Self::refused(step, e))?;
             }
             "timeout" => {
@@ -522,6 +530,29 @@ impl DiagnosticsDriver {
                 dirty: d.dirty,
             },
         )
+    }
+
+    /// The scripted worker, checked against the coordinator's record of it: the incarnation the
+    /// coordinator holds up must be the worker's while it is up and none while it is down, and the
+    /// jobs it holds must be exactly the worker's running and written ones (the driver's slots).
+    /// A coordinator that disagrees (a lost job kept, a spawn it missed) is observed with
+    /// incarnation -1, which no state of the model has, so the step diverges.
+    ///
+    /// Pinned by: `tests/replay.rs::should_diverge_when_the_coordinator_keeps_a_job_the_worker_lost`.
+    fn worker_obs(&self) -> WorkerObs {
+        let up = self.worker.up();
+        let incarnation = self.worker.incarnation();
+        let agrees = self.coordinator.worker() == up.then_some(incarnation)
+            && self.coordinator.jobs().count() == self.slots.len()
+            && self
+                .coordinator
+                .jobs()
+                .all(|j| self.worker.state(j.id) != JobState::Absent);
+        WorkerObs {
+            up,
+            inc: if agrees { i64::from(incarnation.0) } else { -1 },
+            lost: i64::from(self.worker.lost()),
+        }
     }
 
     fn job_obs(&self, job: Option<&Job<String>>, state: JobState) -> JobObs {
@@ -579,11 +610,7 @@ impl Driver for DiagnosticsDriver {
                     (name, obs)
                 })
                 .collect(),
-            worker: WorkerObs {
-                up: self.worker.up(),
-                inc: i64::from(self.worker.incarnation().0),
-                lost: i64::from(self.worker.lost()),
-            },
+            worker: self.worker_obs(),
             jobs: SLOTS
                 .iter()
                 .map(|s| {
@@ -612,6 +639,12 @@ pub fn driver() -> Replayer {
 /// The negative control: every reply is published as it arrives, stale ones included.
 pub fn control() -> Replayer {
     Replayer::new(DiagnosticsDriver::new(Fault::PublishEveryReply))
+}
+
+/// A driver whose coordinator is never told which jobs a crash lost: the worker observation must
+/// diverge at the crash (`DiagnosticsDriver::worker_obs`).
+pub fn crash_untold() -> Replayer {
+    Replayer::new(DiagnosticsDriver::new(Fault::CrashUntold))
 }
 
 /// `value` for each document.

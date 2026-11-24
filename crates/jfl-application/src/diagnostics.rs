@@ -224,6 +224,9 @@ pub enum DiagnosticsError {
     /// A spawn while a worker is up.
     #[error("a worker is up already")]
     WorkerUp,
+    /// A spawn with no compile pending.
+    #[error("no compile is pending")]
+    NothingPending,
     /// A compile with every job slot taken.
     #[error("every job slot is taken")]
     Busy,
@@ -407,13 +410,63 @@ impl<K: Ord + Clone> Coordinator<K> {
         })
     }
 
-    /// The worker `incarnation` is up.
+    /// The worker `incarnation` is up: only while none is and a compile is pending (the model's
+    /// `restart` guard: a worker is spawned lazily, plan §3.4).
+    ///
+    /// Pinned by: `diagnostics::tests::should_refuse_each_transition_when_the_model_does_not_enable_it`.
     pub fn worker_started(&mut self, incarnation: Incarnation) -> Result<(), DiagnosticsError> {
         if self.worker.is_some() {
             return Err(DiagnosticsError::WorkerUp);
         }
+        if self.pending().next().is_none() {
+            return Err(DiagnosticsError::NothingPending);
+        }
         self.worker = Some(incarnation);
         Ok(())
+    }
+
+    /// Drops what the coordinator keeps of closed documents no job still names, and every disk text
+    /// no remaining document reads: the shell's bound on what a long-lived coordinator holds (plan
+    /// §5.9). Not a model action: the model keeps closed documents, whose counters make a reopened
+    /// document's keys new. Without a job naming it, nothing can be delivered for the forgotten
+    /// document, so a reopen that starts its counters again can never match an old reply. Returns
+    /// how many documents were dropped.
+    ///
+    /// Pinned by: `diagnostics::tests::should_forget_closed_documents_and_unread_disk_texts_when_no_job_names_them`.
+    pub fn forget_closed(&mut self) -> usize {
+        let named: BTreeSet<K> = self.jobs.values().map(|j| j.document.clone()).collect();
+        let gone: Vec<K> = self
+            .docs
+            .iter()
+            .filter(|(k, d)| !d.open && !named.contains(*k))
+            .map(|(k, _)| k.clone())
+            .collect();
+        for doc in &gone {
+            if let Some(d) = self.docs.remove(doc) {
+                for file in &d.reads {
+                    if let Some(r) = self.readers.get_mut(file) {
+                        r.remove(doc);
+                        if r.is_empty() {
+                            self.readers.remove(file);
+                        }
+                    }
+                }
+            }
+        }
+        let readers = &self.readers;
+        self.seen.retain(|file, _| readers.contains_key(file));
+        gone.len()
+    }
+
+    /// The documents the coordinator holds, open or closed.
+    pub fn documents(&self) -> usize {
+        self.docs.len()
+    }
+
+    /// Whether some open document reads `file` (the shell reports the disk of these files only, so
+    /// what it has seen stays bounded by the documents).
+    pub fn is_read(&self, file: &K) -> bool {
+        self.readers.contains_key(file)
     }
 
     /// Starts `doc`'s pending compile on the worker, of its inputs' winning texts as they are now.
@@ -622,6 +675,7 @@ mod tests {
         // when
         got.push(c.did_change("a", 2, Text::new(1, "x")).err());
         got.push(c.did_close("a").err());
+        got.push(c.worker_started(Incarnation(1)).err());
         open(&mut c, "a", 1);
         got.push(c.did_open("a", 1, Text::new(1, "x")).err());
         got.push(c.start(&"a").err());
@@ -645,6 +699,7 @@ mod tests {
             [
                 Some(NotOpen),
                 Some(NotOpen),
+                Some(NothingPending),
                 Some(AlreadyOpen),
                 Some(WorkerDown),
                 Some(WorkerDown),
@@ -726,6 +781,69 @@ mod tests {
                 document: "a",
                 version: None,
                 diagnostics: (),
+            }))
+        );
+    }
+    #[test]
+    fn should_forget_closed_documents_and_unread_disk_texts_when_no_job_names_them() {
+        // given: `a` reads `b`; `a` has a job running when both close
+        let mut c: Coordinator<&'static str> = Coordinator::new(2, [("b", Text::new(1, "b1"))]);
+        let _a = c.track("a", ["b"]);
+        open(&mut c, "a", 2);
+        open(&mut c, "z", 3);
+        let _ = c.worker_started(Incarnation(1));
+        let job = c.start(&"a").map(|j| j.id).unwrap_or(JobId(u64::MAX));
+        let _closed = c.did_close("a");
+        let _closed = c.did_close("z");
+
+        // when
+        let first = c.forget_closed();
+        let kept = (c.document(&"a").is_some(), c.seen(&"b").is_some());
+        let _late = c.deliver(Reply {
+            job,
+            diagnostics: (),
+        });
+        let second = c.forget_closed();
+
+        // then: `z` goes at once; `a` waits for its job, then goes with `b`'s text
+        assert_eq!(first, 1);
+        assert_eq!(kept, (true, true));
+        assert_eq!(second, 1);
+        assert_eq!(c.documents(), 0);
+        assert!(c.seen(&"b").is_none());
+        assert!(!c.is_read(&"b"));
+    }
+
+    #[test]
+    fn should_publish_a_reopened_document_afresh_when_it_was_forgotten() {
+        // given: `a` opened, compiled, closed and forgotten
+        let mut c: Coordinator<&'static str> = Coordinator::new(1, []);
+        open(&mut c, "a", 1);
+        let _ = c.worker_started(Incarnation(1));
+        let job = c.start(&"a").map(|j| j.id).unwrap_or(JobId(u64::MAX));
+        let _first = c.deliver(Reply {
+            job,
+            diagnostics: 1,
+        });
+        let _closed = c.did_close("a");
+        let _gone = c.forget_closed();
+
+        // when
+        open(&mut c, "a", 5);
+        let again = c.start(&"a").map(|j| {
+            c.deliver(Reply {
+                job: j.id,
+                diagnostics: 2,
+            })
+        });
+
+        // then
+        assert_eq!(
+            again,
+            Ok(Delivery::Publish(Publication {
+                document: "a",
+                version: Some(1),
+                diagnostics: 2,
             }))
         );
     }

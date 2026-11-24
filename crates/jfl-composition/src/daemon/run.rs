@@ -174,6 +174,7 @@ async fn serve(
     let mut tick = timer::ticker(TICK.min(idle.max(Duration::from_millis(10))));
     let mut idle_since = Some(Instant::now());
     let mut accepting = true;
+    let mut compiled = host.take_compiled();
     // Whether the service may have background work: set by every frame handled, cleared when it
     // says it has none.
     let mut working = true;
@@ -199,8 +200,15 @@ async fn serve(
                     idle_since = None;
                 }
             }
+            Some(done) = next_compiled(compiled.as_mut()) => {
+                host.diagnosed(done).await;
+                for conn in host.take_severed() {
+                    tasks.end(conn);
+                }
+            }
             _ = tick.tick() => {
                 accepting = true;
+                host.observe_disk();
                 match host.tick() {
                     Ok(Tick::Fine) => {}
                     Ok(Tick::LockLost) | Err(_) => break Ended::LockLost,
@@ -233,6 +241,17 @@ async fn serve(
     .await;
     tasks.writers.shutdown().await;
     ended
+}
+
+/// The next finished compile of pushed diagnostics ([`super::diagnostics`]); never, without the
+/// channel.
+async fn next_compiled(
+    compiled: Option<&mut mpsc::Receiver<super::diagnostics::Compiled>>,
+) -> Option<super::diagnostics::Compiled> {
+    match compiled {
+        Some(compiled) => compiled.recv().await,
+        None => std::future::pending().await,
+    }
 }
 
 /// Takes one accepted connection; `false` pauses accepting until the next tick (a failed accept,

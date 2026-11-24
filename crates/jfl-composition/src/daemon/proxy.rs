@@ -14,11 +14,21 @@
 //! A re-sent document keeps the client's version and text, never renumbered (the diagnostics
 //! model's obligation 11).
 //!
+//! **Pushed diagnostics** (LSP-04): a proxy made [`Proxy::with_diagnostics`] asks every new
+//! connection for them (`jfl/watchDiagnostics`, before the re-sent documents). The daemon's
+//! `jfl/publishDiagnostics` may come between any two frames, so every read keeps them aside, the
+//! latest per document ([`Proxy::take_published`]), and [`Proxy::poll`] reads those that came
+//! while the proxy waited for nothing. A publication is handed on only when its `seq` is not below
+//! the count of document notifications this proxy had sent on the connection when it last sent one
+//! of that document: an older one was computed before the client's newer text reached the daemon
+//! (which publishes the newer text's next). Pinned by
+//! `tests/pushed_diagnostics.rs::should_drop_a_publication_when_it_is_older_than_the_documents_last_notification`.
+//!
 //! Pinned by the daemon conformance driver and `tests/daemon.rs`.
 
 use std::collections::BTreeMap;
 use std::io;
-use std::os::fd::BorrowedFd;
+use std::os::fd::{AsFd, BorrowedFd};
 use std::path::Path;
 use std::sync::atomic::{AtomicU16, Ordering};
 use std::time::{Duration, Instant};
@@ -26,10 +36,12 @@ use std::time::{Duration, Instant};
 use jfl_adapter_ipc::client::{self, ClientConn, ConnectError, Received, RecvError};
 use jfl_adapter_ipc::notify::{Notice, NotifyListener, Waited};
 use jfl_adapter_ipc::{Flock, LockError, SocketPath, StateDir};
+use jfl_domain::{FileUri, PositionEncoding};
 use jfl_protocol::codec;
 use jfl_protocol::messages::{
     ClientInfo, ClientKind, ContentChange, DidChange, DidChangeParams, DidClose, DidCloseParams,
-    DidOpen, DidOpenParams, Handshake, HandshakeParams, Method, Stop, StopParams,
+    DidOpen, DidOpenParams, Handshake, HandshakeParams, Method, PublishDiagnostics,
+    PublishDiagnosticsParams, Stop, StopParams, WatchDiagnostics, WatchDiagnosticsParams,
 };
 use jfl_protocol::rpc::{ErrorCode, Outcome, RequestId, Response};
 use jfl_protocol::{DocumentUri, PROTOCOL_VERSION, Version};
@@ -171,6 +183,14 @@ pub struct Proxy<L> {
     /// The end of the [`Proxy::call`] in progress: every wait inside it is cut there, so a call
     /// takes at most its budget, not a reply budget per wait.
     until: Option<Instant>,
+    /// Pushed diagnostics wanted, their ranges in this encoding.
+    diagnostics: Option<PositionEncoding>,
+    /// Document notifications sent on the current connection.
+    sent: u64,
+    /// Per document, `sent` when its last notification went on the current connection.
+    last: BTreeMap<FileUri, u64>,
+    /// Publications read and not yet taken, the latest per document.
+    published: BTreeMap<FileUri, PublishDiagnosticsParams>,
 }
 
 impl<L> std::fmt::Debug for Proxy<L> {
@@ -221,7 +241,91 @@ impl<L: Launcher> Proxy<L> {
             spawned: Vec::new(),
             protocol: PROTOCOL_VERSION,
             until: None,
+            diagnostics: None,
+            sent: 0,
+            last: BTreeMap::new(),
+            published: BTreeMap::new(),
         }
+    }
+
+    /// The same proxy asking every connection for its documents' diagnostics, ranges in
+    /// `encoding` (`jfl/watchDiagnostics`).
+    #[must_use]
+    pub fn with_diagnostics(mut self, encoding: PositionEncoding) -> Self {
+        self.diagnostics = Some(encoding);
+        self
+    }
+
+    /// The connection's descriptor, readable when the daemon sent something (a publication) or
+    /// closed it; `None` while disconnected.
+    #[must_use]
+    pub fn fd(&self) -> Option<BorrowedFd<'_>> {
+        self.conn.as_ref().map(AsFd::as_fd)
+    }
+
+    /// Records a document notification of `uri` sent on the connection.
+    fn count(&mut self, uri: &DocumentUri) {
+        self.sent = self.sent.saturating_add(1);
+        self.last.insert(uri.file().clone(), self.sent);
+    }
+
+    /// Keeps `body` aside when it is a publication; whether it was. Only a watching connection is
+    /// sent any, so the frames of one that does not watch are never probed.
+    fn keep_published(&mut self, body: &[u8]) -> bool {
+        if self.diagnostics.is_none() || !is_notification(body) {
+            return false;
+        }
+        if let Ok(note) = codec::decode_notification::<PublishDiagnostics>(body) {
+            let file = note.params.uri.file().clone();
+            self.published.insert(file, note.params);
+        }
+        // Any other notification (a newer minor's) is dropped.
+        true
+    }
+
+    /// The publications read since the last call that are still current: for a document whose
+    /// last notification on this connection the daemon had applied when it computed them.
+    pub fn take_published(&mut self) -> Vec<PublishDiagnosticsParams> {
+        let last = &self.last;
+        std::mem::take(&mut self.published)
+            .into_values()
+            .filter(|p| last.get(p.uri.file()).is_some_and(|sent| p.seq >= *sent))
+            .collect()
+    }
+
+    /// Reads, without waiting, whatever the daemon sent while the proxy waited for nothing: its
+    /// publications are kept for [`Proxy::take_published`]; its end of the connection resets the
+    /// proxy (the next step connects again, re-sending the documents).
+    pub fn poll(&mut self) {
+        if self.phase != ProxyPhase::Ready {
+            return;
+        }
+        loop {
+            let Some(conn) = self.conn.as_mut() else {
+                return;
+            };
+            match conn.recv(&mut || None) {
+                Ok(Received::Frame(body)) => {
+                    // An answer nobody waits for (an abandoned request's) is dropped.
+                    let _kept = self.keep_published(&body);
+                }
+                Err(RecvError::TimedOut) => return,
+                Ok(Received::Eof) | Err(_) => {
+                    self.reset();
+                    return;
+                }
+            }
+        }
+    }
+
+    /// Connects (spawning the daemon if none runs) until the proxy is ready, within `budget`,
+    /// without a request: for a client that wants pushed diagnostics before it asks anything.
+    pub fn attach(&mut self, budget: Duration) -> Result<(), ProxyError> {
+        let mut remaining = deadline(budget);
+        self.until = Instant::now().checked_add(budget);
+        let ready = self.drive(&mut remaining);
+        self.until = None;
+        ready.map(|_| ())
     }
 
     /// The same proxy announcing `protocol` in its handshake: a proxy of another major, for the
@@ -468,7 +572,19 @@ impl<L: Launcher> Proxy<L> {
             }
             Err(e) => return Err(ProxyError::Protocol(e.to_string())),
         }
-        let mut frames = Vec::with_capacity(self.docs.len().saturating_add(1));
+        self.sent = 0;
+        self.last.clear();
+        self.published.clear();
+        let mut frames = Vec::with_capacity(self.docs.len().saturating_add(2));
+        if let Some(position_encoding) = self.diagnostics {
+            frames.push(
+                codec::encode(&codec::notification::<WatchDiagnostics>(
+                    WatchDiagnosticsParams { position_encoding },
+                ))
+                .map_err(|e| ProxyError::Protocol(e.to_string()))?,
+            );
+        }
+        let watched = frames.len();
         for (uri, doc) in &self.docs {
             frames.push(
                 codec::encode(&codec::notification::<DidOpen>(DidOpenParams {
@@ -482,10 +598,14 @@ impl<L: Launcher> Proxy<L> {
         if let Some(want) = &self.want {
             frames.push(want.body.clone());
         }
-        for frame in &frames {
+        let docs: Vec<DocumentUri> = self.docs.keys().cloned().collect();
+        for (at, frame) in frames.iter().enumerate() {
             if !self.send(frame) {
                 // The daemon went away meanwhile: noticed as its EOF.
                 break;
+            }
+            if let Some(uri) = at.checked_sub(watched).and_then(|i| docs.get(i)) {
+                self.count(uri);
             }
         }
         self.phase = ProxyPhase::Ready;
@@ -523,7 +643,13 @@ impl<L: Launcher> Proxy<L> {
     /// wanted; the proxy connects again.
     pub fn notice(&mut self) -> Result<(), ProxyError> {
         self.expect("notice", &[ProxyPhase::Connecting, ProxyPhase::Ready])?;
-        match self.recv() {
+        let mut read = self.recv();
+        while let Ok(body) = &read
+            && self.keep_published(body)
+        {
+            read = self.recv();
+        }
+        match read {
             Err(ProxyError::Closed) => {
                 self.reset();
                 Ok(())
@@ -554,7 +680,10 @@ impl<L: Launcher> Proxy<L> {
     /// Reads the answer to the waiting request; it is answered then.
     pub fn read_answer<M: Method>(&mut self) -> Result<Response<M::Result>, ProxyError> {
         self.expect("answer", &[ProxyPhase::Ready])?;
-        let body = self.recv()?;
+        let mut body = self.recv()?;
+        while self.keep_published(&body) {
+            body = self.recv()?;
+        }
         let response =
             codec::decode_response::<M>(&body).map_err(|e| ProxyError::Protocol(e.to_string()))?;
         if self.want.as_ref().map(|w| &w.id) != response.id.as_ref() {
@@ -574,8 +703,25 @@ impl<L: Launcher> Proxy<L> {
             text: text.clone(),
         }))
         .unwrap_or_default();
-        self.docs.insert(uri, Doc { version, text });
-        self.phase == ProxyPhase::Ready && self.send(&body)
+        self.docs.insert(uri.clone(), Doc { version, text });
+        self.forward(&uri, &body)
+    }
+
+    /// Sends a document notification on a ready connection, counting it; whether it went. One
+    /// that did not go leaves the daemon behind the client's text: whatever it published of the
+    /// document, held or still to come on this connection, is older than the client's, so nothing
+    /// of it is handed on until the next handshake re-sends the document and counts again.
+    ///
+    /// Pinned by: `tests/pushed_diagnostics.rs::should_hand_on_nothing_older_when_a_change_could_not_be_sent_after_an_abandoned_call`.
+    fn forward(&mut self, uri: &DocumentUri, body: &[u8]) -> bool {
+        let sent = self.phase == ProxyPhase::Ready && self.send(body);
+        if sent {
+            self.count(uri);
+        } else {
+            self.last.remove(uri.file());
+            self.published.remove(uri.file());
+        }
+        sent
     }
 
     /// The client changed a document to `text` (the whole text: the LSP proxy applies a client's
@@ -595,18 +741,24 @@ impl<L: Launcher> Proxy<L> {
             }],
         }))
         .unwrap_or_default();
-        self.docs.insert(uri, Doc { version, text });
-        self.phase == ProxyPhase::Ready && self.send(&body)
+        self.docs.insert(uri.clone(), Doc { version, text });
+        self.forward(&uri, &body)
     }
 
     /// The client closes a document; a ready proxy forwards it (whether it did is returned).
+    /// Whatever the daemon publishes of the document after it is dropped too, so its count is
+    /// pruned: a client clears a closed document's diagnostics itself (`jfl lsp`'s link publishes
+    /// the empty set at every close, whether or not the close reached a daemon).
     pub fn did_close(&mut self, uri: &DocumentUri) -> bool {
         self.docs.remove(uri);
         let body = codec::encode(&codec::notification::<DidClose>(DidCloseParams {
             uri: uri.clone(),
         }))
         .unwrap_or_default();
-        self.phase == ProxyPhase::Ready && self.send(&body)
+        let sent = self.forward(uri, &body);
+        self.last.remove(uri.file());
+        self.published.remove(uri.file());
+        sent
     }
 
     /// The client gives up waiting for its request (its deadline passed, or the call failed): the
@@ -650,9 +802,29 @@ impl<L: Launcher> Proxy<L> {
         params: M::Params,
         remaining: &mut impl FnMut() -> Option<Duration>,
     ) -> Result<Response<M::Result>, ProxyError> {
+        self.request::<M>(params)?;
+        self.drive(remaining)?;
+        loop {
+            match self.read_answer::<M>() {
+                Ok(response) => return Ok(response),
+                Err(ProxyError::Closed | ProxyError::TimedOut) => self.reset(),
+                Err(e) => return Err(e),
+            }
+            if remaining().is_none() {
+                return Err(ProxyError::TimedOut);
+            }
+            self.drive(remaining)?;
+        }
+    }
+
+    /// Steps the proxy until it is ready (connected, past its handshake, its documents and its
+    /// request re-sent), within what `remaining` leaves.
+    fn drive(
+        &mut self,
+        remaining: &mut impl FnMut() -> Option<Duration>,
+    ) -> Result<(), ProxyError> {
         let mut failure = None;
         let mut spawned_here = false;
-        self.request::<M>(params)?;
         loop {
             if remaining().is_none() {
                 return Err(failure.map_or(ProxyError::TimedOut, ProxyError::SpawnFailed));
@@ -681,12 +853,19 @@ impl<L: Launcher> Proxy<L> {
                     Err(ProxyError::Incompatible) if !spawned_here => {}
                     Err(e) => return Err(e),
                 },
-                ProxyPhase::Ready => match self.read_answer::<M>() {
-                    Ok(response) => return Ok(response),
-                    Err(ProxyError::Closed | ProxyError::TimedOut) => self.reset(),
-                    Err(e) => return Err(e),
-                },
+                ProxyPhase::Ready => return Ok(()),
             }
         }
     }
+}
+
+/// Whether a frame from the daemon is a notification (it has a `method`), not a response: one
+/// pass over the body that keeps nothing but the method.
+fn is_notification(body: &[u8]) -> bool {
+    #[derive(serde::Deserialize)]
+    struct Probe {
+        #[serde(default)]
+        method: Option<serde::de::IgnoredAny>,
+    }
+    serde_json::from_slice::<Probe>(body).is_ok_and(|p| p.method.is_some())
 }

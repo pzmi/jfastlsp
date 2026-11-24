@@ -258,6 +258,14 @@ pub enum Outgoing {
         /// The error.
         error: ErrorObject,
     },
+    /// A notification of the server's own (`textDocument/publishDiagnostics`): `body` is its
+    /// params' JSON, serialized from their typed value.
+    Notification {
+        /// The method.
+        method: String,
+        /// The params' JSON.
+        body: Vec<u8>,
+    },
 }
 
 /// `{"jsonrpc":"2.0","id":` … `,"result":` … `}` around a typed result.
@@ -293,8 +301,25 @@ pub fn write_one(out: &mut impl Write, outgoing: Outgoing) -> io::Result<()> {
             write!(out, "Content-Length: {}\r\n\r\n", body.len())?;
             out.write_all(&body)
         }
+        Outgoing::Notification { method, body } => {
+            let method = serde_json::to_vec(&method).map_err(io::Error::other)?;
+            let len = [NOTE_HEAD.len(), method.len(), NOTE_MID.len(), body.len(), 1]
+                .iter()
+                .try_fold(0_usize, |sum, part| sum.checked_add(*part))
+                .ok_or_else(|| io::Error::other("notification too large to frame"))?;
+            write!(out, "Content-Length: {len}\r\n\r\n")?;
+            out.write_all(NOTE_HEAD)?;
+            out.write_all(&method)?;
+            out.write_all(NOTE_MID)?;
+            out.write_all(&body)?;
+            out.write_all(RESULT_TAIL)
+        }
     }
 }
+
+/// `{"jsonrpc":"2.0","method":` … `,"params":` … `}` around a typed notification's params.
+const NOTE_HEAD: &[u8] = b"{\"jsonrpc\":\"2.0\",\"method\":";
+const NOTE_MID: &[u8] = b",\"params\":";
 
 /// `lsp-server`'s id as `jfl-protocol`'s: both are an `i32` or a string, written the same way.
 fn protocol_id(id: RequestId) -> Option<jfl_protocol::RequestId> {
@@ -513,6 +538,29 @@ Content-Length: 39\r\n\r\n{\"jsonrpc\":\"2.0\",\"id\":\"x\",\"method\":\"b\"}";
         assert_eq!(
             bodies(&out),
             [serde_json::json!({"jsonrpc": "2.0", "id": "a\"b", "result": [1, {"k": null}]})]
+        );
+    }
+
+    #[test]
+    fn should_frame_a_typed_notification_when_the_server_sends_one() {
+        // given
+        let outgoing = Outgoing::Notification {
+            method: "textDocument/publishDiagnostics".to_owned(),
+            body: br#"{"uri":"file:///a\u00e9.java","diagnostics":[]}"#.to_vec(),
+        };
+        let mut out = Vec::new();
+
+        // when
+        write_one(&mut out, outgoing).unwrap();
+
+        // then
+        assert_eq!(
+            bodies(&out),
+            [serde_json::json!({
+                "jsonrpc": "2.0",
+                "method": "textDocument/publishDiagnostics",
+                "params": {"uri": "file:///a\u{e9}.java", "diagnostics": []}
+            })]
         );
     }
 

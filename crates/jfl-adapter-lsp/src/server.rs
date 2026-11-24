@@ -25,6 +25,11 @@
 //!   leave its own state half applied, which is its bug to fix, but the session keeps serving
 //!   (fnd §4.3 rule 3).
 //!
+//! - **The server's own notifications** (`textDocument/publishDiagnostics`, LSP-04) go through the
+//!   same writer: [`Handler::attach`] hands the handler a [`Notifier`] before the first message,
+//!   which any thread may use, so they never interleave with a reply. It holds the writer's queue
+//!   only while the session runs: once [`serve`] is returning, a notification is refused, so a
+//!   thread that keeps its notifier can never keep the session from ending.
 //! - **The handler may end the session** ([`Handler::ended`], LSP's `exit`, plan §2.5): checked
 //!   after each notification; the loop then stops reading, and [`serve`] returns once every job
 //!   finished and every reply was written, with [`End::Exit`].
@@ -112,6 +117,14 @@ pub trait Handler {
     /// Pinned by: `tests/server.rs::should_tell_the_handler_when_a_request_in_flight_is_cancelled`.
     fn cancelled(&mut self, id: &RequestId) {
         let _ = id;
+    }
+
+    /// The session's notifier, handed over once before the first message is read: how the server
+    /// sends the client notifications of its own, from any thread. Ignored by default.
+    ///
+    /// Pinned by: `tests/server.rs::should_write_the_handlers_notifications_and_refuse_them_when_the_session_has_ended`.
+    fn attach(&mut self, notifier: Notifier) {
+        let _ = notifier;
     }
 
     /// Whether the session ends now, checked after each notification (LSP's `exit`): the loop
@@ -206,6 +219,34 @@ impl Reply {
     }
 }
 
+/// Sends the client notifications of the server's own, from any thread, through the session's
+/// writer. A send waits while the writer's queue is full (a client that does not read holds the
+/// sender back, never a buffer without bound) and is refused once the session has ended.
+#[derive(Debug, Clone)]
+pub struct Notifier(Arc<Mutex<Option<SyncSender<Outgoing>>>>);
+
+impl Notifier {
+    /// Sends `method` with `params`, serialized from their typed value: whether the session took
+    /// it (`false` once it has ended, or when the params cannot be written as JSON).
+    pub fn notify<T: Serialize + ?Sized>(&self, method: &str, params: &T) -> bool {
+        let Ok(body) = serde_json::to_vec(params) else {
+            return false;
+        };
+        let outgoing = Outgoing::Notification {
+            method: method.to_owned(),
+            body,
+        };
+        // Cloned out of the lock, so a send that waits on a full queue never holds the session's
+        // end (`close`) behind it.
+        let out = lock(&self.0).clone();
+        out.is_some_and(|out| out.send(outgoing).is_ok())
+    }
+
+    fn close(&self) {
+        *lock(&self.0) = None;
+    }
+}
+
 /// How a session ended.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Ended {
@@ -249,6 +290,12 @@ where
             let (job_rx, in_flight) = (&job_rx, &in_flight);
             scope.spawn(move || work(job_rx, in_flight, &out_tx));
         }
+        let notifier = Notifier(Arc::new(Mutex::new(Some(out_tx.clone()))));
+        {
+            let handler = &mut handler;
+            let attached = notifier.clone();
+            let _ = panic::catch_unwind(AssertUnwindSafe(|| handler.attach(attached)));
+        }
         let mut main = MainLoop {
             handler: &mut handler,
             out: out_tx,
@@ -260,6 +307,8 @@ where
             Err(err) => End::Read(err.kind()),
         };
         drop(main);
+        // The writer ends once every sender is gone: the handler's notifier must not keep it.
+        notifier.close();
         let output = writer.join().unwrap_or(Some(io::ErrorKind::Other));
         Ended { input, output }
     })
