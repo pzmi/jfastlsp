@@ -732,6 +732,15 @@ There is no event store (ADR 0008). What persists:
   carries a `Signed-off-by` matching its author, read as a trailer (a quoted line does not count);
   a step of `ci.yml` runs it over the pushed commits, and `land.sh` over the ones it lands.
 - CodeQL, Scorecard, Dependabot as in 7.1.
+- **Dependency updates** (DEP-02): Dependabot (7.1) proposes; it never integrates. Its pull
+  request is never merged: the orchestrator re-makes the bump as a task commit (`DEP-nn: Bump
+  <crate> to <version>`, a card in `tasks.md`'s lane DEP) through `land.sh`, like any other
+  change (ADR 0002), and Dependabot closes its own pull request once `main` carries the update.
+  The task commit is where the bump is checked: the upstream changelog read for API and output
+  changes against our call sites, each crate new to `Cargo.lock` named in the commit body with
+  its licence, whether it is compiled into our graph, and whether it has a build script.
+  The DCO check rejecting the bot's unsigned commits on its pull request is correct, not a
+  failure to fix: there is no bot exemption, since none of its commits reaches `main`.
 - Releases (REL-06): dist builds the archives with GitHub artifact attestations and
   `cargo-auditable`; `SHA256SUMS`, a CycloneDX SBOM (`cargo-cyclonedx` if dist's support is not
   confirmed) and third-party notices; release-plz prepares versions and the changelog; the owner

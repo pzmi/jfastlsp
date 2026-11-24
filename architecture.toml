@@ -114,9 +114,9 @@ jfl-process = { rustix = ["event", "process", "std"], thiserror = ["default"] }
 # (Informal Systems, Apache-2.0) holds the ITF value tree and decodes a model state into the
 # driver's observation; serde_json reads a trace into that tree (as quint-connect does: itf's own
 # `trace_from_str` cannot decode into it); serde derives the observations; toml reads the MODELS
-# registry and the regression manifest (and FORMAL-01's tests/models.rs); similar (Apache-2.0, no
-# dependencies) writes the divergence report's line diff. All in the graph through itf but
-# similar. quint-connect was weighed and not taken (ADR 0007's FORMAL-02 amendment).
+# registry and the regression manifest (and FORMAL-01's tests/models.rs); similar 3 (Apache-2.0;
+# its default features enable none of its optional dependencies, bstr among them; DEP-02) writes
+# the divergence report's line diff. All in the graph through itf but similar. quint-connect was weighed and not taken (ADR 0007's FORMAL-02 amendment).
 jfl-conformance = { itf = ["default"], serde = ["default", "derive"], serde_json = ["default"], similar = ["default"], toml = ["default"] }
 # jfl-adapter-lsp (LSP-01, ADR 0020): lsp-server (rust-analyzer's message type, which frames
 # requests, notifications and errors; ADR 0021) and gen-lsp-types (the LSP types from the 3.18

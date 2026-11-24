@@ -17,7 +17,7 @@ jfl-application = { path = "../jfl-application" }
 jfl-adapter-ipc = { path = "../jfl-adapter-ipc" }
 jfl-composition = { path = "../jfl-composition" }
 itf = "0.4.0"
-similar = "2"
+similar = "3"
 toml = "1.2.1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

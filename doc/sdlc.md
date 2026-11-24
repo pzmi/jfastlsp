@@ -132,6 +132,9 @@ tracked metric that regresses by more than 10 % (plan §1.7, fnd §9).
   commit's. After three red attempts the work stops and the owner hears the failing job and step.
 - **Outside contributions** arrive as pull requests, which run the same CI; the maintainer
   integrates an accepted one as a signed-off commit on `main`.
+- **Dependabot's pull requests are never merged**: each bump is re-made as a signed `DEP-nn`
+  task commit through `land.sh`, and the DCO check rightly rejects the bot's unsigned commits
+  (fnd §7.4).
 
 ## 6. Checkpoints and owner decisions
 

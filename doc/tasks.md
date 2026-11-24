@@ -108,6 +108,7 @@ CLI carrier), **SEM-07** (M4),
 | PROJ-04 | JDK API index from `lib/modules` and `ct.sym`, the shared library index | PROJ-03 | standard | M |  | PROJ-02 |
 | PROJ-05 | Library types in hover and definition; M3 gate | PROJ-02, PROJ-04 | standard | M |  | — |
 | DEP-01 | Switch cafebabe from the git pin to the first release with the 2026-11-13 hostile-input fix | PROJ-03 and a cafebabe release with the fix | light | S |  | any |
+| DEP-02 | Bump similar to 3.2.1 (Dependabot pzmi/jfastlsp#1, re-made as a task commit) | FORMAL-02 | light | S |  | any |
 | SEM-01 | Resolver core per DEC-04 | PROJ-05, DEC-04 | deep | L |  | SEM-04 |
 | SEM-02 | Resolver: inferred receivers and generated members | SEM-01 | deep | L |  | SEM-05 |
 | SEM-03 | Exact answers in the envelope; envelope-honesty mutants | SEM-02 | deep | M |  | SEM-05 |
@@ -3166,9 +3167,10 @@ so citations stay valid; IDX-15 is M2's gate.
 
 ### Lane DEP: pinned-dependency follow-ups
 
-Cards that undo a temporary pin once upstream releases what we need. The orchestrator checks
-pinned git dependencies for a release at every ⛳ checkpoint ([`sdlc.md`](sdlc.md) §6) and
-dispatches the card when its trigger holds.
+Cards that undo a temporary pin once upstream releases what we need, and Dependabot's bumps
+re-made as signed task commits (fnd §7.4: the bot's pull request is never merged). The
+orchestrator checks pinned git dependencies for a release at every ⛳ checkpoint
+([`sdlc.md`](sdlc.md) §6) and dispatches the card when its trigger holds.
 
 #### DEP-01: Switch cafebabe from the git pin to the first release with the 2026-11-13 hostile-input fix
 - **Depends on:** PROJ-03. **Trigger:** a `cafebabe` release newer than 0.9.x on crates.io whose
@@ -3186,3 +3188,21 @@ dispatches the card when its trigger holds.
   - [ ] the `deny.toml` git-source exception for `cafebabe` and its N4 counterpart are removed; `cargo deny check sources` and the architecture stage pass without them
   - [ ] the class-file fuzz target and the hostile-input property tests of PROJ-03 still pass, the input that triggered the 2026-11-13 panic among them
 - **Impact:** dependency graph.
+
+#### DEP-02: Bump similar to 3.2.1
+- **Depends on:** FORMAL-02 (the replay harness that uses `similar`). **Trigger:** Dependabot's
+  pull request pzmi/jfastlsp#1 ("Bump similar from 2.7.0 to 3.2.1"), whose DCO check rightly
+  failed on the bot's unsigned commits. **Model:** light. **Size:** S. **Parallel with:** any.
+- **Cites:** fnd §2.5, §7.4; sdlc §5; ADR 0002.
+- The first Dependabot bump through the flow fnd §7.4 now records: the same change as the bot's
+  (`similar = "3"` in `jfl-conformance`, `Cargo.lock` at 3.2.1) made as one signed task commit
+  and landed by `land.sh`; the bot's pull request is not merged and closes itself once `main`
+  has the update. similar 3's changelog read against our one call site
+  (`Divergence::diff`: `TextDiff::from_lines`, `unified_diff`, `context_radius`, `header`).
+- **Reuse considered:** none needed: a version bump of a crate already chosen (FORMAL-02).
+- **Accept:**
+  - [x] `jfl-conformance` requires `similar = "3"` and `Cargo.lock` holds 3.2.1; the build is `--locked`
+  - [x] the divergence report's diff is unchanged: the replay tests that assert its header and hunks pass (`crates/jfl-conformance/tests/replay.rs`: `should_fail_at_the_skipped_value_when_the_negative_control_replays_a_trace`)
+  - [x] `bstr`, new in `similar`'s lockfile entry, is named in the commit with its licence and build script; `just check-only deny` passes
+  - [x] fnd §7.4 and sdlc §5 record the Dependabot flow: bumps re-made as `DEP-nn` task commits, the bot's pull request never merged, no DCO exemption
+- **Impact:** dependency graph (test-only crate).
