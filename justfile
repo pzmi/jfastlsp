@@ -289,6 +289,19 @@ bench-syntax corpus="small": _preflight
     { printf '%s\n' "$root"; git -C "$root" ls-files -z -- '*.java'; } \
       | {{cargo}} bench --locked -p jfl-composition --bench syntax
 
+# Syntax diagnostics through the coordinator in process (LSP-04): every tracked `.java` file of the
+# pinned corpus opened, then broken by an edit timed from the coordinator's didChange to the
+# publication it decides (the syntax pass between); p50, p95, max, the coordinator's own share and
+# the largest file. No transport: the publication path is not built yet. Reports, never gates.
+# `just bench-diagnostics medium`.
+bench-diagnostics corpus="small": _preflight
+    #!/usr/bin/env bash
+    set -euo pipefail
+    bash scripts/bench-corpus.sh fetch {{quote(corpus)}}
+    root="$(bash scripts/bench-corpus.sh path {{quote(corpus)}})"
+    { printf '%s\n' "$root"; git -C "$root" ls-files -z -- '*.java'; } \
+      | {{cargo}} bench --locked -p jfl-composition --bench diagnostics
+
 # The summary store in process (IDX-08): every tracked `.java` file of the pinned corpus summarised
 # by jfl-adapter-java, then jfl-adapter-store measured in a scratch directory: encoded bytes per
 # file, a full write on 1 and 4 threads, the open and the warm load of the whole view (whole

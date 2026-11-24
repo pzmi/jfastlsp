@@ -927,7 +927,8 @@ number only with a measurement, while `formal.yml`'s 60-minute job stays well un
 `formal/diagnostics.qnt` (FORMAL-05; plan §3.1, §3.2, §3.4, §7.3; ADR 0007, ADR 0036). The
 driver is LSP-04's, over `jfl-application`'s diagnostics coordinator with the testkit's scripted
 compiler and worker, a scripted disk, and a scripted LSP client that records every
-`textDocument/publishDiagnostics`. `diagnostics` is pending on LSP-04 until then.
+`textDocument/publishDiagnostics`: `crates/jfl-conformance/src/diagnostics.rs` (LSP-04), which
+replays every regression and generated trace against the real coordinator.
 
 ### The world
 
@@ -1069,6 +1070,19 @@ These are the design above as LSP-04 must build it; the driver checks each again
 12. **`jfl diag` takes the views per-request stat and cookie first** (ADR 0037): of its file and
     of HEAD, so a shell edit the watcher has not delivered yet is pending before it waits for the
     current version's diagnostics with its deadline.
+
+### Where the coordinator meets each obligation (LSP-04, first slice)
+
+`jfl_application::diagnostics::Coordinator` is a core without I/O, stepped one model action at a
+time by its shell (the driver, the tests, the daemon to come): obligations 1, 3, 4, 5, 6, 7, 9 and
+10 are met by it and checked by the driver and `crates/jfl-application/tests/diagnostics_machine.rs`
+(a reference machine with `EventuallyUpToDate`'s reduction). The overlay-or-disk choice compares
+the caller's stamps (`Text`: the disk's mtime, an overlay's arrival stamped with the file's mtime
+then, as LSP-02's overlays are); what a compile reads is `Coordinator::track`ed (the syntax pass:
+the document alone). Left to the tasks that bring the rest: obligation 2's record of what javac
+read and obligation 8's merge of syntax and javac results (SEM-05; the merge goes through the
+model first), obligation 11 in the daemon's publication path and obligation 12 with `jfl diag`
+(LSP-04's next slice and SEM-05).
 
 ### Not modelled
 
@@ -1222,7 +1236,7 @@ Temurin JDK 21.
 |:--|:--|:--|
 | `formal-test` (23 diagnostics tests) | every `check` | under a second |
 | `formal-freshness`: seven traces regenerated | every `check` | about 2 s per trace |
-| `conformance-replay` | 10 traces of `sim_steps` (40), generated twice, every `check` | a few seconds. Read, not replayed, until LSP-04. |
+| `conformance-replay` | 10 traces of `sim_steps` (40), generated twice, every `check` | a few seconds; replayed through the coordinator since LSP-04. |
 | `formal-verify diagnostics`: Apalache | `steps = 7` | 522 s |
 | `formal-verify diagnostics`: simulation | 20000 samples of `sim_steps` (40) | 149 s |
 | `formal-verify diagnostics`: liveness and its control | 3000 samples of 62 steps, each | 34 s, then the control fails within seconds |

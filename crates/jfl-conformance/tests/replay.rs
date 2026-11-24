@@ -12,6 +12,7 @@ use std::path::{Path, PathBuf};
 use jfl_conformance::HarnessError;
 use jfl_conformance::cli;
 use jfl_conformance::daemon;
+use jfl_conformance::diagnostics;
 use jfl_conformance::manifest;
 use jfl_conformance::registry;
 use jfl_conformance::replay::{self, Context, Failure};
@@ -463,7 +464,7 @@ fn should_refuse_the_registry_when_a_model_has_no_driver() -> TestResult {
     );
     assert!(
         registry::check(&["smoke".to_owned(), "views".to_owned(), "daemon".to_owned()]).is_err(),
-        "diagnostics is pending, so registered"
+        "diagnostics has a driver, so registered"
     );
     Ok(())
 }
@@ -587,16 +588,17 @@ fn should_warn_of_each_pending_model_when_the_traces_are_replayed() {
 }
 
 #[test]
-fn should_read_a_pending_model_s_generated_traces_when_its_driver_has_not_landed() -> TestResult {
-    // given: a well-formed and a malformed generated run of the pending diagnostics model
-    let scratch = Generated::new("pending")?;
-    let daemon = scratch.dir.join("diagnostics");
-    fs::create_dir_all(&daemon)?;
-    let committed_daemon = fs::read_to_string(
+fn should_replay_the_diagnostics_generated_traces_when_its_driver_has_landed() -> TestResult {
+    // given: a well-formed and a malformed generated run of the diagnostics model (pending until
+    // LSP-04 brought its driver, when its traces were read and not replayed)
+    let scratch = Generated::new("diagnostics")?;
+    let generated = scratch.dir.join("diagnostics");
+    fs::create_dir_all(&generated)?;
+    let committed = fs::read_to_string(
         root().join("formal/traces/regression/diagnostics-close-during-compile.itf.json"),
     )?;
     let run = |text: &str| -> Result<(u8, String, String), Box<dyn Error>> {
-        fs::write(daemon.join("trace_0.itf.json"), text)?;
+        fs::write(generated.join("trace_0.itf.json"), text)?;
         let args: Vec<String> = [
             "replay",
             "--model",
@@ -619,19 +621,76 @@ fn should_read_a_pending_model_s_generated_traces_when_its_driver_has_not_landed
     };
 
     // when
-    let (good, bad) = (run(&committed_daemon)?, run("{")?);
+    let (good, bad) = (run(&committed)?, run("{")?);
 
-    // then
+    // then: replayed, and the control diverges where the trace reads a reply after its close
     assert_eq!(good.0, cli::OK, "{}{}", good.1, good.2);
     assert!(
-        good.1.contains(
-            "diagnostics: 1 generated traces read, not replayed (its driver lands with LSP-04)"
-        ),
+        good.1
+            .contains("diagnostics: seed 0x7: 1 generated traces (16 states) conform"),
         "{}",
         good.1
     );
+    assert!(
+        good.1.contains(&format!(
+            "the negative control diverged as it must, at step 6 of {}",
+            generated.join("trace_0.itf.json").display()
+        )),
+        "{}",
+        good.1
+    );
+    assert!(!good.2.contains("warning: diagnostics"), "{}", good.2);
     assert_eq!(bad.0, cli::HARNESS, "{}{}", bad.1, bad.2);
     assert!(bad.2.contains("not an ITF trace"), "{}", bad.2);
+    Ok(())
+}
+
+/// The diagnostics regression trace whose newest reply is published first and an older one read
+/// at step 12 (`twoQuickEditsReverseOrder`, plan §7.3's control step).
+const DIAGNOSTICS_REVERSE: &str =
+    "formal/traces/regression/diagnostics-two-quick-edits-reverse-order.itf.json";
+
+#[test]
+fn should_diverge_at_the_stale_reply_when_the_diagnostics_control_publishes_every_reply()
+-> TestResult {
+    // given
+    let text = fs::read_to_string(root().join(DIAGNOSTICS_REVERSE))?;
+    let context = Context {
+        model: "diagnostics",
+        seed: "0x3",
+        trace: DIAGNOSTICS_REVERSE,
+    };
+
+    // when
+    let conformed = replay::replay(
+        diagnostics::driver(),
+        &context,
+        trace::parse(DIAGNOSTICS_REVERSE, &text)?,
+    );
+    let control = replay::replay(
+        diagnostics::control(),
+        &context,
+        trace::parse(DIAGNOSTICS_REVERSE, &text)?,
+    );
+
+    // then: the model drops version 2's reply after version 3's was published; the control shows it
+    assert!(conformed.is_ok(), "{conformed:?}");
+    let Err(Failure::Diverged(divergence)) = control else {
+        return Err(format!("the diagnostics control did not diverge: {control:?}").into());
+    };
+    assert_eq!(
+        (divergence.step, divergence.action.as_str()),
+        (12, "deliver"),
+        "{divergence}"
+    );
+    assert!(
+        divergence.diff().contains("-            version: 3,"),
+        "{divergence}"
+    );
+    assert!(
+        divergence.diff().contains("+            version: 2,"),
+        "{divergence}"
+    );
     Ok(())
 }
 

@@ -41,7 +41,7 @@ progress = { step = "progressStep", invariant = "allProgress", control = "progre
 
 # Diagnostics staleness: versions, input epochs, sessions, out-of-order replies, worker crashes
 # and timeouts, close (FORMAL-05, plan §3.2, §7.3, doc/formal-models.md, which holds the measured
-# budget). Its driver lands with LSP-04.
+# budget). Its driver is LSP-04's (crates/jfl-conformance/src/diagnostics.rs).
 [models.diagnostics]
 file = "formal/diagnostics.qnt"
 main = "diagnostics"

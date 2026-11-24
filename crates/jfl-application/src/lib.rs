@@ -15,11 +15,14 @@
 //!   completeness and `sync`, the transitions of `formal/views.qnt`.
 //! - [`view_service`] (IDX-09): the async shell that drives the registry over the ports.
 //! - [`clock`] (IDX-09): the `WallClock` port, the time before each stat and the cookie deadline.
+//! - [`diagnostics`] (LSP-04): the diagnostics coordinator: which compile results are published,
+//!   keyed by document, open session and input epoch, the transitions of `formal/diagnostics.qnt`.
 //! - [`queries`] (IDX-10): definition, hover, document and workspace symbols over a pinned
 //!   generation, each answer with its completeness (plan §2.1, §2.2, §2.7).
 
 pub mod blocking;
 pub mod clock;
+pub mod diagnostics;
 pub mod hints;
 pub mod queries;
 pub mod repo_probe;

@@ -21,6 +21,7 @@ use std::fmt;
 
 pub mod cli;
 pub mod daemon;
+pub mod diagnostics;
 pub mod driver;
 pub mod manifest;
 pub mod registry;

@@ -2777,12 +2777,63 @@ plugin; LSP-06 is M1's gate and makes the bench gate blocking.
   number of steps.
 - **Reuse considered:** none fits: the version-tagged publication rule is ours and modelled (ADR
   0007).
+- **As built (LSP-04, first slice, 2026-11-24): the coordinator core and the model's driver.**
+  `jfl_application::diagnostics::Coordinator<K>` (no I/O, never waits): per document an open
+  session and an input epoch, bumped by the model's rules (every `didOpen`; every change of the
+  winning text of a file the compile reads, found through a readers index); `start` records the
+  job's session, epoch, version tag and the winning text of every input; `deliver` publishes a
+  reply only for its document's current epoch in its current open session (`Delivery::Publish`,
+  else `Stale`); `did_close` hands back the empty set to publish; `worker_lost` and `timed_out`
+  re-queue a current compile; `needs_worker` asks for a spawn while a compile is pending; a
+  transition the model does not enable is a `DiagnosticsError`. The overlay-or-disk choice
+  compares the caller's stamps (`Text`: a disk text's mtime; an overlay stamped with the file's
+  mtime when it arrived, as LSP-02's overlays are), and a compile with the disk ahead carries no
+  version. What a compile reads is `track`ed (the syntax pass: the document alone). The testkit's
+  `fakes::compiler::ScriptedWorker` runs jobs in any order, crashes and respawns, and its
+  diagnostics echo session, epoch, incarnation and every input's text (`Echo`). The driver
+  (`crates/jfl-conformance/src/diagnostics.rs`) observes all eleven variables exactly
+  (`deny_unknown_fields`, derived `PartialEq`), the ghosts kept by the model's rules from what the
+  coordinator returned; `diagnostics` moved from `PENDING` to `DRIVERS` (`PENDING` is empty).
+  `just bench-diagnostics SIZE` (`crates/jfl-composition/benches/diagnostics.rs`): the in-process
+  cycle from `did_change` through the syntax pass to the publication (`doc/bench/README.md`).
+- **Decided (LSP-04):** the reference-machine test is plain `proptest`, not
+  `proptest-state-machine` (IDX-09's and IDX-12's decision: its default features add 16 crates
+  against the std-only proptest of `architecture.toml`).
+- **Decided (LSP-04):** the negative control is a fault of the driver's shell, as the `views`
+  control's lagging store is: it publishes the replies the coordinator returns as `Stale` too
+  (plan §7.3's "publish every result"), and diverges at step 12 of
+  `diagnostics-two-quick-edits-reverse-order` (and at step 6 of `diagnostics-close-during-compile`,
+  where a reply is read after the close).
+- **Decided (LSP-04):** the coordinator keeps a closed document's entry (its session and epoch
+  counters, and the last version), so a reopened document never repeats a key; plan §5.9's bound
+  on documents applies to it with the daemon's overlays (Left below).
 - **Accept:**
-  - [ ] `conformance-replay` green for `diagnostics`; the negative control fails at its step
-  - [ ] a transcript with two quick edits whose results arrive in reverse order publishes only the newer
-  - [ ] a `proptest-state-machine` test of the coordinator (open, edit, result, close in any order) against a reference machine (ADR 0007, amended; ver §6.4)
+  - [x] `conformance-replay` green for `diagnostics`; the negative control fails at its step (the seven regression traces conform; generated: 100 traces at `0x2a`, 1,000 at `0x5eed`, 40,949 states; `tests/replay.rs::should_diverge_at_the_stale_reply_when_the_diagnostics_control_publishes_every_reply`, step 12; each of six coordinator mutants (publish every reply, track only the document's own file, a crash or a timeout that does not re-queue, the client's version on disk content, a reply published after the close) diverges and fails the reference machine)
+  - [ ] a transcript with two quick edits whose results arrive in reverse order publishes only the newer (in process today: `crates/jfl-application/tests/diagnostics_machine.rs::should_publish_only_the_newest_when_two_quick_edits_reply_in_reverse_order`; the transcript needs the publication path, Left below)
+  - [x] a `proptest-state-machine` test of the coordinator (open, edit, result, close in any order) against a reference machine (ADR 0007, amended; ver §6.4), over plain `proptest` (Decided above), with `EventuallyUpToDate`'s reduction (60 system moves after the random prefix, then nothing enabled and every open document up to date): `crates/jfl-application/tests/diagnostics_machine.rs`
   - [ ] syntax errors in the corpus's `broken/` files are published with correct UTF-16 ranges
-  - [ ] runs on the bench corpus (small at least, `just bench`) and reports the metrics it affects; its correctness tests also run against the real-corpus cases that apply (BENCH-05)
+  - [ ] runs on the bench corpus (small at least, `just bench`) and reports the metrics it affects; its correctness tests also run against the real-corpus cases that apply (BENCH-05) (in process today: `just bench-diagnostics small` and `medium`, `doc/bench/README.md`; didChange to `publishDiagnostics` through `jfl lsp` comes with the publication path)
+- **Left after LSP-04's first slice:**
+  - **the publication path:** a coordinator per view in the daemon (`daemon::views`), the syntax
+    pass on the blocking pool as the worker, `see_disk` from the view service's stat and watch,
+    stamps from mtimes; a daemon-to-proxy notification (`jfl/publishDiagnostics`, protocol golden
+    first, an additive minor); a server-initiated notification in `jfl-adapter-lsp`'s `serve` (it
+    has none: every frame today answers a request); the proxy forwarding it as
+    `textDocument/publishDiagnostics` with `version`, the ranges in the negotiated encoding
+    through `jfl-domain`'s `LineIndex`; the transcripts (two quick edits in reverse order, close
+    publishes the empty set; a reply order a transcript cannot hold is forced in process, as
+    LSP-02's cancellation is) and the `broken/` goldens; didChange to `publishDiagnostics` p50
+    and p95 through `jfl lsp` on small and medium;
+  - obligation 11 in that path (a re-sent document opened at the client's version: the
+    coordinator takes any version, the daemon must pass it on); obligations 2 and 8 (what javac
+    read, and one publication per epoch when javac's results join the syntax ones) and 12
+    (`jfl diag`) are SEM-05's;
+  - the coordinator's documents, like the daemon's overlays, are not bounded in number (plan
+    §5.9);
+  - `jfl-conformance`'s pending path (a model read, not replayed) has no real pending model now:
+    `tests/replay.rs::should_warn_of_each_pending_model_when_the_traces_are_replayed` passes over
+    an empty list, and the read-only path of generated traces is untested until a model is pending
+    again.
 - **Impact:** LSP capabilities (diagnostics).
 
 #### LSP-05: LSP plugin and `.lsp.json`

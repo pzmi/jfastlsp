@@ -539,6 +539,35 @@ answer 52 ms (small) and 239–243 ms (medium), definition p50 0.66–0.86 ms an
   p95 < 50 ms), which LSP-06 gates.
 - Hover through the proxy is not measured: LSP-03 announces it (the LSP-02 card's "Left").
 
+### Syntax diagnostics through the coordinator (LSP-04, `just bench-diagnostics`)
+
+`crates/jfl-composition/benches/diagnostics.rs` reads every tracked `.java` file into memory, then
+per file, on one thread: opens it in `jfl-application`'s diagnostics coordinator and publishes its
+first compile, then times an edit that breaks it (an unclosed class appended) from the
+coordinator's `did_change` to the publication it decides: the job's start, the syntax pass
+(`jfl-adapter-java`'s parse, summary and diagnostics) and the reply's delivery. The same cycle
+without the parse is the coordinator's own share. **In process, no transport:** the publication
+path through the daemon and `jfl lsp` is LSP-04's next slice, so this is the compute part of
+didChange to `publishDiagnostics`, not what a client waits.
+
+Measured 2026-11-24 (LSP-04) on the 4 vCPU Xeon VM (Intel Xeon @ 2.10GHz, 15 GB), another lane
+building beside it (load average about 2); one run each:
+
+| | small (junit-framework, 1,813 files) | medium (spring-framework, 9,294 files) |
+|:--|--:|--:|
+| didChange to publication, p50 | 0.29 ms | 0.40 ms |
+| didChange to publication, p95 | 2.38 ms | 3.01 ms |
+| didChange to publication, max (the largest file) | 17.2 ms | 61.0 ms (`SpelCompilationCoverageTests.java`, 0.32 MB) |
+| the coordinator alone, p50 / p95 | 6.8 / 50.1 µs | 10.7 / 70.7 µs |
+| diagnostics published per breaking edit | 1.0 | 1.0 |
+
+- The syntax pass is the cost: the parse and extraction of plan §1.7's per-file row (p95 ≤ 5 ms,
+  max ≤ 200 ms), which these rows are inside. The coordinator adds tens of microseconds (the copy
+  of the edited text into its `Text` included); one outlier of 49 ms on small, a pause of the
+  loaded VM, not reproduced on medium (max 0.58 ms).
+- A large file costs its parse: 61 ms for medium's largest, about 12 ms for small's
+  (`Assertions.java`, 0.14 MB). The edit re-parses the whole file (no incremental parse yet).
+
 ## Adding a suite
 
 1. A `suites/<name>.toml` with `name`, `description`, `kind` and the knobs of its kind

@@ -15,6 +15,7 @@ use std::path::Path;
 
 use crate::HarnessError;
 use crate::daemon;
+use crate::diagnostics;
 use crate::replay::Replayer;
 use crate::smoke;
 use crate::views;
@@ -38,7 +39,7 @@ pub struct Entry {
 }
 
 /// Every driver.
-pub const DRIVERS: [Entry; 3] = [
+pub const DRIVERS: [Entry; 4] = [
     Entry {
         model: "smoke",
         driver: smoke::driver,
@@ -54,11 +55,17 @@ pub const DRIVERS: [Entry; 3] = [
         driver: daemon::driver,
         control: daemon::control,
     },
+    Entry {
+        model: "diagnostics",
+        driver: diagnostics::driver,
+        control: diagnostics::control,
+    },
 ];
 
 /// Registered models whose driver has not landed yet, each with the task that brings it. Each
-/// task must have an open card in [`TASKS`] ([`check_pending`]).
-pub const PENDING: [(&str, &str); 1] = [("diagnostics", "LSP-04")];
+/// task must have an open card in [`TASKS`] ([`check_pending`]). None since LSP-04 brought the
+/// `diagnostics` driver; a model that lands before its driver is named here again.
+pub const PENDING: [(&str, &str); 0] = [];
 
 /// The driver of `model`.
 pub fn driver(model: &str) -> Option<&'static Entry> {

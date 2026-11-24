@@ -37,6 +37,12 @@ workspace = true
 name = "syntax"
 harness = false
 
+# Syntax diagnostics through the diagnostics coordinator on the bench corpus
+# (`just bench-diagnostics SIZE`, LSP-04); reports, never gates.
+[[bench]]
+name = "diagnostics"
+harness = false
+
 # The summary store on the bench corpus (`just bench-store SIZE [cold]`, IDX-08); reports, never
 # gates.
 [[bench]]
