@@ -8,6 +8,7 @@
 //! - [`lock`]: the single owner's lock and the proxies' spawn lock, `flock`s through std's
 //!   `File::try_lock`, files `0600`, never removed; a pid file is never trusted (ADR 0021). The
 //!   owner checks that the lock path still names its locked inode ([`lock::Flock::still_named`]).
+//!   A held lock is waited for under the waiter's own deadline ([`lock::LockWait`]).
 //! - [`socket`]: the socket path and its length limit, refused with the limit named.
 //! - [`server`]: the daemon's listener (Tokio): bound, then `0600`, each peer's uid checked
 //!   against the daemon's; connections read through `jfl-protocol`'s bounded decoder and
@@ -15,7 +16,8 @@
 //! - [`client`]: the proxy's connection (std only, so a CLI call starts fast), every wait under a
 //!   deadline the caller computes.
 //! - [`bell`]: an anonymous socket pair that wakes a thread waiting on a connection and on its
-//!   own work queue at once (`jfl lsp`'s link, for pushed diagnostics).
+//!   own work queue at once (`jfl lsp`'s link, for pushed diagnostics), or on a lock another
+//!   thread waits for ([`lock::LockWait`]).
 //! - [`notify`]: sccache's readiness handshake: the proxy binds a datagram socket in the state
 //!   directory and the spawned daemon reports `ready` or why it failed.
 //!
@@ -37,7 +39,7 @@ mod wait;
 
 pub use bell::{Bell, Ringer, Woken};
 pub use client::{ClientConn, ConnectError, Received, RecvError};
-pub use lock::{FileId, Flock, LockError};
+pub use lock::{FileId, Flock, LockError, LockWait};
 pub use message::{Call, End, Incoming, Malformed, Note};
 pub use notify::{Notice, NotifyListener};
 pub use server::{Accepted, ConnReader, ConnWriter, Listener};

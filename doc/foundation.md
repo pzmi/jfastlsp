@@ -145,7 +145,7 @@ Plan §6.5's table is enforced per crate, because clippy has no module-level con
   | Crate | Grants | Why |
   |:--|:--|:--|
   | `jfl-process` | process, clock, env | it spawns; deadlines need `Instant`; it copies the allowlisted variables into the child |
-  | `jfl-adapter-ipc` | socket, fs, spawn | the endpoint, the state directory and lock, per-connection tasks |
+  | `jfl-adapter-ipc` | socket, fs, spawn | the endpoint, the state directory and lock, per-connection tasks; the lock-wait thread (`LockWait`, IDX-12b), detached by necessity (`flock(2)` cannot be cancelled), which hands its lock back at once when its waiter is gone |
   | `jfl-adapter-lsp` | spawn | the session's reader and writer threads and its bounded request pool, all scoped and joined before the session returns (LSP-01) |
   | fs adapters of plan §6.5 (`-fs`, `-git`, `-store`, `-classfile`, `-javac`, `-gradle`) | fs | their own files only; `jfl-adapter-fs` starts no thread itself, but a watch runs `notify`'s event-loop thread (notify's own, stopped when the watch drops, not joined) and a walk `ignore`'s scoped workers (joined before it returns) (IDX-06) |
   | `jfl-composition` | fs, spawn, clock, env, timer | the system `Clock`, configuration, task supervision; timer for the daemon's idle tick and its handshake and write deadlines, in `daemon/timer.rs` only (ADR 0039) |

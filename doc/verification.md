@@ -137,7 +137,7 @@ delete, a worker crash), the fake can be told to fail the same way.
 | `syntax_indexer` | canned summaries, `jfl-adapter-java` | IDX-07 |
 | `summary_store` | in-memory store, `jfl-adapter-store` | IDX-08 |
 | `process_runner` | scripted runner, `jfl-process` | IDX-04 |
-| `endpoint` | in-memory duplex, `jfl-adapter-ipc` | IDX-12 |
+| `endpoint` | in-memory duplex, `jfl-adapter-ipc` | IDX-12 (built in IDX-12b) |
 | `library_indexer` | canned API summaries, `jfl-adapter-classfile` | PROJ-03 |
 | `project_model` | canned models, `jfl-adapter-gradle` | PROJ-01 |
 | `compiler` | scripted compiler, `jfl-adapter-javac` | SEM-04 |

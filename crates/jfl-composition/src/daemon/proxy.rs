@@ -8,8 +8,9 @@
 //! `spawnTimeout`, [`Proxy::on_accepted`] for the proxy's half of `accept`, [`Proxy::notice`],
 //! and the client's [`Proxy::request`], [`Proxy::did_open`], [`Proxy::did_close`],
 //! [`Proxy::quit`]); [`Proxy::call`] runs them in a loop for a real client. Every wait has a
-//! deadline (the accept and handshake, each reply, the notify handshake): an expired one is a
-//! reset, so a daemon alive but hung cannot hold a client forever.
+//! deadline (the accept and handshake, each reply, the notify handshake, the spawn lock): an
+//! expired one is a reset, so a daemon alive but hung, or a spawner suspended while it holds the
+//! spawn lock, cannot hold a client forever.
 //!
 //! A re-sent document keeps the client's version and text, never renumbered (the diagnostics
 //! model's obligation 11).
@@ -35,7 +36,7 @@ use std::time::{Duration, Instant};
 
 use jfl_adapter_ipc::client::{self, ClientConn, ConnectError, Received, RecvError};
 use jfl_adapter_ipc::notify::{Notice, NotifyListener, Waited};
-use jfl_adapter_ipc::{Flock, LockError, SocketPath, StateDir};
+use jfl_adapter_ipc::{Flock, LockError, LockWait, SocketPath, StateDir};
 use jfl_domain::{FileUri, PositionEncoding};
 use jfl_protocol::codec;
 use jfl_protocol::messages::{
@@ -173,8 +174,14 @@ pub struct Proxy<L> {
     serial: u64,
     docs: BTreeMap<DocumentUri, Doc>,
     want: Option<Want>,
-    spawn_lock: Option<Flock>,
+    /// Declared before `spawn_lock`, so a proxy dropped rather than quit unlinks its notify
+    /// socket before it lets the lock go, as [`Proxy::quit`] does.
     notify: Option<NotifyListener>,
+    spawn_lock: Option<Flock>,
+    /// A wait for the spawn lock that expired while another process held it, kept for the next
+    /// wait of the same call only: a call that keeps finding no daemon starts one waiting thread,
+    /// not one per wait, and its end drops it, so no lock is ever parked in an idle proxy.
+    lock_wait: Option<LockWait>,
     child: Option<Box<dyn Spawned>>,
     /// Daemons this proxy started that may still run: reaped as they exit, so a long-lived
     /// proxy collects no zombies.
@@ -236,6 +243,7 @@ impl<L: Launcher> Proxy<L> {
             docs: BTreeMap::new(),
             want: None,
             spawn_lock: None,
+            lock_wait: None,
             notify: None,
             child: None,
             spawned: Vec::new(),
@@ -325,6 +333,7 @@ impl<L: Launcher> Proxy<L> {
         self.until = Instant::now().checked_add(budget);
         let ready = self.drive(&mut remaining);
         self.until = None;
+        self.lock_wait = None;
         ready.map(|_| ())
     }
 
@@ -439,6 +448,9 @@ impl<L: Launcher> Proxy<L> {
                 .map_err(|e| ProxyError::Protocol(e.to_string()))?;
                 self.conn = Some(conn);
                 self.hello = Some(id);
+                // A daemon answers: a wait for the spawn lock is abandoned (its thread releases
+                // the lock if it gets it), so no proxy holds it for a spawn it will not make.
+                self.lock_wait = None;
                 // A daemon that resets the connection meanwhile is noticed on the next read.
                 let _sent = self.send(&body);
                 self.phase = ProxyPhase::Connecting;
@@ -451,14 +463,54 @@ impl<L: Launcher> Proxy<L> {
         Ok(self.phase)
     }
 
-    /// Waits for the spawn lock (`Spawning`): its holder keeps it at most for its bounded spawn
-    /// wait, after which this proxy's second check finds the daemon it started. A real client's
-    /// way to take it ([`Proxy::call`]); [`Proxy::take_spawn_lock`] is the model's step.
-    pub fn wait_spawn_lock(&mut self) -> Result<ProxyPhase, ProxyError> {
+    /// Waits at most `wait` for the spawn lock: `Spawning` once it is held; `Disconnected` when
+    /// another process still holds it at the end, to connect again. A real client's way to take
+    /// it ([`Proxy::call`]); [`Proxy::take_spawn_lock`] is the model's step, whose refusal is an
+    /// expired wait and whose success is a wait that got the lock (`formal/daemon.qnt`'s
+    /// `takeSpawnLock`: "waits and connects again"; no model change).
+    ///
+    /// A running holder keeps the lock at most for its spawn wait, after which this proxy's second
+    /// check finds the daemon it started; a suspended or wedged one (a Ctrl-Z'd `jfl` mid-spawn,
+    /// any process that locks the file) keeps it for ever, so the wait is bounded and the proxy
+    /// connects again in between (the holder's daemon may listen by now). `flock(2)` cannot be
+    /// polled: the wait is a [`LockWait`], a thread blocked in it that wakes this one at once; one
+    /// that expired is kept for the next wait of the same call (so a call that keeps finding no
+    /// daemon starts one such thread) and dropped when the call ends, whatever its end. Within
+    /// the call the thread may take the lock while the proxy connects again; it then holds it
+    /// until the proxy's next step, which either takes it (no daemon) or drops it (a daemon
+    /// answered): the previous holder's release delayed by one connect, as the model may order
+    /// it. Pinned by
+    /// `tests/daemon.rs::should_end_the_call_at_its_deadline_naming_the_spawn_lock_when_its_holder_never_lets_go`,
+    /// `::should_spawn_and_serve_when_the_holder_of_the_spawn_lock_lets_go_during_the_wait` and
+    /// `::should_hold_no_spawn_lock_while_idle_when_its_call_ended_on_a_held_one`.
+    pub fn wait_spawn_lock(&mut self, wait: Duration) -> Result<ProxyPhase, ProxyError> {
         self.expect("takeSpawnLock", &[ProxyPhase::NoDaemon])?;
-        self.spawn_lock = Some(Flock::acquire(&self.state.spawn_lock_path())?);
-        self.phase = ProxyPhase::Spawning;
+        let pending = match self.lock_wait.take() {
+            Some(pending) => pending,
+            None => match Flock::try_acquire(&self.state.spawn_lock_path()) {
+                Ok(lock) => return Ok(self.spawning(lock)),
+                Err(LockError::Held { path }) => LockWait::start(&path)?,
+                Err(e) => return Err(e.into()),
+            },
+        };
+        let mut remaining = deadline(wait);
+        loop {
+            if let Some(lock) = pending.wait(remaining().unwrap_or_default())? {
+                return Ok(self.spawning(lock));
+            }
+            if remaining().is_none_or(|left| left.is_zero()) {
+                break;
+            }
+        }
+        self.lock_wait = Some(pending);
+        self.phase = ProxyPhase::Disconnected;
         Ok(self.phase)
+    }
+
+    fn spawning(&mut self, lock: Flock) -> ProxyPhase {
+        self.spawn_lock = Some(lock);
+        self.phase = ProxyPhase::Spawning;
+        self.phase
     }
 
     /// Tries the spawn lock: `Spawning`, or `Disconnected` while another proxy holds it.
@@ -486,6 +538,9 @@ impl<L: Launcher> Proxy<L> {
             return Ok(self.phase);
         }
         self.reap();
+        // Notify sockets of spawners that died while they waited (the spawn lock is held here),
+        // so they do not pile up; a failure leaves them, as before.
+        let _removed = self.state.remove_notify_sockets();
         // A fixed-width token, unique among this state directory's spawns: the process's pid and
         // its spawn count, shared by every proxy of the process (only the spawn lock's holder
         // binds one, and an abandoned spawn's path is gone long before the count wraps).
@@ -769,6 +824,7 @@ impl<L: Launcher> Proxy<L> {
     /// read as the next one's. The documents stay, re-sent on the next connection.
     pub fn abandon(&mut self) {
         self.want = None;
+        self.lock_wait = None;
         self.reset();
     }
 
@@ -777,9 +833,12 @@ impl<L: Launcher> Proxy<L> {
     pub fn quit(&mut self) {
         self.conn = None;
         self.hello = None;
-        self.spawn_lock = None;
+        // The notify socket goes before the spawn lock, as in `await_notice`: the next holder
+        // takes any `n-*` it finds for a dead spawner's.
         self.notify = None;
         self.child = None;
+        self.spawn_lock = None;
+        self.lock_wait = None;
         self.docs.clear();
         self.want = None;
         self.phase = ProxyPhase::Disconnected;
@@ -797,6 +856,10 @@ impl<L: Launcher> Proxy<L> {
         self.until = Instant::now().checked_add(budget);
         let answer = self.call_until::<M>(params, &mut remaining);
         self.until = None;
+        // A wait for the spawn lock left by this call's end (its deadline passed while another
+        // process held it) is abandoned: kept, it would take the lock once its holder let go and
+        // park it here until the next call, holding every other proxy and a daemon's shutdown.
+        self.lock_wait = None;
         answer
     }
 
@@ -821,23 +884,34 @@ impl<L: Launcher> Proxy<L> {
     }
 
     /// Steps the proxy until it is ready (connected, past its handshake, its documents and its
-    /// request re-sent), within what `remaining` leaves.
+    /// request re-sent), within what `remaining` leaves. A wait for the spawn lock lasts at most
+    /// the spawn budget (a running holder's longest hold) and what is left; a call whose time ran
+    /// out while another process held the spawn lock and no daemon answered fails with
+    /// [`LockError::Held`] naming the lock file, and the proxy is left `Disconnected`, its
+    /// documents and request kept for the next call.
     fn drive(
         &mut self,
         remaining: &mut impl FnMut() -> Option<Duration>,
     ) -> Result<(), ProxyError> {
         let mut failure = None;
         let mut spawned_here = false;
+        let mut held = false;
         loop {
             if remaining().is_none() {
+                if held {
+                    return Err(ProxyError::Lock(LockError::Held {
+                        path: self.state.spawn_lock_path(),
+                    }));
+                }
                 return Err(failure.map_or(ProxyError::TimedOut, ProxyError::SpawnFailed));
             }
             match self.phase {
                 ProxyPhase::Disconnected => {
-                    self.connect()?;
+                    held &= self.connect()? == ProxyPhase::NoDaemon;
                 }
                 ProxyPhase::NoDaemon => {
-                    self.wait_spawn_lock()?;
+                    let wait = remaining().unwrap_or_default().min(self.budget.spawn);
+                    held = self.wait_spawn_lock(wait)? == ProxyPhase::Disconnected;
                 }
                 ProxyPhase::Spawning => {
                     spawned_here |= self.spawn()? == ProxyPhase::Awaiting;

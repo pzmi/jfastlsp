@@ -131,7 +131,7 @@ pub struct ConnReader {
     chunk: Box<[u8]>,
     start: usize,
     end: usize,
-    ended: bool,
+    ended: Option<End>,
 }
 
 impl ConnReader {
@@ -142,20 +142,21 @@ impl ConnReader {
             chunk: vec![0; READ_CHUNK].into_boxed_slice(),
             start: 0,
             end: 0,
-            ended: false,
+            ended: None,
         }
     }
 
-    /// The next frame; after an [`Incoming::End`], always the same end. Cancel-safe between
-    /// frames only: the bytes read are kept in the reader, so a dropped call loses nothing that
-    /// was read.
+    /// The next frame; after an [`Incoming::End`], always the same end (a truncated frame never
+    /// turns into a clean end on the next read). Cancel-safe between frames only: the bytes read
+    /// are kept in the reader, so a dropped call loses nothing that was read. Pinned by the
+    /// `endpoint` contract (`tests/contract.rs`, case `truncated_frame_is_not_clean`).
     pub async fn next(&mut self) -> Incoming {
-        if self.ended {
-            return Incoming::End(End::Eof);
+        if let Some(end) = &self.ended {
+            return Incoming::End(end.clone());
         }
         let incoming = self.read_frame().await;
-        if matches!(incoming, Incoming::End(_)) {
-            self.ended = true;
+        if let Incoming::End(end) = &incoming {
+            self.ended = Some(end.clone());
         }
         incoming
     }

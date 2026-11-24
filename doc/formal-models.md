@@ -668,7 +668,10 @@ Unix sockets, `flock`s and files in a fresh state directory under the temporary 
    daemon reads a closed connection's EOF, when it stops, and when it crashes. A new daemon
    starts with none; nothing is persisted for it to restore (control `crashKeepingOverlays`).
 6. **Spawn: spawn lock, check again, spawn, handshake.** A proxy that finds no daemon takes the
-   spawn lock (another proxy holding it: wait, then connect again), checks again under it (a
+   spawn lock (another proxy holding it: wait, then connect again; the real wait is bounded, so
+   one that expires is this refusal and one that gets the lock is the take; nothing of the wait
+   outlives its call, and a lock its thread gets meanwhile is held only until the proxy's next
+   step, the previous holder's release delayed by that step, IDX-12b), checks again under it (a
    racing proxy's daemon may listen by now), binds its notify socket, starts `jfl daemon`
    detached in its own session, and waits with a bounded budget. Ready, an error, a dead child
    or an expired wait all end the same way: release the spawn lock and connect again.
@@ -742,8 +745,9 @@ These are the design above as IDX-12 must build it; the driver checks each again
    shutdown steps, never a `Drop` that an abort would run.
 7. **Per-connection state:** overlays and requests keyed by connection, dropped when the daemon
    reads EOF, on stop and on crash; nothing persisted across a restart.
-8. **The proxy:** the spawn lock, the second check under it, the notify handshake with a bounded
-   wait; on a refused connect, a reset backlog connection, a failed or timed-out spawn: connect
+8. **The proxy:** the spawn lock (its wait bounded by the call's deadline and the spawn budget,
+   an expired wait a refused `takeSpawnLock`: connect again; IDX-12b), the second check under
+   it, the notify handshake with a bounded wait; on a refused connect, a reset backlog connection, a failed or timed-out spawn: connect
    again. On a new connection: the version handshake, then the open documents, then the
    unanswered request. A re-sent document keeps the client's LSP version and text, never
    renumbered (the `diagnostics` model's obligation 11). **The proxy's waits have deadlines:** for the accept and handshake, and

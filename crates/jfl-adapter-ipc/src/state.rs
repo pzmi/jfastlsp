@@ -160,4 +160,36 @@ impl StateDir {
     pub fn log_path(&self) -> PathBuf {
         self.path.join(LOG_FILE)
     }
+
+    /// Removes every notify socket in the directory (`n-` and 12 lowercase hex digits) and says
+    /// how many. Only the spawn lock's holder binds one, and it removes its own before it lets the
+    /// lock go, so one found by the next holder was left by a spawner that died while it waited:
+    /// call this only under the spawn lock, before binding a new one. Pinned by
+    /// `jfl-composition`'s
+    /// `tests/daemon.rs::should_remove_a_notify_socket_left_by_a_dead_spawner_when_it_spawns`.
+    pub fn remove_notify_sockets(&self) -> io::Result<usize> {
+        let mut removed = 0_usize;
+        for entry in fs::read_dir(&self.path)? {
+            let name = entry?.file_name();
+            let Some(token) = name
+                .to_str()
+                .and_then(|name| name.strip_prefix(NOTIFY_PREFIX))
+            else {
+                continue;
+            };
+            let shaped = token.len() == NOTIFY_NAME_LEN.saturating_sub(NOTIFY_PREFIX.len())
+                && token
+                    .bytes()
+                    .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b));
+            if !shaped {
+                continue;
+            }
+            match fs::remove_file(self.path.join(&name)) {
+                Ok(()) => removed = removed.saturating_add(1),
+                Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+                Err(e) => return Err(e),
+            }
+        }
+        Ok(removed)
+    }
 }

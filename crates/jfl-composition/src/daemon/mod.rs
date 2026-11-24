@@ -32,7 +32,7 @@ use std::ffi::OsString;
 use std::fs::OpenOptions;
 use std::io;
 use std::os::fd::OwnedFd;
-use std::os::unix::fs::OpenOptionsExt;
+use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -43,6 +43,11 @@ use proxy::{Launcher, Spawned};
 
 /// How long a daemon with no connection lives on.
 pub const DEFAULT_IDLE: Duration = Duration::from_secs(30 * 60);
+
+/// The size past which `daemon.log` is emptied when a daemon is spawned: its daemons write only
+/// warnings and errors there (no INFO on the healthy path, fnd §5), so 4 MiB is a great many of
+/// them, and a log that grows past it is cut rather than left to fill the disk.
+pub const LOG_CAP: u64 = 4 << 20;
 
 /// What `jfl daemon` runs with.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -229,13 +234,22 @@ impl ProcessLauncher {
         self
     }
 
-    /// Starts the daemon, reporting on `notify`.
+    /// Starts the daemon, reporting on `notify`, its stdout and stderr appended to `daemon.log`:
+    /// reset to `0600` (a file left wider by an older build or another umask, as the lock files
+    /// are) and emptied first when it has grown past [`LOG_CAP`], so the log stays bounded across
+    /// spawns. Pinned by `tests/daemon.rs::should_reset_the_log_to_0600_and_empty_it_when_it_grew_past_its_cap`.
     pub fn spawn(&mut self, notify: &Path) -> io::Result<DetachedDaemon> {
         let log = OpenOptions::new()
             .create(true)
             .append(true)
             .mode(jfl_adapter_ipc::state::FILE_MODE)
             .open(self.state.log_path())?;
+        log.set_permissions(std::fs::Permissions::from_mode(
+            jfl_adapter_ipc::state::FILE_MODE,
+        ))?;
+        if log.metadata()?.len() > LOG_CAP {
+            log.set_len(0)?;
+        }
         let mut command = Command::new(self.program.clone())
             .arg("daemon")
             .arg("--state-dir")

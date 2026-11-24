@@ -23,4 +23,5 @@ thiserror = "2"
 workspace = true
 
 [dev-dependencies]
-tokio = { version = "1.52.3", default-features = false, features = ["rt"] }
+jfl-testkit = { path = "../jfl-testkit" }
+tokio = { version = "1.52.3", default-features = false, features = ["rt", "sync"] }

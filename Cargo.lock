@@ -705,6 +705,7 @@ dependencies = [
  "jfl-application",
  "jfl-domain",
  "jfl-protocol",
+ "jfl-testkit",
  "lsp-server",
  "rustix",
  "serde_json",

@@ -98,6 +98,7 @@ CLI carrier), **SEM-07** (M4),
 | IDX-10 | Queries: `sym`, `def`, `hover` | IDX-09 | deep | L |  | LSP-01 |
 | IDX-11 | Queries: `refs`, the `possible` superset, completeness | IDX-10 | deep | L |  | IDX-12 |
 | IDX-12 | Daemon and IPC: lock, socket, spawn, reconnect (daemon driver) | IDX-03, IDX-09, FORMAL-04 | deep | L |  | IDX-11 |
+| IDX-12b | Daemon and IPC follow-ups: a bounded wait for the spawn lock, the `endpoint` contract suite | IDX-12, FND-18, IDX-09e, LSP-02 | deep | M |  | LSP-03 |
 | IDX-16 | Other JVM languages' sources make answers incomplete | IDX-11 | deep | M |  | FND-18 |
 | IDX-17 | The language seam: a registry, an indexer per language, language-tagged summaries | IDX-16 | deep | L |  | — |
 | LSP-01 | LSP adapter on `lsp-server` and the LSP conformance harness | IDX-03; started before DEC-02 by the owner's delegation (2026-11-17); DEC-02 still gates work beyond the walking skeleton | deep | L |  | IDX-09, IDX-10 |
@@ -773,7 +774,7 @@ foundation piece by piece (ADR 0035).
 - **Reuse considered:** none needed: fixes; the existing spawn lock is the wait.
 - **Speed:** no bench metric applies: only the daemon's shutdown changes, which no benchmark
   measures (ADR 0031).
-- **Follow-up (pre-existing, not this card):** `Proxy::wait_spawn_lock` blocks in
+- **Follow-up (pre-existing, not this card; done in IDX-12b):** `Proxy::wait_spawn_lock` blocks in
   `Flock::acquire` outside the call's budget, so `Proxy::call`'s "within `budget` in all" does
   not hold while another process holds the spawn lock (a suspended spawner blocks every proxy
   that finds no daemon).
@@ -2368,7 +2369,7 @@ the loop is held p95 299–307 ms per slice (the whole 4.1–4.3 s settle before
 - **Left:**
   - a lost watch and an overflow are not driven in the bench (they set the same rescan; the
     component tests cover the path);
-  - **ready follow-up** (FND-17 has landed): a daemon-level test of a rescan during a settle in
+  - **ready follow-up** (FND-17 has landed; done in IDX-12b): a daemon-level test of a rescan during a settle in
     `tests/daemon.rs` (a commit in a linked worktree while a large view settles; every answer
     before the last slice incomplete, none waiting for the whole view); the component tests,
     the lowest level that can fail for the bound, and the bench cover it meanwhile;
@@ -2860,8 +2861,117 @@ the loop is held p95 299–307 ms per slice (the whole 4.1–4.3 s settle before
   - [x] after a daemon crash a client reconnects and the new daemon holds no overlay of a dead connection (the `daemon-crash-with-open-documents` trace on the host in process; `tests/daemon.rs::should_reconnect_to_a_new_daemon_with_its_document_when_the_daemon_crashed` with a killed process)
   - [x] a reference-machine test of the host's lock, socket and connection states, with `EventuallyServed`'s reduction (once faults stop, every waiting client is served within 60 system moves): plain `proptest`, not `proptest-state-machine`, whose default features add 16 crates against the std-only proptest of `architecture.toml` (orchestrator's decision, IDX-12) (`jfl-composition/tests/host_machine.rs`; ADR 0007, amended; ver §6.4)
   - [x] reports the metrics it affects (`just bench-daemon`, `doc/bench/README.md`); no corpus applies (none of it reads a Java file; the orchestrator to confirm this reading of the clause)
-  - [ ] the `endpoint` contract suite (ver §5): one suite over an in-memory duplex and `jfl-adapter-ipc`, with a deliberately broken implementation failing it
+  - [x] the `endpoint` contract suite (ver §5): one suite over an in-memory duplex and `jfl-adapter-ipc`, with a deliberately broken implementation failing it (IDX-12b: `jfl_testkit::contracts::endpoint`, `crates/jfl-adapter-ipc/tests/contract.rs`)
 - **Impact:** protocol (endpoint); new authority (sockets).
+
+#### IDX-12b: Daemon and IPC follow-ups: a bounded wait for the spawn lock, the `endpoint` contract suite
+- **Depends on:** IDX-12, FND-18, IDX-09e, LSP-02. **Model:** deep. **Size:** M. **Parallel with:** LSP-03.
+- **Cites:** plan §5.2, §5.3, §6.5, §7.2; ver §2, §5, §6; ADR 0007, ADR 0039; `doc/formal-models.md`
+  (the daemon's decisions 6 and 9, IDX-12's obligation 8); the IDX-12, LSP-02 and FND-18 reviews.
+- **Why:** the items left on IDX-12 (its last Accept box, the `endpoint` suite), FND-18 (its
+  follow-up: `Proxy::wait_spawn_lock` blocked in `Flock::acquire` without bound, so a suspended
+  spawner, a Ctrl-Z'd `jfl` mid-spawn or any process that locks `spawn.lock`, held every proxy that
+  found no daemon for ever, and `Proxy::call`'s "within `budget` in all" did not hold) and IDX-09e
+  (a daemon-level test of a rescan during a settle, ready once `tests/daemon.rs` was free).
+- **Decided (IDX-12b): the proxy's wait for the spawn lock is bounded, and its expiry is the
+  model's refused `takeSpawnLock`** ("waits and connects again"): no model change (ADR 0007
+  checked; `doc/formal-models.md` decision 6 and obligation 8 say so). Each wait lasts at most the
+  call's time left and its spawn budget (a running holder's longest hold: its notify wait); an
+  expired one leaves the proxy `Disconnected`, so it connects again (the holder's daemon may listen
+  by now) and waits again; a call whose deadline passes while the lock is still held and no daemon
+  answers fails with `LockError::Held` naming `spawn.lock`, the proxy `Disconnected` with its
+  documents and request kept. `flock(2)` cannot be polled, so the wait is
+  `jfl_adapter_ipc::LockWait`: a thread (the crate's `spawn` grant) blocks in it and hands the lock
+  over a bounded channel, ringing a `Bell` the proxy polls with its time left (`poll(2)`; no sleep,
+  no timed wait); a wait that expired is kept for the next wait of the same call only, so a call
+  that keeps finding no daemon starts one such thread, and one abandoned (a daemon answered, or the
+  call ended, whatever its end, `abandon` included) releases the lock as soon as its thread gets it.
+  **Why the model needs no change** (re-checked after the review, which found the first version
+  kept the wait past its call: a thread took the lock once its holder let go and parked it in an
+  idle `jfl lsp` until its next call, refusing every other proxy and making a daemon's shutdown
+  wait its 15 s and stop alone, which `Progress` forbids): now nothing is pending once a call
+  ends, and within a call a thread that gets the lock holds it only until the proxy's next step,
+  which follows at once (an expired wait leaves the proxy `Disconnected`, and its connect then
+  either drops the wait, releasing the lock, or finds no daemon and takes it); an abandoned
+  thread holds it only between its `flock` and its failed hand-over, with no wait in between. Each
+  is the previous holder's release delayed by that step, an ordering the model already allows, so
+  a refused `takeSpawnLock` (lock held at the expiry) and a successful one (the wait got it) are
+  the only proxy moves (pinned by
+  `tests/daemon.rs::should_hold_no_spawn_lock_while_idle_when_its_call_ended_on_a_held_one`, red
+  on the first version). `jfl lsp` answers a call that ended on a held lock `ServerCancelled`, as
+  any call that reached its deadline (`lsp::tests::should_answer_server_cancelled_when_the_call_ended_on_a_held_spawn_lock`).
+  Weighed and not taken: inotify's close events on the lock file (Linux only, and
+  `__fput` reports the close before it drops the flock, so a waiter can retry too early and sleep
+  to its deadline) and a poll in slices (a polling loop).
+- **Decided (IDX-12b): the `endpoint` contract** (ver §5) is `jfl_testkit::contracts::endpoint`:
+  its own vocabulary (`jfl-testkit` may not name `jfl-adapter-ipc`), a `Connection` whose client
+  and server halves the suite drives one call at a time, the server reporting each frame as a
+  `Read` (the adapter's `Incoming`). Ten cases: frames in order both ways; frames of 1 MiB whole
+  both ways; a body that is not a message answered with its id and the framing kept; a frame over
+  the 16 MiB limit skipped and the next one read; a client body over the limit refused with
+  nothing written; a clean end that stays clean; the server's close the client's end; a client
+  read whose deadline passed losing nothing; a truncated frame never a clean end, then or after;
+  lost framing never resynchronised on a guess. The fake is `DuplexEndpoint`, an in-memory duplex
+  over `jfl-protocol`'s decoder; eleven broken carriers each fail exactly one case, every case
+  failed by at least one (`truncated_frame_is_not_clean` by two). The fake shares that
+  decoder with the adapter on purpose: the framing is `jfl-protocol`'s contract, pinned by its own
+  property tests, so the suite checks the carrier (the socket, the reader and writer, the ends,
+  the classification, which the fake does on its own with `serde_json` rather than
+  `lsp_server`). The real carrier
+  (`crates/jfl-adapter-ipc/tests/contract.rs`) runs the daemon side on a thread and runtime of its
+  own, its reader reading ahead and its writer fed through Tokio's bounded channels (the `sync`
+  feature, a dev feature of `jfl-adapter-ipc` now). The suite found a bug: `ConnReader::next`
+  promised "always the same end" after an end and returned a clean end instead, so a truncated
+  frame read as a clean end on the second read (fixed: the end is kept).
+- **Also (the reviews' LOWs, cheap):** a spawner that died while it waited left its `n-*` notify
+  socket for ever; the next holder of the spawn lock removes every one it finds
+  (`StateDir::remove_notify_sockets`), and `Proxy::quit` drops its notify socket before the spawn
+  lock, as `await_notice` does (and a proxy dropped without `quit` the same, its fields declared
+  in that order). `daemon.log` is reset to `0600` at every spawn and emptied when it
+  has grown past `daemon::LOG_CAP` (4 MiB; its daemons write only warnings and errors).
+- **Version mismatch:** already pinned by `tests/daemon.rs::should_stop_the_daemon_of_another_major_and_start_its_own_when_a_proxy_connects`
+  and `::should_serve_only_stop_when_the_handshake_announced_another_major` (IDX-12's card lists
+  it as decided and pinned); nothing to add.
+- **Reuse considered:** std's `File::lock` and `mpsc::sync_channel`, the crate's own `Bell`
+  (LSP-04) and `poll(2)` helper; no lock crate (plan §16.3). The contract suite follows
+  `process_runner`'s shape (a vocabulary of its own, a fake, broken carriers in its tests).
+- **Speed:** no bench metric applies (ADR 0031): the proxy's wait changes only while another
+  process holds the spawn lock, and the rest is tests and the spawn's housekeeping, which no
+  benchmark measures.
+- **Left (the cards' LOWs not taken here):**
+  - the `endpoint` suite has no cancellation case (`ConnReader::next` is cancel-safe between
+    frames), no read-failure end (`End::Read`, a reset), and its duplex cannot be told to fail
+    (ver §5); no consumer uses it as a fake yet;
+  - `daemon.log` is opened without `O_NOFOLLOW` (the `0700` state directory admits no other
+    user), and its cap is checked only at a spawn, so one long-lived daemon's log can grow past it;
+  - the proxy's `connect` has no deadline of its own (a Unix connect blocks only on a full
+    backlog), and neither has `client::listening`, the second check;
+  - a connection's overlays and the session's open documents are not bounded in number (plan
+    §5.9);
+  - the liveness control `progressStepIgnoringSweep` runs by hand only (the registry takes one
+    control per model);
+  - the state directory is checked by its last component only, and the shutdown's unlink compares
+    then removes (a window after a lost lock only);
+  - nothing is logged through a subscriber (refused peers, accept and write failures): the tracing
+    subscriber, with `lsp_server`'s `log` kept below DEBUG, is still to come;
+  - the bench can leave a daemon on an error path; the test daemon is a bin of a production crate
+    (a release builds `--bin jfl` only);
+  - LSP-02's left items on the views (`settle`'s reads, `head_commit` inline, hover) are the views'
+    and LSP-03's, not the daemon's.
+- **Accept:**
+  - [x] a call that ended on a held spawn lock leaves its idle proxy holding nothing once the holder lets go (`tests/daemon.rs::should_hold_no_spawn_lock_while_idle_when_its_call_ended_on_a_held_one`; red on the first version, which kept the wait); `jfl lsp` answers it `ServerCancelled` (`lsp::tests::should_answer_server_cancelled_when_the_call_ended_on_a_held_spawn_lock`)
+  - [x] a held spawn lock ends a call at its deadline with `LockError::Held` naming `spawn.lock`, spawning nothing, the proxy `Disconnected`; before IDX-12b the call never returned (`tests/daemon.rs::should_end_the_call_at_its_deadline_naming_the_spawn_lock_when_its_holder_never_lets_go`, red on the old proxy at its 20 s guard)
+  - [x] a holder that lets go during the wait wakes it at once (a spawn budget past the call's, so a missed wake would end the call): the proxy spawns and is served (`::should_spawn_and_serve_when_the_holder_of_the_spawn_lock_lets_go_during_the_wait`, the release after `/proc/locks` lists the proxy's thread blocked); the hand-over and an abandoned wait's release, its thread first seen blocked in `flock` (`jfl-adapter-ipc`'s `lock::tests`)
+  - [x] the `endpoint` contract suite over the in-memory duplex and `jfl-adapter-ipc`, each of eleven broken carriers failing exactly one case, every case covered (`jfl-testkit`'s `contracts::endpoint::tests`, `crates/jfl-adapter-ipc/tests/contract.rs`; the old `ConnReader::next` fails `truncated_frame_is_not_clean`)
+  - [x] a rescan during a settle at daemon level, forced every time: the test daemon (`src/bin/jfl-composition-test-daemon.rs`, never shipped) holds the views' background work while `<state>/test-hold-settle` exists, so a commit in a linked worktree with all three slices left is answered at exactly the open's generation plus one (the rescan's), from the new `HEAD`, incomplete; with the marker removed the view is complete only after the three slices' generations (one more when the commit's own `.git` event sets a second rescan, which leaves the files again: its timing is the watcher's, so that count is not asserted; 3 runs in 50 under load had it), every answer before incomplete (`tests/daemon.rs::should_leave_the_deferred_files_to_the_slices_when_a_commit_in_a_linked_worktree_comes_during_the_settle`; with the rescan reading the deferred files again it fails, answered complete at once)
+  - [x] a dead spawner's notify socket removed by the next spawn; `daemon.log` reset to `0600` and emptied past its cap, kept under it (`tests/daemon.rs`, three tests)
+  - [x] the affected tests repeated under load, 4 CPU hogs, each test binary as one process (tests as threads): `tests/daemon.rs` whole (29 tests) 50 runs, no failure, after a first 50 whose 3 failures were the rescan test's exact final generation (the commit's `.git` event's extra rescan, now not asserted); the `endpoint` contract on the socket 50 runs and `jfl-adapter-ipc`'s `lock::tests` 50 runs, no failure; `just check` green
+- **Impact:** `jfl-adapter-ipc` (`LockWait`; `ConnReader::next` keeps its end;
+  `StateDir::remove_notify_sockets`; dev-dependencies `jfl-testkit` and Tokio's `sync`);
+  `jfl-composition` (the proxy's bounded wait for the spawn lock, dropped at every call's end; the
+  notify sweep, the notify socket released before the spawn lock; `daemon.log`'s mode and cap;
+  `jfl lsp`'s `ServerCancelled` for a held lock; the test daemon's settle hold); `jfl-testkit` (`contracts::endpoint`); `architecture.toml` (the
+  dev feature); tests; plan §5.2; `doc/formal-models.md`.
 
 #### IDX-16: Other JVM languages' sources make answers incomplete
 - **Depends on:** IDX-11. **Model:** deep. **Size:** M. **Parallel with:** FND-18.

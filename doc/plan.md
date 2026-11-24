@@ -449,7 +449,10 @@ daemon are the closest published shapes (§16).
 - **Spawn on demand.** A proxy that finds no daemon takes a short spawn lock, starts
   `jfl daemon` detached (its own session) through `jfl-process`, and waits for readiness with a
   bounded budget through sccache's notify-socket handshake; two proxies racing start one daemon.
-  The lock is std `File::try_lock`; a pid file is never trusted (ADR 0021).
+  The lock is std `File::try_lock`; a pid file is never trusted (ADR 0021). A proxy that finds
+  the spawn lock held waits for it within its call's deadline, at most its spawn budget at a time
+  (a running holder's longest hold), connecting again in between; a holder that never lets go (a
+  suspended `jfl`) ends the call at its deadline with an error naming the lock (IDX-12b).
 - **Reconnect.** A proxy that loses its daemon (crash, upgrade, idle exit) reconnects, spawning
   if needed, and re-sends its open documents; a request in flight is answered with an error the
   client can retry, never silently dropped.

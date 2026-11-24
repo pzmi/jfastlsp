@@ -219,8 +219,10 @@ jfl-adapter-java = { proptest = ["std"], tree-sitter-java = ["default"] }
 jfl-adapter-store = { proptest = ["std"] }
 jfl-application = { proptest = ["std"] }
 # jfl-adapter-ipc (IDX-12): tokio's current-thread runtime (rt) to drive the daemon side in the
-# integration tests; in the graph already (the crate's own tokio).
-jfl-adapter-ipc = { tokio = ["rt"] }
+# integration tests; in the graph already (the crate's own tokio). Its channels (sync, IDX-12b) hand
+# the `endpoint` contract's server thread the frames to write while its reader reads ahead; enabled
+# in the graph already (jfl-composition).
+jfl-adapter-ipc = { tokio = ["rt", "sync"] }
 # jfl-composition (IDX-12): proptest for the daemon host's reference-machine test (ver §6.4; plain
 # proptest, not proptest-state-machine, whose default features add 16 crates against the std-only
 # proptest every crate here takes), with the same features as jfl-domain's, for the same reasons.

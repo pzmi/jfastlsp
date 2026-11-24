@@ -59,6 +59,23 @@ mod given {
 
         /// A proxy named `name` whose spawns are recorded here.
         pub(crate) fn proxy(&self, name: &str, idle: Option<Duration>) -> Proxy<Recording> {
+            self.proxy_with(
+                name,
+                idle,
+                Budget {
+                    reply: Duration::from_secs(10),
+                    spawn: Duration::from_secs(20),
+                },
+            )
+        }
+
+        /// A proxy named `name` with the waits' `budget`, whose spawns are recorded here.
+        pub(crate) fn proxy_with(
+            &self,
+            name: &str,
+            idle: Option<Duration>,
+            budget: Budget,
+        ) -> Proxy<Recording> {
             let mut launcher = ProcessLauncher::new(Path::new(PROGRAM), self.state.clone());
             if let Some(idle) = idle {
                 launcher = launcher.with_idle(idle);
@@ -72,10 +89,7 @@ mod given {
                     launcher,
                     children: Arc::clone(&self.children),
                 },
-                Budget {
-                    reply: Duration::from_secs(10),
-                    spawn: Duration::from_secs(20),
-                },
+                budget,
             )
         }
 
@@ -160,6 +174,47 @@ mod given {
             }
             let _ = fs::remove_dir_all(&self.root);
         }
+    }
+
+    /// Whether a process waits blocked in `flock(2)` for the lock file at `path`: `/proc/locks`
+    /// lists a blocked waiter as `-> FLOCK` with the file's inode.
+    #[cfg(target_os = "linux")]
+    pub(crate) fn lock_waiter_blocked(path: &Path) -> bool {
+        use std::os::unix::fs::MetadataExt;
+        let Ok(ino) = fs::metadata(path).map(|m| m.ino()) else {
+            return false;
+        };
+        let suffix = format!(":{ino}");
+        fs::read_to_string("/proc/locks").is_ok_and(|locks| {
+            locks.lines().any(|line| {
+                let fields: Vec<&str> = line.split_whitespace().collect();
+                fields.get(1) == Some(&"->")
+                    && fields.get(2) == Some(&"FLOCK")
+                    && fields.get(6).is_some_and(|id| id.ends_with(&suffix))
+            })
+        })
+    }
+
+    /// Whether a process waits blocked for the lock file at `path`: not observable here, so the
+    /// test that asks releases the lock at once (the wake itself is pinned by `jfl-adapter-ipc`'s
+    /// `lock::tests`).
+    #[cfg(not(target_os = "linux"))]
+    pub(crate) fn lock_waiter_blocked(_path: &Path) -> bool {
+        true
+    }
+
+    /// Whether a process waits blocked for the lock file at `path` now: `false` where it cannot
+    /// be seen (the test then relies on the lock alone).
+    #[cfg(target_os = "linux")]
+    pub(crate) fn lock_waiter_blocked_now(path: &Path) -> bool {
+        lock_waiter_blocked(path)
+    }
+
+    /// Whether a process waits blocked for the lock file at `path` now: `false` where it cannot
+    /// be seen (the test then relies on the lock alone).
+    #[cfg(not(target_os = "linux"))]
+    pub(crate) fn lock_waiter_blocked_now(_path: &Path) -> bool {
+        false
     }
 
     /// The daemon's pid in a status answer.
@@ -720,6 +775,130 @@ fn should_wait_for_a_stopping_daemon_and_start_one_that_serves_when_a_proxy_find
 }
 
 #[test]
+fn should_end_the_call_at_its_deadline_naming_the_spawn_lock_when_its_holder_never_lets_go() {
+    // given: no daemon, and the spawn lock held by someone who never lets go (a spawner
+    // suspended mid-spawn); a call with a short budget
+    use jfl_composition::daemon::proxy::{ProxyError, ProxyPhase};
+    let daemons = Daemons::new();
+    let held = daemons.spawn_lock();
+
+    // when: a proxy calls on a thread of its own, the test waiting for its end
+    let (ended, phase, waited) = std::thread::scope(|scope| {
+        let (tx, rx) = std::sync::mpsc::sync_channel(1);
+        let daemons = &daemons;
+        scope.spawn(move || {
+            let mut proxy = daemons.proxy("held", None);
+            let call =
+                proxy.call::<Status>(StatusParams { worktree: None }, Duration::from_secs(2));
+            let _sent = tx.send((call, proxy.phase()));
+        });
+        let mut got = None;
+        let waited = wait_until(Duration::from_secs(20), "the call's end", || {
+            got = rx.try_recv().ok();
+            got.is_some()
+        });
+        // A proxy waiting without bound (before IDX-12b) goes on once the lock is free.
+        drop(held);
+        let (call, phase) = got.unwrap_or_else(|| rx.recv().unwrap());
+        (call, phase, waited)
+    });
+
+    // then: the call ended at its deadline (within the test's 20 s for a 2 s budget; before
+    // IDX-12b it waited for the lock for ever) with the lock file named, nothing spawned
+    waited.unwrap();
+    assert!(
+        matches!(
+            &ended,
+            Err(ProxyError::Lock(jfl_adapter_ipc::LockError::Held { path }))
+                if *path == daemons.state.spawn_lock_path()
+        ),
+        "{ended:?}"
+    );
+    assert_eq!(phase, ProxyPhase::Disconnected);
+    assert!(daemons.spawned().is_empty(), "{:?}", daemons.spawned());
+}
+
+#[test]
+fn should_hold_no_spawn_lock_while_idle_when_its_call_ended_on_a_held_one() {
+    // given: a call that ended at its deadline while another process held the spawn lock, its
+    // proxy kept (as `jfl lsp` keeps its own between requests) and asking nothing more
+    use jfl_composition::daemon::proxy::ProxyError;
+    let daemons = Daemons::new();
+    let path = daemons.state.spawn_lock_path();
+    let held = daemons.spawn_lock();
+    let mut proxy = daemons.proxy("idle", None);
+    let ended = proxy.call::<Status>(StatusParams { worktree: None }, Duration::from_secs(2));
+
+    // when: the holder lets go while the proxy is idle; another descriptor asks for the lock,
+    // twice, each time once no waiter is blocked on it (so a thread of the proxy that was woken
+    // has taken it by then, or never will)
+    drop(held);
+    let free = || {
+        wait_until(
+            Duration::from_secs(20),
+            "the spawn lock free while the proxy is idle",
+            || {
+                !given::lock_waiter_blocked_now(&path)
+                    && jfl_adapter_ipc::Flock::try_acquire(&path).is_ok()
+            },
+        )
+    };
+    let first = free();
+    let second = free();
+
+    // then: the lock is free both times (before IDX-12b's review, the proxy's wait outlived the
+    // call, took the lock once its holder let go and kept it until the proxy's next call)
+    assert!(
+        matches!(
+            &ended,
+            Err(ProxyError::Lock(jfl_adapter_ipc::LockError::Held { .. }))
+        ),
+        "{ended:?}"
+    );
+    first.unwrap();
+    second.unwrap();
+    drop(proxy);
+}
+
+#[test]
+fn should_spawn_and_serve_when_the_holder_of_the_spawn_lock_lets_go_during_the_wait() {
+    // given: no daemon, the spawn lock held, and a proxy whose spawn budget outlasts its call, so
+    // its one wait for the lock ends with the call unless the release wakes it
+    use jfl_composition::daemon::proxy::Budget;
+    let daemons = Daemons::new();
+    let held = daemons.spawn_lock();
+    let budget = Budget {
+        reply: Duration::from_secs(10),
+        spawn: Duration::from_secs(120),
+    };
+
+    // when: the proxy calls on a thread of its own; once it waits for the lock, the holder lets go
+    let served = std::thread::scope(|scope| {
+        let daemons = &daemons;
+        let caller = scope.spawn(move || {
+            let mut proxy = daemons.proxy_with("woken", None, budget);
+            proxy.call::<Status>(StatusParams { worktree: None }, BUDGET)
+        });
+        let blocked = wait_until(
+            Duration::from_secs(20),
+            "a waiter blocked on the spawn lock",
+            || given::lock_waiter_blocked(&daemons.state.spawn_lock_path()),
+        );
+        drop(held);
+        blocked.unwrap();
+        caller.join().unwrap()
+    });
+
+    // then: the release woke the wait (else it would have run to the call's end), and the daemon
+    // spawned then serves
+    assert_eq!(
+        served.map(|r| pid_of(&r)).ok(),
+        daemons.spawned().last().copied()
+    );
+    assert_eq!(daemons.spawned().len(), 1, "{:?}", daemons.spawned());
+}
+
+#[test]
 fn should_keep_its_listener_until_it_holds_the_spawn_lock_and_release_both_before_the_end_when_stopped()
  {
     // given: a serving daemon, a client past its handshake, and the spawn lock held, as a proxy
@@ -1196,5 +1375,180 @@ fn should_answer_a_request_between_the_slices_of_a_settle_when_the_view_is_large
     assert!(
         seen.iter().all(|(g, complete)| *complete == (*g == last)),
         "{seen:?}"
+    );
+}
+
+#[test]
+fn should_leave_the_deferred_files_to_the_slices_when_a_commit_in_a_linked_worktree_comes_during_the_settle()
+ {
+    // given: a linked worktree (`.claude/worktrees/lt`, whose `HEAD` and index live outside its
+    // root, so a commit there raises no watcher event) of more files than an open reads whole:
+    // the request's own package (two files) and 1,100 elsewhere, which the open defers and the
+    // settle reads in slices of `SETTLE_SLICE` (512): three slices. The test daemon holds its
+    // background work while `<state>/test-hold-settle` exists, so the commit's request comes
+    // before any slice every time
+    use jfl_composition::daemon::views::SETTLE_SLICE;
+    use jfl_protocol::messages::{Definition, PositionParams};
+    const DEFERRED: usize = 1100;
+    let daemons = Daemons::new();
+    let hold = daemons.state.path().join("test-hold-settle");
+    fs::write(&hold, b"").unwrap();
+    let mut files: Vec<(String, Vec<u8>)> = vec![
+        (
+            "a/Main.java".to_owned(),
+            b"package a;\nclass Main { Other other; }\n".to_vec(),
+        ),
+        (
+            "a/Other.java".to_owned(),
+            b"package a;\nclass Other {}\n".to_vec(),
+        ),
+    ];
+    for n in 0..DEFERRED {
+        files.push((
+            format!("b/p{}/C{n}.java", n % 10),
+            format!("package b;\nclass C{n} {{}}\n").into_bytes(),
+        ));
+    }
+    let borrowed: Vec<(&str, &[u8])> = files
+        .iter()
+        .map(|(p, b)| (p.as_str(), b.as_slice()))
+        .collect();
+    let main =
+        jfl_testkit::fixtures::git::Repo::init(&daemons.root().join("m"), &borrowed).unwrap();
+    let linked = main.add_agent_worktree("lt").unwrap();
+    let at = PositionParams {
+        uri: DocumentUri::from(
+            jfl_domain::FileUri::from_path(&linked.root().join("a/Main.java").to_string_lossy())
+                .unwrap(),
+        ),
+        line: 1,
+        col: 6,
+        position_encoding: jfl_domain::PositionEncoding::Utf16,
+        clamp: false,
+    };
+    let mut proxy = daemons.proxy("rescan", None);
+    let mut ask = || match proxy
+        .call::<Definition>(at.clone(), BUDGET)
+        .unwrap()
+        .outcome
+    {
+        Outcome::Result(found) => (
+            found.view.generation,
+            found.completeness.complete(),
+            found.view.head.map(|h| h.to_string()),
+        ),
+        Outcome::Error(e) => panic!("not answered: {e:?}"),
+    };
+
+    // when: the first request (on a declaration's own name: exact, so only the view can make it
+    // incomplete) opens the view; a commit lands in the linked worktree, and the next request's
+    // stat finds it (the rescan); then the settle is let go and requests are asked until one is
+    // complete
+    let (opened, first_complete, _) = ask();
+    linked
+        .git(&[
+            "commit",
+            "--quiet",
+            "--allow-empty",
+            "--message",
+            "during the settle",
+        ])
+        .unwrap();
+    let head = linked
+        .git(&["rev-parse", "HEAD"])
+        .unwrap()
+        .trim()
+        .to_owned();
+    let after_commit = ask();
+    fs::remove_file(&hold).unwrap();
+    let mut seen = Vec::new();
+    let waited = wait_until(Duration::from_secs(60), "a complete answer", || {
+        let (generation, complete, _) = ask();
+        seen.push((generation, complete));
+        complete
+    });
+    seen.dedup();
+    waited.map_err(|e| format!("{e:?}: {seen:?}")).unwrap();
+
+    // then: the request that found the commit published the rescan's generation alone, from the
+    // new HEAD, and was incomplete with every deferred file left (before IDX-09e its rescan read
+    // them all inline and answered complete); every slice was then published after it, so the
+    // view was complete only past the open's generation, the rescan's and three slices' (the
+    // commit's own `.git` event may set one more rescan, which leaves the files again, before or
+    // between the slices: IDX-09e's scenario, its timing the watcher's); every answer before that
+    // was incomplete
+    let slices = u64::try_from(DEFERRED.div_ceil(SETTLE_SLICE)).unwrap();
+    assert_eq!(slices, 3);
+    assert!(!first_complete);
+    assert_eq!(
+        after_commit,
+        (opened + 1, false, Some(head)),
+        "opened at {opened}: {seen:?}"
+    );
+    let (last, _) = seen.last().copied().unwrap();
+    assert!(last >= opened + 1 + slices, "{seen:?}");
+    assert!(
+        seen.iter().all(|(g, complete)| *complete == (*g == last)),
+        "{seen:?}"
+    );
+}
+
+#[test]
+fn should_remove_a_notify_socket_left_by_a_dead_spawner_when_it_spawns() {
+    // given: a spawner's notify socket left behind (its proxy died while it waited: its listener
+    // never dropped), and a file of another shape
+    let daemons = Daemons::new();
+    let stale = daemons.state.notify_path(0x00de_ad00_beef);
+    std::mem::forget(NotifyListener::bind(&stale).unwrap());
+    let other = daemons.state.path().join("n-not-a-token");
+    fs::write(&other, b"").unwrap();
+    let mut proxy = daemons.proxy("sweeper", None);
+
+    // when: a proxy finds no daemon and spawns one
+    let served = proxy.call::<Status>(StatusParams { worktree: None }, BUDGET);
+
+    // then: the dead spawner's socket is gone; nothing else was touched
+    assert!(served.is_ok(), "{served:?}");
+    assert!(!stale.exists());
+    assert!(other.exists());
+}
+
+#[test]
+fn should_reset_the_log_to_0600_and_empty_it_when_it_grew_past_its_cap() {
+    // given: a log left wider than 0600 and past its cap
+    use jfl_composition::daemon::LOG_CAP;
+    let daemons = Daemons::new();
+    let log = daemons.state.log_path();
+    fs::write(&log, vec![b'x'; usize::try_from(LOG_CAP).unwrap() + 1]).unwrap();
+    fs::set_permissions(&log, fs::Permissions::from_mode(0o644)).unwrap();
+    let mut proxy = daemons.proxy("log", None);
+
+    // when
+    let served = proxy.call::<Status>(StatusParams { worktree: None }, BUDGET);
+
+    // then: 0600, and emptied before the daemon wrote to it (it writes nothing on a healthy start)
+    assert!(served.is_ok(), "{served:?}");
+    let meta = fs::metadata(&log).unwrap();
+    assert_eq!(meta.permissions().mode() & 0o7777, 0o600);
+    assert!(meta.len() < LOG_CAP, "{} bytes", meta.len());
+}
+
+#[test]
+fn should_keep_the_log_when_it_is_under_its_cap() {
+    // given: a log under its cap
+    let daemons = Daemons::new();
+    let log = daemons.state.log_path();
+    fs::write(&log, b"an earlier daemon's warning\n").unwrap();
+    let mut proxy = daemons.proxy("log", None);
+
+    // when
+    let served = proxy.call::<Status>(StatusParams { worktree: None }, BUDGET);
+
+    // then
+    assert!(served.is_ok(), "{served:?}");
+    assert!(
+        fs::read_to_string(&log)
+            .unwrap()
+            .starts_with("an earlier daemon's warning\n")
     );
 }

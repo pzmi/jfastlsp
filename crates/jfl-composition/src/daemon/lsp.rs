@@ -41,7 +41,8 @@
 //!   at all. Either way it is answered `ServerCancelled` (-32802, LSP 3.17: the client may
 //!   retry). The link takes one request at a time and each ends by its own deadline, so a request
 //!   queued behind others is answered by its deadline too (theirs come no later). Pinned by
-//!   `lsp::tests::should_answer_server_cancelled_without_asking_when_the_deadline_passed_in_the_queue`.
+//!   `lsp::tests::should_answer_server_cancelled_without_asking_when_the_deadline_passed_in_the_queue`
+//!   and `::should_answer_server_cancelled_when_the_call_ended_on_a_held_spawn_lock`.
 //!
 //! - **Pushed diagnostics** (LSP-04, plan §2.5, §3.2). A client whose `initialize` declares
 //!   `textDocument.publishDiagnostics` ([`translate::wants_diagnostics`]) gets its open documents'
@@ -70,7 +71,7 @@ use std::sync::mpsc::{Receiver, SyncSender, TryRecvError, sync_channel};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use jfl_adapter_ipc::{Bell, Ringer, SocketPath, StateDir};
+use jfl_adapter_ipc::{Bell, LockError, Ringer, SocketPath, StateDir};
 use jfl_adapter_lsp::document::Document;
 use jfl_adapter_lsp::translate::{self, Echo, UriBook};
 use jfl_adapter_lsp::transport::End;
@@ -694,15 +695,7 @@ impl Daemon for ProxyDaemon {
             },
             Err(e) => {
                 proxy.abandon();
-                let code = if matches!(e, ProxyError::TimedOut) {
-                    SERVER_CANCELLED
-                } else {
-                    ErrorCode::InternalError
-                };
-                Err(Failure::new(
-                    code,
-                    format!("the daemon did not answer: {e}"),
-                ))
+                Err(call_failure(&e))
             }
         }
     }
@@ -848,9 +841,40 @@ pub fn run(config: &LspConfig) -> u8 {
     exit_code(Phase::of(phase.load(Ordering::Acquire)), &ended)
 }
 
+/// What a request whose proxy call failed is answered: `ServerCancelled` (the client may retry)
+/// for every end at the request's deadline, a reply's or the spawn lock's another process still
+/// held (IDX-12b), `InternalError` for anything else. Pinned by
+/// `lsp::tests::should_answer_server_cancelled_when_the_call_ended_on_a_held_spawn_lock`.
+fn call_failure(error: &ProxyError) -> Failure {
+    let code = match error {
+        ProxyError::TimedOut | ProxyError::Lock(LockError::Held { .. }) => SERVER_CANCELLED,
+        _ => ErrorCode::InternalError,
+    };
+    Failure::new(code, format!("the daemon did not answer: {error}"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn should_answer_server_cancelled_when_the_call_ended_on_a_held_spawn_lock() {
+        // given: the ends of a call at its deadline, and a failure that is not one
+        let held = ProxyError::Lock(LockError::Held {
+            path: PathBuf::from("/state/spawn.lock"),
+        });
+        let timed_out = ProxyError::TimedOut;
+        let closed = ProxyError::Closed;
+
+        // when
+        let codes = [&held, &timed_out, &closed].map(|e| call_failure(e).code);
+
+        // then
+        assert_eq!(
+            codes,
+            [SERVER_CANCELLED, SERVER_CANCELLED, ErrorCode::InternalError]
+        );
+    }
 
     /// A daemon that counts the definitions it is asked and answers each with an error.
     struct Counting(u32);
