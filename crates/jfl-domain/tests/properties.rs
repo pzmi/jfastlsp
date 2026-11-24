@@ -5,6 +5,7 @@
 //! Seeded (ver §3): every run starts from [`SEED`], so a failure reproduces as it is; proptest
 //! shrinks it and writes the minimal case to `proptest-regressions/`, which is committed.
 
+use jfl_domain::Language;
 use jfl_domain::{
     Arity, ByteOffset, ByteRange, Completeness, DeclId, DeclKind, DeclarationInput, Envelope,
     EnvelopeParts, FileSummary, FileUri, Freshness, Generation, IncompleteReason, IndexState,
@@ -356,7 +357,7 @@ proptest! {
     ) {
         // given: the declaration in a summary, under its enclosing types
         let at = byte_range(0, 2).unwrap();
-        let mut builder = SummaryBuilder::new();
+        let mut builder = SummaryBuilder::new(Language::Java);
         if !package.is_empty() {
             builder.package(&package.join(".")).unwrap();
         }
@@ -474,7 +475,7 @@ proptest! {
     ) {
         // given
         let at = byte_range(0, 2).unwrap();
-        let mut builder = SummaryBuilder::new();
+        let mut builder = SummaryBuilder::new(Language::Java);
         builder.package("com.acme").unwrap();
         let mut parent = None;
         for (i, name) in names.iter().enumerate() {
@@ -507,7 +508,7 @@ proptest! {
     ) {
         // given: a valid summary with one field of each kind overwritten
         let at = byte_range(0, 2).unwrap();
-        let mut builder = SummaryBuilder::new();
+        let mut builder = SummaryBuilder::new(Language::Java);
         let class = builder.declaration(&declaration(DeclKind::Class, None, "A", &[], at)).unwrap();
         builder.declaration(&declaration(DeclKind::Method, Some(class), "f", &["int"], at)).unwrap();
         builder.reference("f", byte_range(0, 1).unwrap(), RefShape::Call, Arity::of(1)).unwrap();

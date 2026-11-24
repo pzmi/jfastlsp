@@ -20,8 +20,8 @@ use jfl_application::hints::{HintQueue, HintSink, hint_queue};
 use jfl_application::source_tree::{
     BUILD_FILES, Exclusion, FileStat, FsKind, GitEntry, HintSubject, ListMode, ListedFile, Listing,
     MTime, ReadBytes, RescanReason, Skipped, SourceTree, SourceTreeError, Unlisted, UnlistedReason,
-    WatchErrorKind, exclusion, hint_excluded, is_cookie_name, is_git_metadata, is_java_file_name,
-    is_other_source_name,
+    WatchErrorKind, exclusion, hint_excluded, is_cookie_name, is_git_metadata,
+    is_indexed_file_name, is_other_source_name,
 };
 use jfl_domain::{FileUri, RelPath};
 
@@ -417,7 +417,7 @@ fn walk(
         }
         match entry {
             Entry::File { stat, .. } => {
-                if let Some(path) = under(base, key).filter(|_| is_java_file_name(name)) {
+                if let Some(path) = under(base, key).filter(|_| is_indexed_file_name(name)) {
                     let stat = (mode == ListMode::PathsAndStat).then_some(*stat);
                     listing.files.push(ListedFile { path, stat });
                 } else if is_other_source_name(name) {
@@ -429,7 +429,8 @@ fn walk(
                 why: UnlistedReason::NonUtf8Name,
             }),
             Entry::Link { to_dir } => {
-                if let Some(path) = under(base, key).filter(|_| *to_dir || is_java_file_name(name))
+                if let Some(path) =
+                    under(base, key).filter(|_| *to_dir || is_indexed_file_name(name))
                 {
                     listing.skipped.push(Skipped {
                         path,

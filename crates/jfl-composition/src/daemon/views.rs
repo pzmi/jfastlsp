@@ -51,7 +51,6 @@ use std::sync::Arc;
 use jfl_adapter_fs::{FsConfig, FsSourceTree};
 use jfl_adapter_git::{GitConfig, GitRepoProbe};
 use jfl_adapter_ipc::Call;
-use jfl_adapter_java::{Grammar, GrammarSpec, JavaIndexer};
 use jfl_adapter_store::{Blake3, DiskSummaryStore};
 use jfl_application::Sources as _;
 use jfl_application::queries::{definition, hover};
@@ -70,6 +69,7 @@ use jfl_protocol::{SCHEMA_VERSION, WireEnvelope};
 use super::ports::{SystemClock, TokioPool};
 use super::service::{Context, Overlay, Service, Working, error_body, result_body, unwired};
 use super::spelling::OpenDocuments;
+use crate::languages::{self, Indexers};
 
 /// The summary store's cap on disk: 2 GiB, about four times the large corpus's summaries.
 pub const STORE_CAP: u64 = 2 << 30;
@@ -92,7 +92,7 @@ pub const STORE_DIR: &str = "summaries";
 type Engine = ViewService<
     FsSourceTree<TokioPool>,
     GitRepoProbe<TokioPool>,
-    JavaIndexer<TokioPool>,
+    Indexers<TokioPool>,
     DiskSummaryStore<TokioPool>,
     SystemClock,
     Blake3,
@@ -150,7 +150,6 @@ impl Views {
     /// `state/summaries`, created `0700` by the store), its blocking jobs on `pool`; `owner` names
     /// its cookies (ASCII letters and digits).
     pub fn open(state: &Path, pool: &TokioPool, owner: &str) -> Result<Self, String> {
-        let grammar = Grammar::new(&GrammarSpec::orchard()).map_err(|e| e.to_string())?;
         let (store, _opened) = DiskSummaryStore::open(
             &state.join(STORE_DIR),
             STORE_CAP,
@@ -162,7 +161,7 @@ impl Views {
             (
                 FsSourceTree::new(pool.clone(), FsConfig::default()),
                 GitRepoProbe::new(pool.clone(), GitConfig::default()),
-                JavaIndexer::new(grammar, pool.clone()),
+                languages::indexers(pool.clone())?,
                 store,
             ),
             SystemClock,

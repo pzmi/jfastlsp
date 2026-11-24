@@ -8,6 +8,7 @@
 //!
 //! Pinned by the `syntax_indexer` contract suite (`contracts::syntax_indexer::tests`).
 
+use jfl_domain::Language;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -54,6 +55,10 @@ impl CannedSyntaxIndexer {
 }
 
 impl SyntaxIndexer for CannedSyntaxIndexer {
+    fn language(&self) -> Language {
+        Language::Java
+    }
+
     fn grammar(&self) -> GrammarId {
         self.grammar
     }

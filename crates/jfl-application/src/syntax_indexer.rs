@@ -1,5 +1,9 @@
-//! The `SyntaxIndexer` port (plan §6.4): a Java file's bytes in, its [`FileSummary`] and its syntax
-//! diagnostics out, or a typed refusal.
+//! The `SyntaxIndexer` port (plan §6.4): a source file's bytes in, its [`FileSummary`] and its
+//! syntax diagnostics out, or a typed refusal. **One indexer per language** (IDX-17): each names
+//! its [`Language`] ([`SyntaxIndexer::language`]) and tags every summary with it, and the view
+//! service reaches them through [`SyntaxIndexers`], which routes a file to the indexer of the
+//! language the `languages` registry gives its name. One indexer is the set of its one language;
+//! composition wires the set (`jfl-composition`'s `languages` module).
 //!
 //! **What every implementation does with the bytes first** is a pure function here,
 //! [`source_text`], so the testkit fake and the tree-sitter adapter refuse the same inputs and the
@@ -26,7 +30,7 @@
 use core::future::Future;
 use std::sync::Arc;
 
-use jfl_domain::{ByteRange, FileSummary, SummaryError};
+use jfl_domain::{ByteRange, FileSummary, Language, SummaryError};
 
 use crate::queries::FileText;
 
@@ -120,6 +124,12 @@ pub enum SyntaxIndexError {
     /// The pool shut down, or the job panicked.
     #[error("the indexing job was interrupted")]
     Interrupted,
+    /// No indexer of this language is wired (IDX-17): a gap, as any refusal.
+    #[error("no indexer is wired for {}", language.name())]
+    NoIndexer {
+        /// The file's language.
+        language: Language,
+    },
 }
 
 /// What a reference site's name is, read from the syntax tree at the site.
@@ -190,8 +200,12 @@ pub struct SiteSyntax {
     pub shadowed: bool,
 }
 
-/// Indexes Java source.
+/// Indexes one language's source.
 pub trait SyntaxIndexer: Send + Sync + 'static {
+    /// The language it reads: every summary it makes is of this language (the `syntax_indexer`
+    /// contract suite's `summarises_the_golden_corpus`, whose goldens each name their language).
+    fn language(&self) -> Language;
+
     /// The grammar, for the `SyntaxKey`.
     fn grammar(&self) -> GrammarId;
 
@@ -230,6 +244,90 @@ pub trait SyntaxIndexer: Send + Sync + 'static {
         names: Vec<ByteRange>,
     ) -> impl Future<Output = Vec<Option<SiteSyntax>>> + Send {
         core::future::ready(vec![None; names.len()])
+    }
+}
+
+/// What a [`SyntaxKey`](jfl_domain::SyntaxKey) reads of a language's indexer: its grammar and its
+/// summariser's format version.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct KeyInputs {
+    /// [`SyntaxIndexer::grammar`].
+    pub grammar: GrammarId,
+    /// [`SyntaxIndexer::summariser_version`].
+    pub summariser_version: u32,
+}
+
+/// The indexers of every wired language, as the view service and the queries reach them: each
+/// call names the file's language (from the `languages` registry), and goes to that language's
+/// [`SyntaxIndexer`]. A language with no indexer is refused, never read as another language.
+///
+/// Every single [`SyntaxIndexer`] is the set of its one language. A second language is wired in
+/// composition by a type holding one indexer per language whose methods `match` on the language
+/// (`jfl-composition`'s `languages` module); the port stays generic, so the request path makes
+/// no dynamic call. Rejected alternative: `dyn SyntaxIndexer` per language, which the port's
+/// `impl Future` methods rule out without boxing every parse.
+///
+/// Pinned by: `syntax_indexer::tests::should_route_a_file_to_its_language_when_one_indexer_is_the_set`.
+pub trait SyntaxIndexers: Send + Sync + 'static {
+    /// The key inputs of `language`'s indexer, `None` when none is wired.
+    fn key_inputs(&self, language: Language) -> Option<KeyInputs>;
+
+    /// [`SyntaxIndexer::index`] by `language`'s indexer; [`SyntaxIndexError::NoIndexer`] when none
+    /// is wired.
+    fn index(
+        &self,
+        language: Language,
+        bytes: Vec<u8>,
+    ) -> impl Future<Output = Result<Indexed, SyntaxIndexError>> + Send;
+
+    /// [`SyntaxIndexer::site_syntax`] by the indexer of `text`'s language; `None` when none is
+    /// wired (which proves nothing).
+    fn site_syntax(
+        &self,
+        text: Arc<FileText>,
+        name: ByteRange,
+    ) -> impl Future<Output = Option<SiteSyntax>> + Send;
+
+    /// [`SyntaxIndexer::sites_syntax`] by the indexer of `text`'s language; no facts when none is
+    /// wired.
+    fn sites_syntax(
+        &self,
+        text: Arc<FileText>,
+        names: Vec<ByteRange>,
+    ) -> impl Future<Output = Vec<Option<SiteSyntax>>> + Send;
+}
+
+impl<X: SyntaxIndexer> SyntaxIndexers for X {
+    fn key_inputs(&self, language: Language) -> Option<KeyInputs> {
+        (language == self.language()).then(|| KeyInputs {
+            grammar: self.grammar(),
+            summariser_version: self.summariser_version(),
+        })
+    }
+
+    async fn index(&self, language: Language, bytes: Vec<u8>) -> Result<Indexed, SyntaxIndexError> {
+        if language != self.language() {
+            return Err(SyntaxIndexError::NoIndexer { language });
+        }
+        SyntaxIndexer::index(self, bytes).await
+    }
+
+    async fn site_syntax(&self, text: Arc<FileText>, name: ByteRange) -> Option<SiteSyntax> {
+        if text.language != self.language() {
+            return None;
+        }
+        SyntaxIndexer::site_syntax(self, text, name).await
+    }
+
+    async fn sites_syntax(
+        &self,
+        text: Arc<FileText>,
+        names: Vec<ByteRange>,
+    ) -> Vec<Option<SiteSyntax>> {
+        if text.language != self.language() {
+            return vec![None; names.len()];
+        }
+        SyntaxIndexer::sites_syntax(self, text, names).await
     }
 }
 
@@ -306,6 +404,84 @@ mod tests {
             ]
         );
         assert_eq!(source_text(at_limit.as_bytes()), Ok(at_limit.as_str()));
+    }
+
+    struct Tagging;
+
+    impl SyntaxIndexer for Tagging {
+        fn language(&self) -> Language {
+            Language::Java
+        }
+
+        fn grammar(&self) -> GrammarId {
+            GrammarId {
+                name: "tagging",
+                version: "1",
+            }
+        }
+
+        fn summariser_version(&self) -> u32 {
+            7
+        }
+
+        fn index(
+            &self,
+            _bytes: Vec<u8>,
+        ) -> impl Future<Output = Result<Indexed, SyntaxIndexError>> + Send {
+            core::future::ready(Ok(Indexed {
+                summary: jfl_domain::SummaryBuilder::new(Language::Java).finish(),
+                diagnostics: Vec::new(),
+                diagnostics_dropped: 0,
+            }))
+        }
+    }
+
+    fn block_on<F: Future>(future: F) -> F::Output {
+        let mut future = core::pin::pin!(future);
+        let mut context = core::task::Context::from_waker(core::task::Waker::noop());
+        loop {
+            if let core::task::Poll::Ready(out) = future.as_mut().poll(&mut context) {
+                return out;
+            }
+        }
+    }
+
+    #[test]
+    fn should_route_a_file_to_its_language_when_one_indexer_is_the_set() {
+        // given
+        let set = Tagging;
+        let text = Arc::new(FileText::new(Language::Java, "class A {}".to_owned()).unwrap());
+        // when
+        let inputs = SyntaxIndexers::key_inputs(&set, Language::Java);
+        let indexed = block_on(SyntaxIndexers::index(
+            &set,
+            Language::Java,
+            b"class A {}".to_vec(),
+        ));
+        let facts = block_on(SyntaxIndexers::sites_syntax(
+            &set,
+            text,
+            vec![
+                ByteRange::new(
+                    jfl_domain::ByteOffset::new(6),
+                    jfl_domain::ByteOffset::new(7),
+                )
+                .unwrap(),
+            ],
+        ));
+        // then
+        assert_eq!(
+            inputs,
+            Some(KeyInputs {
+                grammar: set.grammar(),
+                summariser_version: 7,
+            })
+        );
+        assert_eq!(indexed.map(|i| i.summary.language()), Ok(Language::Java));
+        assert_eq!(facts, vec![None]);
+        assert!(Language::ALL.iter().all(|language| {
+            SyntaxIndexers::key_inputs(&set, *language).is_some() == (*language == Language::Java)
+        }));
     }
 
     #[test]

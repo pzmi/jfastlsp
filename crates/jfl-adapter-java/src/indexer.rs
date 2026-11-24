@@ -10,6 +10,7 @@ use jfl_application::syntax_indexer::{
 };
 use jfl_application::{BlockingPool, FileText};
 use jfl_domain::ByteRange;
+use jfl_domain::Language;
 
 use crate::extract::{self, Work, Worker};
 use crate::grammar::Grammar;
@@ -116,6 +117,10 @@ impl<P> JavaIndexer<P> {
 }
 
 impl<P: BlockingPool> SyntaxIndexer for JavaIndexer<P> {
+    fn language(&self) -> Language {
+        Language::Java
+    }
+
     fn grammar(&self) -> GrammarId {
         self.grammar.id()
     }

@@ -4,6 +4,7 @@
 //!
 //! - [`path`], [`uri`], [`text`] (IDX-01): worktree-relative paths, `file://` URIs, and byte
 //!   offsets, positions, encodings and the [`LineIndex`] that converts between them (plan §2.3).
+//! - [`language`] (IDX-17): the [`Language`] every summary is tagged with.
 //! - [`symbol`] (IDX-02): declaration kinds and the [`SymbolId`] text form (plan §2.1).
 //! - [`summary`] (IDX-02): the compact per-file [`FileSummary`] the syntax index keeps.
 //! - [`digest`] and [`keys`] (IDX-02): caller-supplied digests and the cache keys of plan §5.4.
@@ -17,6 +18,7 @@ extern crate alloc;
 pub mod digest;
 pub mod envelope;
 pub mod keys;
+pub mod language;
 pub mod path;
 pub mod summary;
 pub mod symbol;
@@ -32,6 +34,7 @@ pub use envelope::{
 pub use keys::{
     EnvironmentInputs, EnvironmentKey, JdkIdentity, SemanticKey, SyntaxInputs, SyntaxKey,
 };
+pub use language::Language;
 pub use path::{PathError, RelPath};
 pub use summary::{
     Arity, DeclId, Declaration, DeclarationInput, FileSummary, Import, ListRef, Modifiers,

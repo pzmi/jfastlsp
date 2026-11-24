@@ -1,4 +1,5 @@
 {
+  "language": "java",
   "package": "grammar",
   "imports": [
     {"at":"4:1-4:25","module":false,"name":"modulejava.base","on_demand":false,"static":false}

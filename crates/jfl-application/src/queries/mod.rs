@@ -49,9 +49,9 @@ use std::sync::{Arc, Mutex, PoisonError, Weak};
 
 use jfl_domain::{
     ByteRange, Completeness, DeclKind, Envelope, EnvelopeParts, FileUri, Freshness,
-    IncompleteReason, LineIndex, Location, ModuleName, ObjectId, Position, PositionEncoding,
-    PositionError, PossibleHit, Range, Reason, RefShape, ReferenceSite, RelPath, SymbolId,
-    SyntaxKey, Target, TargetStatus, View, Why,
+    IncompleteReason, Language, LineIndex, Location, ModuleName, ObjectId, Position,
+    PositionEncoding, PositionError, PossibleHit, Range, Reason, RefShape, ReferenceSite, RelPath,
+    SymbolId, SyntaxKey, Target, TargetStatus, View, Why,
 };
 
 use crate::clock::{WallClock, elapsed};
@@ -134,6 +134,8 @@ impl<C: WallClock> Deadline for ClockDeadline<'_, C> {
 /// A file's text and its line index, read for one key.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FileText {
+    /// The file's language (IDX-17): whose indexer reads scope facts from it.
+    pub language: Language,
     /// The text, after a dropped byte-order mark (the offsets of a summary count from there).
     pub text: String,
     /// Its lines.
@@ -141,11 +143,15 @@ pub struct FileText {
 }
 
 impl FileText {
-    /// `text` and its line index; `None` for a text over 4 GiB.
+    /// `text`, a file in `language`, and its line index; `None` for a text over 4 GiB.
     #[must_use]
-    pub fn new(text: String) -> Option<Self> {
+    pub fn new(language: Language, text: String) -> Option<Self> {
         let lines = LineIndex::new(&text).ok()?;
-        Some(Self { text, lines })
+        Some(Self {
+            language,
+            text,
+            lines,
+        })
     }
 }
 

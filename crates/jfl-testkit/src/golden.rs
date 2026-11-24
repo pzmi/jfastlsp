@@ -1,7 +1,8 @@
 //! The golden Java corpus (ver §4): every `.java` file under `fixtures/java/` (but
 //! `fixtures/java/summaries/`) and its expected summary, `fixtures/java/summaries/<grammar>/<path>.json`.
 //!
-//! **The format** is JSON, one record per line so a review reads a diff line by line: the package,
+//! **The format** is JSON, one record per line so a review reads a diff line by line: the
+//! language (IDX-17), the package,
 //! the imports, the declarations (with their symbol identity, when they have one), the reference
 //! sites and the syntax diagnostics. A range is `line:column-line:column`, 1-based, columns in
 //! UTF-8 bytes (`jfl`'s CLI convention, plan §2.3), of the file's text after a dropped byte-order
@@ -25,7 +26,7 @@ use std::path::{Path, PathBuf};
 
 use jfl_application::syntax_indexer::{Indexed, SyntaxDiagnostic, SyntaxProblem, source_text};
 use jfl_domain::{
-    Arity, ByteRange, DeclId, DeclKind, DeclarationInput, LineIndex, Modifiers, Position,
+    Arity, ByteRange, DeclId, DeclKind, DeclarationInput, Language, LineIndex, Modifiers, Position,
     PositionEncoding, RefShape, SummaryBuilder,
 };
 use serde_json::{Map, Value, json};
@@ -261,6 +262,7 @@ pub fn render(indexed: &Indexed, bytes: &[u8]) -> Result<String, String> {
         }));
     }
     let mut out = String::from("{\n");
+    let _ = writeln!(out, "  \"language\": {},", json!(summary.language().name()));
     let package = json!(summary.package());
     let _ = writeln!(out, "  \"package\": {package},");
     for (key, items) in [
@@ -336,7 +338,10 @@ pub fn parse(golden: &str, bytes: &[u8]) -> Result<Indexed, String> {
     let lines = Lines::new(text)?;
     let root: Value = serde_json::from_str(golden).map_err(|e| e.to_string())?;
     let root = root.as_object().ok_or("the golden is not an object")?;
-    let mut builder = SummaryBuilder::new();
+    let language = string(root, "language")?;
+    let language =
+        Language::from_name(language).ok_or_else(|| format!("unknown language {language}"))?;
+    let mut builder = SummaryBuilder::new(language);
     if let Some(package) = field(root, "package")?.as_str() {
         builder.package(package).map_err(|e| e.to_string())?;
     }
@@ -627,7 +632,7 @@ mod tests {
     fn should_read_back_what_it_wrote_when_a_summary_is_rendered() {
         // given
         let text = b"package p;\nimport static a.B.c;\nclass A {\n  void f(int x) { g(x); }\n}\n";
-        let mut builder = SummaryBuilder::new();
+        let mut builder = SummaryBuilder::new(Language::Java);
         builder.package("p").unwrap();
         builder.import("a.B.c", true, false, range(11, 32)).unwrap();
         let class = builder

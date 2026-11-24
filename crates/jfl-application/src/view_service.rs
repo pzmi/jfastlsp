@@ -99,6 +99,7 @@ use jfl_domain::{
 };
 
 use crate::clock::{WallClock, elapsed};
+use crate::languages::indexed_language;
 use crate::queries::{FileText, Sources};
 use crate::repo_probe::{
     GitFile, GitSnapshot, GitStat, HeadState, RepoProbe, RepoProbeError, Worktree,
@@ -106,10 +107,10 @@ use crate::repo_probe::{
 use crate::source_tree::{
     BUILD_FILES, Exclusion, FileStat, FsKind, Hint, Hints, ListMode, MTime, OtherSources, Rescan,
     RescanReason, RescanReasons, SourceTree, SourceTreeError, cookie_name, cookie_stamp, is_cookie,
-    is_java_file_name,
+    is_indexed_file_name,
 };
 use crate::summary_store::SummaryStore;
-use crate::syntax_indexer::{MAX_SOURCE_BYTES, SiteSyntax, SyntaxIndexer, strip_bom};
+use crate::syntax_indexer::{MAX_SOURCE_BYTES, SiteSyntax, SyntaxIndexers, strip_bom};
 use crate::views::{
     Cookie, Entry, Event, FileSeen, GitSeen, Observed, Published, RequestId, Stamp, Stored,
     ViewError, ViewRegistry,
@@ -519,7 +520,7 @@ pub struct ServiceSources<'s, T, X, H> {
 impl<T, X, H> Sources for ServiceSources<'_, T, X, H>
 where
     T: SourceTree,
-    X: SyntaxIndexer,
+    X: SyntaxIndexers,
     H: KeyHasher + Clone + Send + Sync,
 {
     fn text(
@@ -530,6 +531,8 @@ where
     ) -> impl Future<Output = Option<Arc<FileText>>> + Send {
         let key = *key;
         async move {
+            let language = indexed_language(path.file_name())?;
+            let inputs = self.indexer.key_inputs(language)?;
             let read = self
                 .tree
                 .read(root, path, MAX_SOURCE_BYTES.saturating_add(4))
@@ -541,13 +544,12 @@ where
             let bytes = strip_bom(&read.bytes);
             let mut digest = self.hasher.clone();
             digest.update(bytes);
-            let grammar = self.indexer.grammar();
             let found = SyntaxKey::derive(
                 &SyntaxInputs {
                     file: digest.finish(),
-                    grammar: grammar.name,
-                    grammar_version: grammar.version,
-                    summariser_version: self.indexer.summariser_version(),
+                    grammar: inputs.grammar.name,
+                    grammar_version: inputs.grammar.version,
+                    summariser_version: inputs.summariser_version,
                 },
                 self.hasher.clone(),
             );
@@ -555,7 +557,7 @@ where
                 return None;
             }
             let text = core::str::from_utf8(bytes).ok()?.to_owned();
-            FileText::new(text).map(Arc::new)
+            FileText::new(language, text).map(Arc::new)
         }
     }
 
@@ -577,7 +579,8 @@ where
 }
 
 /// The view service over the ports: `T` the source tree, `P` the repository probe, `X` the syntax
-/// indexer, `S` the summary store, `C` the wall clock, `H` the key hasher.
+/// indexers (one per language, [`SyntaxIndexers`]: each file goes to its language's), `S` the
+/// summary store, `C` the wall clock, `H` the key hasher.
 pub struct ViewService<T: SourceTree, P, X, S, C, H> {
     tree: T,
     probe: P,
@@ -719,7 +722,7 @@ async fn stat_of<T: SourceTree>(
 impl<T, X, S, C, H> Reader<'_, T, X, S, C, H>
 where
     T: SourceTree,
-    X: SyntaxIndexer,
+    X: SyntaxIndexers,
     S: SummaryStore,
     C: WallClock,
     H: KeyHasher + Clone + Send + Sync,
@@ -747,6 +750,13 @@ where
         let Some(stat) = seen.stat else {
             return (seen, Summary::Absent, false);
         };
+        // Every listed path has an indexed language (the listing keeps no other); a path with none,
+        // or whose language no indexer is wired for, is a gap, never read as another language.
+        let Some((language, inputs)) = indexed_language(path.file_name())
+            .and_then(|language| Some((language, self.indexer.key_inputs(language)?)))
+        else {
+            return (seen, Summary::Gap, false);
+        };
         // Held from the read to the end of the parse, which owns the bytes.
         let want = usize::try_from(stat.size)
             .unwrap_or(usize::MAX)
@@ -768,13 +778,12 @@ where
         }
         let mut digest = self.hasher.clone();
         digest.update(strip_bom(&read.bytes));
-        let grammar = self.indexer.grammar();
         let key = SyntaxKey::derive(
             &SyntaxInputs {
                 file: digest.finish(),
-                grammar: grammar.name,
-                grammar_version: grammar.version,
-                summariser_version: self.indexer.summariser_version(),
+                grammar: inputs.grammar.name,
+                grammar_version: inputs.grammar.version,
+                summariser_version: inputs.summariser_version,
             },
             self.hasher.clone(),
         );
@@ -800,7 +809,7 @@ where
                 false,
             );
         }
-        match self.indexer.index(read.bytes).await {
+        match self.indexer.index(language, read.bytes).await {
             Ok(indexed) => {
                 // The mark travels with the summary into the store (IDX-11): references read it.
                 let broken = !indexed.diagnostics.is_empty() || indexed.diagnostics_dropped > 0;
@@ -822,7 +831,7 @@ impl<T, P, X, S, C, H> ViewService<T, P, X, S, C, H>
 where
     T: SourceTree,
     P: RepoProbe,
-    X: SyntaxIndexer,
+    X: SyntaxIndexers,
     S: SummaryStore,
     C: WallClock + Clone,
     H: KeyHasher + Clone + Send + Sync,
@@ -1239,7 +1248,7 @@ where
                     // Another daemon's cookie, or another view's file: no change of this view.
                 } else if self.other_unchanged(root, &path).await {
                     // An edit of another language's file the last listing counted: no count moved.
-                } else if is_java_file_name(path.file_name())
+                } else if is_indexed_file_name(path.file_name())
                     && self
                         .registry
                         .view(root)

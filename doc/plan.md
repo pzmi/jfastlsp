@@ -704,11 +704,11 @@ migrated, when its version changes.
 |---|---|---|
 | `jfl-domain` | pure | paths and URIs, positions and encodings (§2.3), symbols, file summaries, cache keys (§5.4), the envelope and the completeness computation (§2.1), generation and staleness policies |
 | `jfl-protocol` | pure | the daemon wire protocol and the `--json` schema: versioned messages, handshake, frame limits (§6.6) |
-| `jfl-application` | application | use cases and queries (def, refs, hover, sym, impls, calls, status, sync), the view registry and generations (§4), the diagnostics coordinator (§3.2), the port traits (§6.4) |
+| `jfl-application` | application | use cases and queries (def, refs, hover, sym, impls, calls, status, sync), the view registry and generations (§4), the diagnostics coordinator (§3.2), the port traits (§6.4), the language registry (which language a file is, by name; IDX-17) |
 | `jfl-process` | support | the only child-process runner: argv only, cleared environment plus an allowlist, deadline, own process group, bounded output (§6.5) |
 | `jfl-adapter-fs` | adapter | `SourceTree`: scanning with nested-worktree exclusion (`ignore`), reading, stat, watcher hints (`notify`) |
 | `jfl-adapter-git` | adapter | `RepoProbe`: worktree roots, common directory, `HEAD` and index stat, changed files (the `git` CLI, ADR 0024) |
-| `jfl-adapter-java` | adapter | `SyntaxIndexer`: tree-sitter Java parsing (ADR 0022) into file summaries and syntax diagnostics |
+| `jfl-adapter-java` | adapter | `SyntaxIndexer` for Java: tree-sitter Java parsing (ADR 0022) into file summaries and syntax diagnostics |
 | `jfl-adapter-classfile` | adapter | `LibraryIndexer`: class files, JARs, `ct.sym` and `jmods` into API summaries (ADR 0023) |
 | `jfl-adapter-store` | adapter | `SummaryStore`, `LibraryStore`, `ProjectModelCache`: the on-disk caches at the DEC-03 tier (ADR 0025) |
 | `jfl-adapter-ipc` | adapter | the Unix socket endpoint (server and client), the state-directory lock, peer checks, framing (ADR 0021) |
@@ -788,7 +788,7 @@ fake and a contract suite run against the fake and the real adapter (ver §5).
 |---|---|---|
 | `SourceTree` | `jfl-adapter-fs` | listing honours exclusions (nested worktrees, `.claude/worktrees/`), stat reflects writes, reads are bounded |
 | `RepoProbe` | `jfl-adapter-git` | innermost root, common directory, `HEAD`/index change detection, changed files after checkout, stash and reset |
-| `SyntaxIndexer` | `jfl-adapter-java` | the golden corpus's summaries, syntax errors located, no panic on any input |
+| `SyntaxIndexer` (one per language; the view service reaches the set as `SyntaxIndexers`, wired in composition's `languages`, IDX-17) | `jfl-adapter-java` | the golden corpus's summaries, each tagged with the indexer's language, syntax errors located, no panic on any input |
 | `SummaryStore` | `jfl-adapter-store` | get after put by key, LRU cap honoured, a torn write never returns a corrupt summary |
 | `LibraryIndexer`, `LibraryStore` | `jfl-adapter-classfile`, `jfl-adapter-store` | API summaries of the fixture JARs, multi-release selection, malformed input refused |
 | `ProjectModelSource` | `jfl-adapter-gradle` | the fixture builds' models, fingerprint stability, refusal without opt-in |

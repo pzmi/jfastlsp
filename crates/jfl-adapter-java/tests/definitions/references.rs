@@ -20,7 +20,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use jfl_adapter_java::JavaIndexer;
 use jfl_application::QueryCache;
 use jfl_application::syntax_indexer::{Indexed, SyntaxIndexError, SyntaxIndexer};
-use jfl_domain::{DeclKind, Envelope, FileSummary, Modifiers, Position};
+use jfl_domain::{DeclKind, Envelope, FileSummary, Language, Modifiers, Position, SummaryBuilder};
 use jfl_testkit::exec::InlinePool;
 
 use super::generator::Rng;
@@ -285,6 +285,10 @@ struct Ignoring {
 }
 
 impl SyntaxIndexer for Ignoring {
+    fn language(&self) -> Language {
+        Language::Java
+    }
+
     fn grammar(&self) -> jfl_application::syntax_indexer::GrammarId {
         self.inner.grammar()
     }
@@ -477,10 +481,10 @@ fn oracle<X: SyntaxIndexer>(
     let summaries: Vec<FileSummary> = files
         .iter()
         .map(|(_, b)| {
-            indexer
-                .index_blocking(b)
-                .map(|i| i.summary)
-                .unwrap_or_default()
+            indexer.index_blocking(b).map_or_else(
+                |_| SummaryBuilder::new(Language::Java).finish(),
+                |i| i.summary,
+            )
         })
         .collect();
     seeds

@@ -366,6 +366,7 @@ impl Resolver<'_> {
 
 #[cfg(test)]
 mod tests {
+    use jfl_domain::Language;
     use std::sync::Arc;
 
     use jfl_domain::{
@@ -397,7 +398,7 @@ mod tests {
     /// `class A { int count; class Inner {} class B { class Inner {} void f() { count; Inner } } }`
     /// as a summary: `count` at 55, `Inner` at 62, both reference sites.
     fn snapshot() -> Snapshot {
-        let mut b = SummaryBuilder::new();
+        let mut b = SummaryBuilder::new(Language::Java);
         b.package("p").unwrap();
         let declare = |b: &mut SummaryBuilder,
                        kind: DeclKind,

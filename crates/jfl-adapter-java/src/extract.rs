@@ -9,6 +9,7 @@ use jfl_application::syntax_indexer::{
     GrammarId, Indexed, MAX_DIAGNOSTICS, SyntaxDiagnostic, SyntaxIndexError, SyntaxProblem,
     source_text, work_budget,
 };
+use jfl_domain::Language;
 use jfl_domain::{
     Arity, ByteOffset, ByteRange, DeclId, DeclKind, DeclarationInput, Modifiers, RefShape,
     SummaryBuilder, SummaryError, erase_parameter_type_with, parameter_type_base,
@@ -216,7 +217,7 @@ fn index_within(
         budget,
         comments: &comments,
     };
-    let mut builder = SummaryBuilder::new();
+    let mut builder = SummaryBuilder::new(Language::Java);
     file.package_and_imports(&captured, &comments, &mut builder)?;
     file.declarations(&captured, &comments, &mut builder)?;
     let refs = core::mem::take(&mut captured.refs);

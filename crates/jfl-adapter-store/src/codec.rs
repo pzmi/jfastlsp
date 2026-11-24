@@ -1,6 +1,6 @@
 //! The entry format (format version [`FORMAT_VERSION`]): a fixed header, then the head (every
-//! part of the summary but its reference sites, the distinct names those sites use, and since
-//! format 2 whether the file had a syntax error), then the
+//! part of the summary but its reference sites, the distinct names those sites use, since
+//! format 2 whether the file had a syntax error, and since format 3 the file's language), then the
 //! reference sites, each section a postcard record (ADR 0025).
 //!
 //! ```text
@@ -32,14 +32,15 @@
 
 use jfl_application::{Declarations, DeclarationsError};
 use jfl_domain::{
-    Arity, ByteOffset, ByteRange, DeclId, DeclKind, Declaration, FileSummary, Import, ListRef,
-    Modifiers, RefShape, ReferenceSite, Span, StrId, SummaryError, SummaryParts, SyntaxKey,
+    Arity, ByteOffset, ByteRange, DeclId, DeclKind, Declaration, FileSummary, Import, Language,
+    ListRef, Modifiers, RefShape, ReferenceSite, Span, StrId, SummaryError, SummaryParts,
+    SyntaxKey,
 };
 use serde::{Deserialize, Serialize};
 
 /// The format version written in every header. Bumped whenever the same summary would encode
 /// differently or an old reader would misread a new entry; an entry of another version is a miss.
-pub const FORMAT_VERSION: u32 = 2;
+pub const FORMAT_VERSION: u32 = 3;
 
 /// The header's magic bytes.
 pub const MAGIC: [u8; 4] = *b"JFLS";
@@ -79,8 +80,8 @@ pub enum Corrupt {
     /// A section that postcard cannot read, or with bytes left over.
     #[error("entry section does not decode")]
     Decode,
-    /// A value no summary holds: a range that ends before it starts, an unknown kind or shape,
-    /// unknown modifier bits.
+    /// A value no summary holds: a range that ends before it starts, an unknown language, kind or
+    /// shape, unknown modifier bits.
     #[error("entry holds a value out of range")]
     Value,
     /// The parts decode, and `jfl-domain` refuses them.
@@ -93,6 +94,8 @@ pub enum Corrupt {
 
 #[derive(Serialize, Deserialize)]
 struct Head<'a> {
+    /// [`SummaryParts::language`]'s code (format 3, IDX-17).
+    language: u8,
     #[serde(borrow)]
     text: &'a str,
     strings: Vec<(u32, u32)>,
@@ -249,6 +252,7 @@ pub fn encode(key: &SyntaxKey, summary: &FileSummary) -> Result<Vec<u8>, Corrupt
     let parts = summary.parts();
     let names = Declarations::names_of(summary);
     let head = Head {
+        language: parts.language.code(),
         text: &parts.text,
         strings: parts.strings.iter().map(|s| (s.start, s.len)).collect(),
         package: parts.package.map(|p| p.0),
@@ -343,6 +347,7 @@ fn whole<'a, T: Deserialize<'a>>(bytes: &'a [u8]) -> Result<T, Corrupt> {
 fn head_parts(head: &[u8]) -> Result<(SummaryParts, Box<[StrId]>), Corrupt> {
     let head: Head<'_> = whole(head)?;
     let parts = SummaryParts {
+        language: Language::from_code(head.language).ok_or(Corrupt::Value)?,
         text: head.text.into(),
         strings: head
             .strings
@@ -431,7 +436,7 @@ mod tests {
     }
 
     fn summary() -> FileSummary {
-        let mut b = SummaryBuilder::new();
+        let mut b = SummaryBuilder::new(Language::Java);
         b.package("a.b").unwrap();
         b.import("java.util.List", false, false, range(10, 30))
             .unwrap();
@@ -508,6 +513,28 @@ mod tests {
                 .unwrap()
                 .syntax_errors()
         );
+    }
+
+    #[test]
+    fn should_refuse_an_entry_when_its_language_code_is_unknown() {
+        // given: a well-sealed entry whose head names a language no build knows (the language
+        // is the head's first field, one byte)
+        let entry = encode(&key(1), &summary()).unwrap();
+        let head_len = usize::try_from(u32::from_le_bytes([
+            entry[40], entry[41], entry[42], entry[43],
+        ]))
+        .unwrap();
+        let (head, references) = entry[HEADER_LEN..].split_at(head_len);
+        assert_eq!(head[0], Language::Java.code());
+        let mut unknown = head.to_vec();
+        unknown[0] = 0x7f;
+        let resealed = seal(&key(1), &unknown, references).unwrap();
+        // when
+        let summary = decode(&key(1), &resealed);
+        let declarations = decode_declarations(&key(1), &resealed);
+        // then
+        assert_eq!(summary, Err(Corrupt::Value));
+        assert!(matches!(declarations, Err(Corrupt::Value)));
     }
 
     #[test]

@@ -1625,6 +1625,7 @@ fn implicit(kind: DeclKind, name: &str, member: Member) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use jfl_domain::Language;
     use jfl_domain::{ByteOffset, DeclarationInput, Digest, SummaryBuilder, SyntaxInputs};
 
     struct Zero;
@@ -1643,7 +1644,7 @@ mod tests {
 
     /// One file of package `p` declaring each `(name, supertypes)` as a top-level class.
     fn snapshot(classes: &[(&str, &[&str])]) -> Snapshot {
-        let mut builder = SummaryBuilder::new();
+        let mut builder = SummaryBuilder::new(Language::Java);
         builder.package("p").unwrap();
         for (i, (name, supertypes)) in (0_u32..).zip(classes) {
             builder
@@ -1780,7 +1781,7 @@ mod tests {
     /// A file at `path` of `package` (`None`: the default package) with these single-type
     /// imports, declaring each class; `Outer$Inner` declares `Inner` inside `Outer`.
     fn file(path: &str, package: Option<&str>, imports: &[&str], classes: &[&str]) -> FileEntry {
-        let mut builder = SummaryBuilder::new();
+        let mut builder = SummaryBuilder::new(Language::Java);
         if let Some(package) = package {
             builder.package(package).unwrap();
         }

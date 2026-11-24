@@ -41,7 +41,6 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
-use jfl_adapter_java::{Grammar, GrammarSpec, JavaIndexer};
 use jfl_application::diagnostics::{Coordinator, Delivery, Incarnation, Job, JobId, Reply, Text};
 use jfl_application::syntax_indexer::{
     MAX_SOURCE_BYTES, SyntaxDiagnostic, SyntaxProblem, strip_bom,
@@ -56,6 +55,7 @@ use jfl_protocol::messages::{
 use tokio::sync::mpsc;
 
 use super::host::ConnId;
+use crate::languages::{self, Indexers};
 
 /// The compiles one connection runs at once: enough that a quick second edit starts without
 /// waiting for the first, few enough that one client cannot fill the blocking pool.
@@ -95,7 +95,7 @@ impl Work {
     /// The syntax pass over the job's own input, its ranges counted in [`Work::encoding`] on that
     /// very text. A document whose input is absent (no overlay, no file) has no diagnostics.
     #[must_use]
-    pub fn compile(&self, indexer: &JavaIndexer<()>) -> Compiled {
+    pub fn compile(&self, indexer: &Indexers<()>) -> Compiled {
         let text = self
             .job
             .inputs
@@ -125,7 +125,7 @@ pub trait Runner: Send {
 #[derive(Debug)]
 pub struct PoolRunner {
     done: mpsc::Sender<Compiled>,
-    indexer: Option<Arc<JavaIndexer<()>>>,
+    indexer: Option<Arc<Indexers<()>>>,
 }
 
 impl PoolRunner {
@@ -138,10 +138,9 @@ impl PoolRunner {
         }
     }
 
-    fn indexer(&mut self) -> Option<Arc<JavaIndexer<()>>> {
+    fn indexer(&mut self) -> Option<Arc<Indexers<()>>> {
         if self.indexer.is_none() {
-            let grammar = Grammar::new(&GrammarSpec::orchard()).ok()?;
-            self.indexer = Some(Arc::new(JavaIndexer::new(grammar, ())));
+            self.indexer = Some(Arc::new(languages::indexers(()).ok()?));
         }
         self.indexer.clone()
     }
@@ -190,7 +189,7 @@ fn failed(work: &Work) -> Compiled {
 /// The syntax diagnostics of `text`, ranges in `encoding`.
 #[must_use]
 pub fn syntax(
-    indexer: &JavaIndexer<()>,
+    indexer: &Indexers<()>,
     text: &str,
     encoding: PositionEncoding,
 ) -> Vec<WireDiagnostic> {
@@ -697,8 +696,8 @@ mod tests {
         }
     }
 
-    fn indexer() -> JavaIndexer<()> {
-        JavaIndexer::new(Grammar::new(&GrammarSpec::orchard()).unwrap(), ())
+    fn indexer() -> Indexers<()> {
+        languages::indexers(()).unwrap()
     }
 
     fn held() -> (Diagnostics, std_mpsc::Receiver<Work>) {

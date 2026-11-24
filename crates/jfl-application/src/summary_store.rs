@@ -287,6 +287,7 @@ pub trait SummaryStore: Send + Sync + 'static {
 
 #[cfg(test)]
 mod tests {
+    use jfl_domain::Language;
     use jfl_domain::{
         ByteOffset, ByteRange, DeclKind, DeclarationInput, Modifiers, RefShape, SummaryBuilder,
     };
@@ -298,7 +299,7 @@ mod tests {
     }
 
     fn summary() -> FileSummary {
-        let mut builder = SummaryBuilder::new();
+        let mut builder = SummaryBuilder::new(Language::Java);
         builder.package("p").unwrap();
         builder
             .declaration(&DeclarationInput {

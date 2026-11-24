@@ -99,6 +99,7 @@ CLI carrier), **SEM-07** (M4),
 | IDX-11 | Queries: `refs`, the `possible` superset, completeness | IDX-10 | deep | L |  | IDX-12 |
 | IDX-12 | Daemon and IPC: lock, socket, spawn, reconnect (daemon driver) | IDX-03, IDX-09, FORMAL-04 | deep | L |  | IDX-11 |
 | IDX-16 | Other JVM languages' sources make answers incomplete | IDX-11 | deep | M |  | FND-18 |
+| IDX-17 | The language seam: a registry, an indexer per language, language-tagged summaries | IDX-16 | deep | L |  | — |
 | LSP-01 | LSP adapter on `lsp-server` and the LSP conformance harness | IDX-03; started before DEC-02 by the owner's delegation (2026-11-17); DEC-02 still gates work beyond the walking skeleton | deep | L |  | IDX-09, IDX-10 |
 | LSP-02 | `jfl lsp`: lifecycle, encodings, document sync, deadlines | LSP-01, IDX-12 | deep | L |  | IDX-11 |
 | LSP-03 | Navigation methods | LSP-02, IDX-11, DEC-06 | standard | L |  | LSP-04 |
@@ -2919,6 +2920,141 @@ the loop is held p95 299–307 ms per slice (the whole 4.1–4.3 s settle before
   - [x] component tests for references, hover's counts and workspace symbols (`tests/queries.rs`), for definitions proved and not proved, with Kotlin and with an aspect (`should_keep_a_proved_definition_complete_when_only_kotlin_can_see_it`, `should_withdraw_complete_from_a_proved_definition_when_an_aspect_can_see_it`), build logic's scope (`jfl-adapter-java`'s `tests/definitions/references.rs::should_count_build_scripts_and_build_src_only_for_build_logic_when_a_view_has_them`), and the count kept current by hints (`tests/view_service.rs::should_count_other_language_files_again_when_one_is_created_or_removed`)
   - [x] `just bench-views medium` before and after (`doc/bench/README.md`): no change past this VM's noise; spring-framework counts 436 such files (396 `.kt`, 17 `.groovy`, 13 `.aj`, 6 `.bsh`, 4 `.jsp`; its 34 `.gradle` scripts are build logic's) and every one of its 100 references answers says `436 files in other JVM languages not indexed`; junit-framework (small) counts 164 (154 `.kt`, 6 `.jte`, 4 `.groovy`; 79 `.gradle.kts` scripts scoped), and its 79 references answers that were complete are not
 - **Impact:** protocol (an additive `incomplete_because` reason); completeness of references, definition, hover and workspace symbols; the `source_tree` and `repo_probe` contract suites.
+
+#### IDX-17: The language seam: a registry, an indexer per language, language-tagged summaries
+- **Depends on:** IDX-16. **Model:** deep. **Size:** L. **Parallel with:** —.
+- **Cites:** plan §5, §6.1, §6.3, §6.4; fnd §2, §6; ADR 0014, ADR 0031. Approved by the owner,
+  2026-11-24 ("option 2"), on the Go and Python research's section 6 (its prerequisite: generalise
+  the Java-shaped summary vocabulary and move the Java resolution rules out of
+  `jfl-application`).
+- **Why:** Java was assumed throughout: the listing matched `.java` in four places, the
+  `SyntaxIndexer` port had one implementation and no language, and a summary did not say what
+  it was a summary of. Adding Go, Kotlin or Python should mean a new adapter and resolver, not
+  edits across the core. No second language is added here, and behaviour does not change.
+- **Done (slice 1, this card's commit):**
+  - **The registry:** `jfl_application::languages` is the one place that maps a file name to a
+    language: `INDEXED_LANGUAGES` (`Language::Java` with `.java`, matched case-sensitively as
+    `javac` does) beside IDX-16's `OTHER_JVM_EXTENSIONS` and `BUILD_SCRIPT_SUFFIXES`, which moved
+    there from `source_tree` (re-exported, so their paths still work). `source_kind` gives
+    `SourceKind::Indexed(Language)` for an indexed file. The fs adapter's walk, the testkit's fake
+    tree, the git adapter's `ls-files` parsers, the hint filter and the view service ask the
+    registry (`indexed_language`, `indexed_language_of_bytes` for names that are not UTF-8,
+    `is_indexed_file_name`); `JAVA_EXTENSION` and `is_java_file_name` are gone, and the git
+    adapter's `TRACKED_PATHSPECS` test checks the registry's indexed extensions too. A static
+    table rather than one injected by composition: the listing, the pathspecs, the hints and the
+    view service classify names with no port between them, and one `const` keeps them in
+    agreement by construction (the module's documentation says why, and when injection would pay).
+  - **An indexer per language:** `SyntaxIndexer::language()` names the language an indexer reads;
+    the view service and the queries reach the set through the new `SyntaxIndexers` port, whose
+    calls name the file's language (`key_inputs`, `index`, `site_syntax`, `sites_syntax`). Every
+    single `SyntaxIndexer` is the set of its one language (a blanket impl), and a language with no
+    indexer is refused (`SyntaxIndexError::NoIndexer`, a gap), never read as another.
+    `jfl-composition::languages` names each language's adapter (`Indexers`, `indexers(pool)`).
+    The daemon's `Views` builds its engine from it, and so does the syntax diagnostics pass
+    (`daemon/diagnostics.rs`, as `Indexers<()>`); no other place builds a `JavaIndexer`. A second language there replaces `Indexers` by
+    a struct with one indexer per language whose methods `match` on the language. Generic, not
+    `dyn`: the port's `impl Future` methods would need a box per parse otherwise.
+  - **Language-tagged summaries:** `jfl_domain::Language` (an enum with a stable code and a name;
+    an enum so that every exhaustive `match` lists what a new language must decide), and
+    `SummaryParts::language`, `FileSummary::language()`; `SummaryBuilder::new(language)` and no
+    `Default` on the summary types, so no summary is Java by omission. `FileText` carries the
+    language too, which routes the scope facts. The store's entry format is 3 (the language's
+    code in the head; a format-2 store is discarded whole on open, never migrated, fnd §6). The
+    summariser version and every `SyntaxKey` are unchanged; the API digest does not read the
+    language (a file's language follows from its name, which no two summaries of one key differ
+    in).
+  - **Goldens:** the 71 summary goldens under `fixtures/java/summaries/` gain one line,
+    `"language": "java"`, and nothing else; `fixtures.lock` moves with them.
+- **Proposed (owner decides, with DEC-04):** where the Java resolution rules go in slice 2.
+  **This conflicts with the plan:** plan §5.6, plan §6.1, fnd §2.1 and DEC-04's card all say that
+  a resolver of our own is the pure crate `jfl-resolve`, named by DEC-04, an owner decision.
+  Today's resolver awaits the async `Sources` and `Deadline` ports of `jfl-application`, which a
+  pure crate may not name (plan §6.3). The two options:
+  - **(a) `jfl-lang-java`, with the adapter role and no grants:** it depends on `jfl-domain` and
+    `jfl-application` only, implements a per-language resolver port that `jfl-application` owns,
+    and is wired by composition beside the indexer. The resolver moves as it is.
+    - The architecture checker stays as it is, since the adapter role already exists. A new crate
+      role would instead be a gate change: the roles in `architecture.toml` and the role list of
+      `jfl-architecture`'s policy.
+    - It adds a row to plan §6.1 and §6.3, with its `members`, `architecture.toml`, `deny.toml`
+      and `clippy.toml` entries.
+    - The owner must supersede plan §5.6's `jfl-resolve` wording.
+    - It keeps the JLS rules apart from the tree-sitter grammar, so the javac differential runs
+      without the C build.
+  - **(b) the pure `jfl-resolve`,** as the plan foresees (`#![no_std]`, fnd §2.3). The resolver
+    must first be restructured off the async `Sources` and `Deadline` ports, onto a snapshot the
+    caller fills, and the port's vocabulary goes into `jfl-domain`. This is heavier than a move,
+    but it matches the plan and the no_std discipline.
+
+  Putting the rules into `jfl-adapter-java` was weighed and set aside: it would tie the JLS rules
+  to the C grammar and its build. Slice 2 starts only once the owner has chosen.
+- **Audit: the summary vocabulary (`jfl-domain`).** Language-neutral already: a declaration's
+  name, range and name range, its container (`parent`), its header text (`signature`), the
+  string arena, reference sites by name, range and arity, `syntax_errors`, `Declarations` and the
+  name postings. Java-shaped: `DeclKind`'s eleven kinds; `Modifiers` (Java's fourteen and
+  `varargs`); `Import`'s `is_static`, `on_demand` and `module` (JEP 511); `package` as a dotted
+  name; `params` erased by Java's rules (`erase_parameter_type`); `supertypes` and `permits`
+  (`extends`/`implements`/`permits`); `annotations`; `javadoc`; `RefShape`'s `New`, `MethodRef`
+  and `Annotation`; `SymbolId`'s text form (`pkg.Type$Nested#member(params)`, `<init>`, `$`
+  quoting); the API digest's reading of all of these. **Slice 2 splits them**: a neutral
+  declaration (kind as a neutral category plus the language's own kind code, name, ranges,
+  container, signature) and a per-language extension table keyed by `DeclId` (for Java:
+  modifiers, parameters, supertypes, permits, annotations, Javadoc), with imports and the package
+  in the same extension; the symbol text form becomes per language. A format bump again (a
+  cache), goldens changed only by renames.
+- **Audit: `jfl-protocol` and the LSP mapping.** No message carries a language, and none needs
+  one yet. Java-shaped, each additive to fix and none trivial enough for this card (each is a
+  protocol minor and a golden): `SymbolKind`'s variants mirror `DeclKind` (a Go `func` or
+  `struct`, a Python `def` needs new variants; `Other` keeps old readers safe); `SymbolFilter`'s
+  `class`/`method`/`field` grouping; `DiagnosticSource::Javac`; `Reason::NoClasspath` and its
+  wording, and `method_ref`; IDX-16's reason wording ("files in other JVM languages not
+  indexed"). The LSP adapter ignores `didOpen`'s `languageId`. The daemon's syntax diagnostics
+  (`jfl-composition`'s `daemon/diagnostics.rs`) take their indexer from `languages`, but they
+  parse every open document with the Java one whatever its name. That coordinator must route by
+  the registry before a second language lands; it is not routed here, because routing changes
+  what a `.kt` document shows today. There is no `.lsp.json` yet (LSP-05).
+- **Remains (slice 2, a card of its own):** the resolver port and `jfl-lang-java`:
+  `queries/resolve.rs` (1.9k lines), `resolve/prove.rs` (0.6k), the Java lexical rules of
+  `queries/scan.rs` (1.0k: `$` in identifiers, text blocks, Javadoc words, `case` labels), the
+  annotation-processor list (`PROCESSOR_PACKAGES`), and the Java-shaped scope facts of
+  `syntax_indexer` (`SiteSyntax`, `SiteForm`, `Around`), with the generic queries (definition,
+  hover, references, symbols, the envelope, the completeness rules that are not Java's) left in
+  `jfl-application` over neutral `Hit`, `Outcome` and `Unproved` types; the vocabulary split
+  above; the diagnostics coordinator's routing; the port and method names that still say Java
+  (`RepoProbe::tracked_java`, the git adapter's `java_names`, `Listing`'s documentation), a
+  rename with no change of behaviour.
+- **Reuse considered:** none needed: a table over the existing name checks, and a generic port
+  over the existing adapter.
+- **Accept:**
+  - [x] one registry maps a name to its language, and no extension belongs to two rules
+    (`languages::tests::should_classify_a_file_by_its_extension_when_a_listing_meets_it`,
+    `languages::tests::should_give_each_extension_one_rule_when_the_registry_is_read`); the git
+    pathspecs follow it (`jfl-adapter-git`'s `tests::should_name_every_extension_of_the_registry_when_tracked_files_are_asked_for`)
+  - [x] a file reaches its language's indexer, and every registered language has one wired
+    (`syntax_indexer::tests::should_route_a_file_to_its_language_when_one_indexer_is_the_set`,
+    `jfl-composition`'s `languages::tests::should_wire_an_indexer_for_every_indexed_language_when_built`)
+  - [x] summaries carry their language through the store and the goldens
+    (`language::tests::should_round_trip_every_language_when_its_code_or_name_is_read_back`, the
+    store codec's round trip at format 3 and its refusal of an unknown language
+    (`codec::tests::should_refuse_an_entry_when_its_language_code_is_unknown`), the `syntax_indexer` contract suite's
+    `summarises_the_golden_corpus` over the tagged goldens)
+  - [x] behaviour unchanged: every other test, golden and transcript as on IDX-16's commit,
+    `just javac-bindings check` clean
+  - [x] `just bench-views` and `just bench-queries`, small and medium, before and after: no change past
+    this VM's noise (4 vCPU, 15 GB, Linux; 2026-11-24; three interleaved before/after pairs on
+    c2a2167 and this commit, the machine under a load of 4 to 6.5 from the other lane, so ranges
+    across runs): small, warm-store whole view 144–158 ms before, 137–171 ms after; definition
+    p50 0.96–1.03 ms before, 0.83–0.91 ms after; references, common names, p50 6.3–8.7 ms before,
+    7.3–8.9 ms after. Medium, warm-store whole view 586–877 ms before, 586–976 ms after;
+    definition p50 1.08–1.27 ms before, 1.06–1.24 ms after; hover p50 1.05–1.15 ms before,
+    1.03–1.25 ms after; references, common names, p50 27–31 ms before, 23–34 ms after; workspace
+    symbols prefix p50 9.5–12.7 ms before, 10.0–10.6 ms after. Every answer count is identical
+    (definitions' exact/possible/unresolved split, 39371 and 9915 possible references). The
+    request path adds one extension lookup per file read; re-measure on a quiet machine before
+    M1's bench gate takes these as a baseline
+- **Impact:** the `SyntaxIndexer` port (a `language()` method, the `SyntaxIndexers` set); the
+  summary store's format (3); the summary goldens' format (a `language` line); no protocol, LSP
+  or `--json` change; no change of any answer.
 
 ### Lane LSP: M1, the LSP carrier
 

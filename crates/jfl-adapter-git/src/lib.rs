@@ -38,7 +38,8 @@ pub mod snapshot;
 
 use cli::Git;
 
-/// The pathspecs of [`RepoProbe::tracked_java`]'s `ls-files`: `.java` as the listing matches it,
+/// The pathspecs of [`RepoProbe::tracked_java`]'s `ls-files`: each indexed language's extension
+/// (`jfl_application::INDEXED_LANGUAGES`, `.java` today) as the listing matches it, case and all,
 /// and each extension of `jfl_application::source_tree::OTHER_JVM_EXTENSIONS` and
 /// `BUILD_SCRIPT_SUFFIXES` (`.gradle.kts` is under `.kts`) without regard to case, as
 /// `source_kind` matches them (IDX-16). `*` matches across `/` in a pathspec without `glob`
@@ -427,6 +428,7 @@ pub(crate) fn map_io(error: &io::Error) -> RepoProbeError {
 
 #[cfg(test)]
 mod tests {
+    use jfl_application::INDEXED_LANGUAGES;
     use jfl_application::source_tree::{BUILD_SCRIPT_SUFFIXES, OTHER_JVM_EXTENSIONS};
 
     use super::TRACKED_PATHSPECS;
@@ -440,7 +442,12 @@ mod tests {
             .chain(BUILD_SCRIPT_SUFFIXES.iter().copied())
             .filter(|suffix| *suffix != ".gradle.kts")
             .map(|suffix| format!(":(icase)*{suffix}"))
-            .chain(core::iter::once("*.java".to_owned()))
+            .chain(
+                INDEXED_LANGUAGES
+                    .iter()
+                    .flat_map(|indexed| indexed.extensions)
+                    .map(|extension| format!("*{extension}")),
+            )
             .collect();
         // when
         let mut asked: Vec<&str> = TRACKED_PATHSPECS.to_vec();

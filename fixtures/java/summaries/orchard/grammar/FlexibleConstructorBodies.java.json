@@ -1,4 +1,5 @@
 {
+  "language": "java",
   "package": "grammar",
   "imports": [],
   "declarations": [

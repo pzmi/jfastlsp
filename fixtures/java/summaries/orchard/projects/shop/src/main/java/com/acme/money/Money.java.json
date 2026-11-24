@@ -1,4 +1,5 @@
 {
+  "language": "java",
   "package": "com.acme.money",
   "imports": [],
   "declarations": [

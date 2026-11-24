@@ -1,6 +1,8 @@
 //! Use cases and queries, the view registry and generations, the diagnostics coordinator and the
 //! port traits. Role: application.
 //!
+//! - [`languages`] (IDX-17): the language registry: which language a file is, by name, and the
+//!   other JVM languages counted beside the indexed ones (IDX-16).
 //! - [`source_tree`] (IDX-06): the `SourceTree` port, its value types and the exclusion rules of
 //!   plan §4.2 that every implementation applies.
 //! - [`hints`] (IDX-06): the bounded, coalescing queue a watch delivers its hints through.
@@ -24,6 +26,7 @@ pub mod blocking;
 pub mod clock;
 pub mod diagnostics;
 pub mod hints;
+pub mod languages;
 pub mod queries;
 pub mod repo_probe;
 pub mod shared_index;
@@ -36,6 +39,7 @@ pub mod views;
 pub use blocking::{BlockingPool, Interrupted};
 pub use clock::WallClock;
 pub use hints::{DEFAULT_HINT_CAPACITY, HintQueue, HintSink, hint_queue};
+pub use languages::{INDEXED_LANGUAGES, IndexedLanguage, indexed_language};
 pub use queries::{
     ClockDeadline, Deadline, DocumentSymbol, DocumentSymbols, FileText, Hover, HoverDeclaration,
     Pinned, QueryCache, QueryConfig, QueryError, ReferenceCounts, ReferencesQuery, Sources,
@@ -57,8 +61,8 @@ pub use summary_store::{
     StoreStats, SummaryStore, SummaryStoreError,
 };
 pub use syntax_indexer::{
-    Around, GrammarId, Indexed, SiteForm, SiteSyntax, SyntaxDiagnostic, SyntaxIndexError,
-    SyntaxIndexer, SyntaxProblem,
+    Around, GrammarId, Indexed, KeyInputs, SiteForm, SiteSyntax, SyntaxDiagnostic,
+    SyntaxIndexError, SyntaxIndexer, SyntaxIndexers, SyntaxProblem,
 };
 pub use view_service::{
     Answer, GitObserved, ServiceConfig, ServiceError, ServiceSources, Summary, ViewService,

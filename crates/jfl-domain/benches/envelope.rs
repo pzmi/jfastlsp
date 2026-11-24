@@ -17,6 +17,7 @@ use std::sync::OnceLock;
 
 use divan::Bencher;
 use divan::counter::ItemsCount;
+use jfl_domain::Language;
 use jfl_domain::{
     Arity, ByteOffset, ByteRange, Completeness, DeclKind, DeclarationInput, Digest, Envelope,
     EnvelopeParts, FileSummary, FileUri, Freshness, Generation, IncompleteReason, IndexState,
@@ -235,7 +236,7 @@ fn typical_summary() -> Result<FileSummary, String> {
 fn summary_of(references: u32) -> Result<FileSummary, String> {
     let mut rng = Rng(0x1DC0_0003);
     let err = |e: jfl_domain::SummaryError| e.to_string();
-    let mut builder = SummaryBuilder::new();
+    let mut builder = SummaryBuilder::new(Language::Java);
     builder
         .package("org.example.payments.billing")
         .map_err(err)?;

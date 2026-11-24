@@ -199,6 +199,8 @@ mod tests {
 
     use jfl_application::syntax_indexer::{GrammarId, Indexed};
 
+    use jfl_domain::Language;
+
     use super::*;
     use crate::fakes::syntax_indexer::CannedSyntaxIndexer;
 
@@ -268,6 +270,10 @@ mod tests {
     }
 
     impl SyntaxIndexer for Broken {
+        fn language(&self) -> Language {
+            Language::Java
+        }
+
         fn grammar(&self) -> GrammarId {
             ORCHARD
         }

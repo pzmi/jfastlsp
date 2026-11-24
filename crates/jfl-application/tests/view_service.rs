@@ -14,6 +14,7 @@ use jfl_application::{
     Answer, CountingClock, RepoProbeError, ServiceConfig, ServiceError, Summary, SummaryStore,
     ViewService, WallClock,
 };
+use jfl_domain::Language;
 use jfl_domain::{FileUri, IncompleteReason, ModuleName, RelPath, SummaryBuilder};
 use jfl_testkit::exec::block_on;
 use jfl_testkit::fakes::clock::FakeWallClock;
@@ -31,6 +32,10 @@ mod given {
     pub(crate) struct Indexer(pub(crate) Arc<AtomicUsize>);
 
     impl SyntaxIndexer for Indexer {
+        fn language(&self) -> Language {
+            Language::Java
+        }
+
         fn grammar(&self) -> GrammarId {
             GrammarId {
                 name: "test-grammar",
@@ -51,7 +56,7 @@ mod given {
                 Err(SyntaxIndexError::TooMuchWork)
             } else {
                 Ok(Indexed {
-                    summary: SummaryBuilder::new().finish(),
+                    summary: SummaryBuilder::new(Language::Java).finish(),
                     diagnostics: Vec::new(),
                     diagnostics_dropped: 0,
                 })

@@ -30,6 +30,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
 use ignore::{DirEntry, ParallelVisitor, ParallelVisitorBuilder, WalkBuilder, WalkState};
+use jfl_application::languages::indexed_language_of_bytes;
 use jfl_application::source_tree::{
     BUILD_FILES, Exclusion, GitEntry, GitMarker, ListMode, ListedFile, Listing, Skipped, Unlisted,
     UnlistedReason, exclusion, is_git_metadata, is_other_source_name, nested_root,
@@ -149,9 +150,10 @@ fn has_build_file(dir: &Path) -> bool {
         .any(|name| fs::symlink_metadata(dir.join(name)).is_ok())
 }
 
-fn is_java_name(name: &OsStr) -> bool {
-    let bytes = name.as_bytes();
-    bytes.len() > b".java".len() && bytes.ends_with(b".java")
+/// Whether the registry gives this name an indexed language, by its bytes: a name that is not
+/// UTF-8 is still listed, as a gap.
+fn is_indexed_name(name: &OsStr) -> bool {
+    indexed_language_of_bytes(name.as_bytes()).is_some()
 }
 
 /// The exclusion rule for the directory `dir` strictly below `root`; `None` to walk into it.
@@ -238,7 +240,7 @@ fn keep(entry: &DirEntry, root: &Path, skipped: &Mutex<Vec<Skipped>>) -> bool {
     };
     let path = entry.path();
     let why = if file_type.is_symlink() {
-        let reported = is_java_name(name) || fs::metadata(path).is_ok_and(|m| m.is_dir());
+        let reported = is_indexed_name(name) || fs::metadata(path).is_ok_and(|m| m.is_dir());
         if !reported {
             return false;
         }
@@ -344,7 +346,7 @@ impl ParallelVisitor for Visitor<'_> {
         match entry {
             Ok(entry) => {
                 let is_file = entry.file_type().is_some_and(|t| t.is_file());
-                if is_file && is_java_name(entry.file_name()) {
+                if is_file && is_indexed_name(entry.file_name()) {
                     return self.file(&entry);
                 }
                 if is_file && is_other_source_name(&entry.file_name().to_string_lossy()) {

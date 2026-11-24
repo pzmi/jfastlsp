@@ -1,4 +1,5 @@
 {
+  "language": "java",
   "package": "com.acme.probe3",
   "imports": [],
   "declarations": [

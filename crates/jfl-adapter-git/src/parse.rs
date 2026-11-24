@@ -6,7 +6,7 @@
 //!
 //! Pinned by `parse::tests` and the property tests in `tests/parsers.rs`.
 
-use jfl_application::source_tree::JAVA_EXTENSION;
+use jfl_application::languages::indexed_language_of_bytes;
 use jfl_application::{HeadState, ObjectId};
 use jfl_domain::RelPath;
 
@@ -86,7 +86,7 @@ pub fn java_names(bytes: &[u8]) -> Result<Paths, Malformed> {
             return Err(Malformed);
         }
         let name = record.rsplit(|b| *b == b'/').next().unwrap_or(record);
-        if name.len() > JAVA_EXTENSION.len() && name.ends_with(JAVA_EXTENSION.as_bytes()) {
+        if indexed_language_of_bytes(name).is_some() {
             paths.push(record);
         }
     }
@@ -106,7 +106,7 @@ pub fn tracked_names(bytes: &[u8]) -> Result<(Paths, Paths), Malformed> {
             return Err(Malformed);
         }
         let name = record.rsplit(|b| *b == b'/').next().unwrap_or(record);
-        if name.len() > JAVA_EXTENSION.len() && name.ends_with(JAVA_EXTENSION.as_bytes()) {
+        if indexed_language_of_bytes(name).is_some() {
             java.push(record);
         } else if jfl_application::source_tree::is_other_source_name(&String::from_utf8_lossy(name))
         {

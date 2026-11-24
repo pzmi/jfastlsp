@@ -1,6 +1,6 @@
-//! Per-file syntax summaries (plan §2.1, §5.4, §5.5): what the syntax index keeps of a Java file.
+//! Per-file syntax summaries (plan §2.1, §5.4, §5.5): what the syntax index keeps of a source file.
 //!
-//! A [`FileSummary`] holds the package, the imports, every declaration (kind, name, signature
+//! A [`FileSummary`] holds the file's [`Language`] (IDX-17), the package, the imports, every declaration (kind, name, signature
 //! with annotations, modifiers, Javadoc range, supertypes and permitted subtypes by name,
 //! parameter types, annotation names) and every reference site (simple
 //! name, arity, syntactic shape). The extractor (IDX-07) fills it through [`SummaryBuilder`] and
@@ -39,6 +39,7 @@ use alloc::vec::Vec;
 use core::mem::size_of;
 
 use crate::digest::{Digest, Encoder, KeyHasher};
+use crate::language::Language;
 use crate::symbol::{DeclKind, MemberId, SymbolError, SymbolId};
 use crate::text::ByteRange;
 
@@ -298,8 +299,13 @@ pub struct ReferenceSite {
 
 /// A summary as plain data: what the store writes and reads (IDX-08, postcard). Build a
 /// [`FileSummary`] from it with [`FileSummary::from_parts`].
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
+///
+/// No `Default`: a summary is always of a language its indexer names, never Java by omission.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct SummaryParts {
+    /// The language the file was summarised as (IDX-17): which indexer made this summary, and so
+    /// which language's rules read it.
+    pub language: Language,
     /// Every string of the summary, once.
     pub text: Box<str>,
     /// Where each [`StrId`]'s string lies in `text`.
@@ -389,8 +395,9 @@ fn index(len: usize) -> Result<u32, SummaryError> {
 }
 
 /// Builds a [`FileSummary`], interning every string once (IDX-07's extraction fills it).
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct SummaryBuilder {
+    language: Language,
     text: String,
     strings: Vec<Span>,
     interned: BTreeMap<Box<str>, StrId>,
@@ -402,10 +409,20 @@ pub struct SummaryBuilder {
 }
 
 impl SummaryBuilder {
-    /// An empty summary.
+    /// An empty summary of a file in `language`.
     #[must_use]
-    pub fn new() -> Self {
-        Self::default()
+    pub fn new(language: Language) -> Self {
+        Self {
+            language,
+            text: String::new(),
+            strings: Vec::new(),
+            interned: BTreeMap::new(),
+            package: None,
+            imports: Vec::new(),
+            declarations: Vec::new(),
+            type_names: Vec::new(),
+            references: Vec::new(),
+        }
     }
 
     /// The id of `value`, stored on first use.
@@ -518,6 +535,7 @@ impl SummaryBuilder {
     pub fn finish(self) -> FileSummary {
         FileSummary {
             parts: SummaryParts {
+                language: self.language,
                 text: self.text.into_boxed_str(),
                 strings: self.strings.into_boxed_slice(),
                 package: self.package,
@@ -536,7 +554,7 @@ impl SummaryBuilder {
 ///
 /// Pinned by: `summary::tests::should_refuse_parts_when_an_index_is_out_of_range` and
 /// `tests/properties.rs::should_rebuild_the_same_summary_when_its_parts_round_trip`.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct FileSummary {
     parts: SummaryParts,
 }
@@ -594,6 +612,12 @@ impl FileSummary {
             check_list(declaration.annotations)?;
         }
         Ok(Self { parts })
+    }
+
+    /// The language the file was summarised as ([`SummaryParts::language`]).
+    #[must_use]
+    pub const fn language(&self) -> Language {
+        self.parts.language
     }
 
     /// Whether the file had a syntax error when it was summarised ([`SummaryParts::syntax_errors`]).
@@ -867,7 +891,7 @@ mod tests {
     /// `package com.acme; import java.util.List; class Billing { long charge(Money m) {..} }`,
     /// optionally with a second `charge` overload.
     fn billing(signature: &str, overloads: bool, import: &str) -> FileSummary {
-        let mut builder = SummaryBuilder::new();
+        let mut builder = SummaryBuilder::new(Language::Java);
         builder.package("com.acme").unwrap();
         builder.import(import, false, false, range(0, 5)).unwrap();
         let class = builder
@@ -929,7 +953,7 @@ mod tests {
     #[test]
     fn should_store_a_string_once_when_it_repeats() {
         // given
-        let mut builder = SummaryBuilder::new();
+        let mut builder = SummaryBuilder::new(Language::Java);
         // when
         for at in 0..100 {
             builder
@@ -954,7 +978,7 @@ mod tests {
         let before = billing("long charge(Money m)", false, "java.util.List");
         // A body edit changes the reference sites and the declaration's range; a line added
         // above shifts every range. Neither is in the API.
-        let mut after = SummaryBuilder::new();
+        let mut after = SummaryBuilder::new(Language::Java);
         after.package("com.acme").unwrap();
         after
             .import("java.util.List", false, false, range(40, 45))
@@ -993,7 +1017,7 @@ mod tests {
     /// `class Person<T> { String name; }` with the class's header and the field's annotations
     /// as given.
     fn person(class_signature: &str, annotations: &[&str], field_signature: &str) -> FileSummary {
-        let mut builder = SummaryBuilder::new();
+        let mut builder = SummaryBuilder::new(Language::Java);
         builder.package("com.acme").unwrap();
         let class = builder
             .declaration(&DeclarationInput {
@@ -1056,7 +1080,7 @@ mod tests {
     fn should_keep_permits_apart_from_supertypes_when_a_type_is_sealed() {
         // given
         let shape = |permits: &'static [&'static str]| {
-            let mut builder = SummaryBuilder::new();
+            let mut builder = SummaryBuilder::new(Language::Java);
             builder
                 .declaration(&DeclarationInput {
                     supertypes: &["Figure"],
@@ -1090,7 +1114,7 @@ mod tests {
     fn should_keep_the_api_digest_when_imports_are_reordered() {
         // given
         let with_imports = |imports: &[&str]| {
-            let mut builder = SummaryBuilder::new();
+            let mut builder = SummaryBuilder::new(Language::Java);
             for name in imports {
                 builder.import(name, false, false, range(0, 1)).unwrap();
             }
@@ -1110,7 +1134,7 @@ mod tests {
     fn should_change_the_api_digest_when_a_module_import_replaces_a_package_import() {
         // given: `import module java.base;` and `import java.base.*;` name the same text
         let with = |module: bool| {
-            let mut builder = SummaryBuilder::new();
+            let mut builder = SummaryBuilder::new(Language::Java);
             if module {
                 builder.module_import("java.base", range(0, 1)).unwrap();
             } else {
@@ -1169,7 +1193,7 @@ mod tests {
     #[test]
     fn should_name_every_declaration_kind_when_it_is_addressable() {
         // given
-        let mut builder = SummaryBuilder::new();
+        let mut builder = SummaryBuilder::new(Language::Java);
         builder.package("com.acme").unwrap();
         let outer = builder
             .declaration(&input(DeclKind::Class, None, "Billing"))
@@ -1291,7 +1315,7 @@ mod tests {
     #[test]
     fn should_refuse_a_declaration_when_its_parent_is_not_added_yet() {
         // given
-        let mut builder = SummaryBuilder::new();
+        let mut builder = SummaryBuilder::new(Language::Java);
         // when
         let refused = builder.declaration(&input(DeclKind::Method, Some(DeclId(0)), "f"));
         // then
@@ -1337,13 +1361,15 @@ mod tests {
     #[test]
     fn should_keep_the_syntax_error_mark_when_parts_round_trip() {
         // given
-        let marked = SummaryBuilder::new().finish().with_syntax_errors(true);
+        let marked = SummaryBuilder::new(Language::Java)
+            .finish()
+            .with_syntax_errors(true);
         // when
         let back = FileSummary::from_parts(marked.parts().clone()).unwrap();
         let without = back.without_references();
         // then
         assert!(back.syntax_errors());
         assert!(without.syntax_errors());
-        assert!(!SummaryBuilder::new().finish().syntax_errors());
+        assert!(!SummaryBuilder::new(Language::Java).finish().syntax_errors());
     }
 }
