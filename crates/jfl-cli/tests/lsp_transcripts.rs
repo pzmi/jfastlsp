@@ -3,7 +3,8 @@
 //! format and the normalisation). The `lsp-conformance` stage runs this target and
 //! `lsp_daemon.rs`.
 //!
-//! Each transcript gets its own scratch directory: a git copy of `fixtures/lsp/worktree/` under
+//! Each transcript runs twice, the worktree spelled as it is and through a link above it, each
+//! time in its own scratch directory: a git copy of `fixtures/lsp/worktree/` under
 //! `a+b/c@d/` (so every answer naming a file the client never sent shows the canonical,
 //! percent-encoded form), substituted for `{{root}}` as the client spells it and `{{root_uri}}` as
 //! the daemon writes it, and the daemon's state directory, which `jfl lsp` starts a daemon in on
@@ -39,10 +40,21 @@ fn should_pass_every_transcript_when_run_against_jfl_lsp() {
     let transcripts = texts(&fixtures()).unwrap();
     let names: Vec<&str> = transcripts.iter().map(|(name, _)| name.as_str()).collect();
 
-    // when
+    // when: each one with the worktree spelled as it is, and through a link above it (FND-17)
     let failures: Vec<String> = transcripts
         .iter()
-        .filter_map(|(name, text)| run(&World::new(), name, text).err().map(|e| e.to_string()))
+        .flat_map(|(name, text)| {
+            [
+                ("plain", World::new()),
+                ("through a link", World::through_link()),
+            ]
+            .into_iter()
+            .filter_map(move |(spelling, world)| {
+                run(&world, name, text)
+                    .err()
+                    .map(|e| format!("{spelling}: {e}"))
+            })
+        })
         .collect();
 
     // then

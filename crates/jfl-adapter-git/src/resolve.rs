@@ -276,13 +276,40 @@ fn precheck(git: &Path, marker: GitMarker) -> Result<(), RepoProbeError> {
 /// The canonical form of the deepest existing directory that holds `path` (itself, when it is a
 /// directory): a request may name a file not yet written, or one under a symbolic link.
 fn existing_dir(path: &Path) -> Result<PathBuf, RepoProbeError> {
+    canonical_parts(path).map(|(dir, _)| dir)
+}
+
+/// `path` as the probe binds it: the deepest existing directory that holds it (itself, when it
+/// is a directory) canonicalised, then the rest of `path` below that directory as written. The
+/// root [`resolve`] finds for `path` is this path's innermost worktree, so a caller that binds a
+/// file to that root by this path always finds it under the root (FND-17: the daemon binds a
+/// request spelled through a link with it).
+///
+/// Pinned by: `tests/worktrees.rs::should_resolve_the_directory_and_keep_the_rest_when_a_path_goes_through_a_link`.
+pub fn canonical_path(path: &Path) -> Result<PathBuf, RepoProbeError> {
+    let (mut dir, rest) = canonical_parts(path)?;
+    if !rest.as_os_str().is_empty() {
+        dir.push(rest);
+    }
+    Ok(dir)
+}
+
+/// The canonical deepest existing directory holding `path`, and `path` below the directory it
+/// canonicalised.
+fn canonical_parts(path: &Path) -> Result<(PathBuf, PathBuf), RepoProbeError> {
     let mut dir = match fs::metadata(path) {
         Ok(meta) if meta.is_dir() => path,
         _ => path.parent().unwrap_or(path),
     };
     loop {
         match fs::canonicalize(dir) {
-            Ok(canonical) if canonical.is_dir() => return Ok(canonical),
+            Ok(canonical) if canonical.is_dir() => {
+                let rest = path
+                    .strip_prefix(dir)
+                    .unwrap_or(Path::new(""))
+                    .to_path_buf();
+                return Ok((canonical, rest));
+            }
             Ok(_) => {}
             Err(error) if gone(&error) => {}
             Err(error) => return Err(map_io(&error)),

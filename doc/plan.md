@@ -345,6 +345,12 @@ Each request's file resolves to the innermost enclosing worktree root (the direc
 up to it is a `stat` per directory, redone per request so that a worktree or repository created
 inside a resolved directory is seen at once). One connection never implies one view: a subagent's
 request may name another worktree's file. A **view** is the daemon's state for one worktree root (ADR 0017).
+A root is named by its canonical path (links resolved), so a request is bound by its file's
+canonical path, and the answer names the root and every file under it as the request spelled the
+root: a path through a link at or above the worktree (macOS's `$TMPDIR` under `/var`, a link to
+`/private/var`) is answered in the client's own spelling, never refused, and a client's open
+document is matched to a request or a hit by its canonical path as well as by its spelling, so
+the refusal of a hit in a modified document (§4.4) never depends on spellings (FND-17).
 
 ### 4.2 Nested worktrees
 

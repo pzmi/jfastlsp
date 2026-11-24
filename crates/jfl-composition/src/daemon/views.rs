@@ -7,7 +7,10 @@
 //!   the query under its internal deadline (plan §2.7: 300 ms; at the deadline the answer is
 //!   partial and says `deadline`), and lets the pin go. Pinned by
 //!   `tests/daemon.rs::should_answer_a_definition_from_the_views_with_an_honest_envelope_when_a_client_asks`. The request's own stats run inline on the
-//!   loop, the reads and parses on the blocking pool (IDX-09's decision).
+//!   loop, the reads and parses on the blocking pool (IDX-09's decision). A file spelled through
+//!   a link is bound by its canonical path and answered in the request's spelling of the root
+//!   ([`super::spelling`]); pinned by
+//!   `tests/daemon.rs::should_answer_in_the_request_s_spelling_when_the_worktree_is_reached_through_a_link`.
 //! - **Between requests** ([`Service::background`]): `settle` once a request opened a view, in
 //!   slices of [`SETTLE_SLICE`] files (the rest of the view read and published a slice at a time,
 //!   IDX-09d), then `write_back` in slices of [`WRITE_SLICE`] summaries, each step run to its
@@ -64,6 +67,7 @@ use jfl_protocol::{SCHEMA_VERSION, WireEnvelope};
 
 use super::ports::{SystemClock, TokioPool};
 use super::service::{Context, Overlay, Service, Working, error_body, result_body, unwired};
+use super::spelling::OpenDocuments;
 
 /// The summary store's cap on disk: 2 GiB, about four times the large corpus's summaries.
 pub const STORE_CAP: u64 = 2 << 30;
@@ -117,6 +121,25 @@ impl std::fmt::Debug for Views {
 enum Found {
     Definition(Envelope),
     Hover(Hover),
+}
+
+impl Found {
+    /// Every URI at or below `from` spelled below `to` ([`Envelope::respelled`]); kept in `from`'s
+    /// spelling whole when one cannot be (too long).
+    fn respelled(self, from: &FileUri, to: &FileUri) -> Self {
+        match self {
+            Self::Definition(envelope) => {
+                Self::Definition(envelope.respelled(from, to).unwrap_or(envelope))
+            }
+            Self::Hover(hover) => Self::Hover(Hover {
+                envelope: hover
+                    .envelope
+                    .respelled(from, to)
+                    .unwrap_or_else(|| hover.envelope.clone()),
+                ..hover
+            }),
+        }
+    }
 }
 
 impl Views {
@@ -173,7 +196,10 @@ impl Views {
                  save it, or ask again once the disk holds it (plan §4.4)",
             )
         };
-        if overlay_differs(context, params.uri.file()) {
+        // Open documents by spelling or canonical path (FND-17): whatever the spellings, a
+        // modified one is found.
+        let open = OpenDocuments::new(context.overlays);
+        if overlay_differs(&open, params.uri.file()) {
             return modified(id);
         }
         let found = self.query(op, &params).await;
@@ -185,7 +211,7 @@ impl Views {
             Ok(Found::Hover(found)) => Some(&found.envelope),
             Err(_) => None,
         };
-        if hits.is_some_and(|envelope| hit_in_modified(context, envelope)) {
+        if hits.is_some_and(|envelope| hit_in_modified(&open, envelope)) {
             return modified(id);
         }
         match found {
@@ -208,7 +234,9 @@ impl Views {
         op: Operation,
         params: &PositionParams,
     ) -> Result<Found, (ErrorCode, String)> {
-        let file = params.uri.file().clone();
+        // Bound by its canonical path, answered in the request's spelling of the root (FND-17).
+        let asked = params.uri.file();
+        let file = super::spelling::canonical(asked).unwrap_or_else(|| asked.clone());
         let answer = self.engine.request(&file).await.map_err(|e| match e {
             ServiceError::NotInWorktree => (ErrorCode::NotInWorktree, e.to_string()),
             other => (ErrorCode::InternalError, other.to_string()),
@@ -275,10 +303,16 @@ impl Views {
             .map(Found::Definition)
         };
         let id = answer.id;
+        let respell =
+            super::spelling::client_root(asked, &answer.view).map(|to| (answer.view.clone(), to));
         drop(answer);
         // The pin is let go whatever the query found; a registry that refuses is this service's
         // defect, and the answer stands.
         let _released = self.engine.finish(id);
+        let found = match respell {
+            Some((from, to)) => found.map(|found| found.respelled(&from, &to)),
+            None => found,
+        };
         found.map_err(|e| {
             let code = match e {
                 QueryError::NoSymbol => ErrorCode::NoSymbol,
@@ -369,9 +403,12 @@ fn hover_result(found: &Hover) -> HoverResult {
 /// the disk ([`overlay_differs`]), each file checked once.
 ///
 /// Pinned by: `fixtures/lsp/document-sync.jsonl` (Greeter.java open with lines inserted, a
-/// definition from Main.java).
-fn hit_in_modified(context: &Context<'_>, envelope: &Envelope) -> bool {
-    if context.overlays.is_empty() {
+/// definition from Main.java) and, whatever the spellings,
+/// `tests/daemon.rs::should_refuse_a_hit_in_a_modified_document_when_it_was_opened_through_a_link`,
+/// `tests/daemon.rs::should_refuse_a_hit_in_a_modified_document_when_the_request_goes_through_a_link_inside_the_worktree`
+/// and `tests/daemon.rs::should_refuse_a_hit_in_a_modified_document_when_a_link_leads_from_another_worktree`.
+fn hit_in_modified(open: &OpenDocuments<'_, Overlay>, envelope: &Envelope) -> bool {
+    if open.is_empty() {
         return false;
     }
     let files: BTreeSet<&FileUri> = envelope
@@ -380,18 +417,13 @@ fn hit_in_modified(context: &Context<'_>, envelope: &Envelope) -> bool {
         .map(|l| &l.uri)
         .chain(envelope.possible().iter().map(|p| &p.location.uri))
         .collect();
-    files.into_iter().any(|file| overlay_differs(context, file))
+    files.into_iter().any(|file| overlay_differs(open, file))
 }
 
 /// Whether the client's open document `file` holds another text than the file on disk, and the
 /// disk was not written after that text arrived (plan §4.4: then the disk wins).
-fn overlay_differs(context: &Context<'_>, file: &FileUri) -> bool {
-    let Some(overlay) = context
-        .overlays
-        .iter()
-        .find(|(open, _)| open.file() == file)
-        .map(|(_, overlay)| overlay)
-    else {
+fn overlay_differs(open: &OpenDocuments<'_, Overlay>, file: &FileUri) -> bool {
+    let Some(overlay) = open.get(file) else {
         return false;
     };
     let path = Path::new(file.path());

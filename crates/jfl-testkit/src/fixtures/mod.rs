@@ -76,3 +76,9 @@ pub fn fifo(path: &Path) -> Result<(), String> {
         Err(format!("mkfifo exited with {status}"))
     }
 }
+
+/// Makes a symbolic link at `link` to `target`, for a test crate that holds no fs grant (a
+/// worktree spelled through a link, as macOS's temporary directory is).
+pub fn symlink(target: &Path, link: &Path) -> Result<(), String> {
+    std::os::unix::fs::symlink(target, link).map_err(|e| format!("symlink {}: {e}", link.display()))
+}

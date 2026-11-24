@@ -124,7 +124,9 @@ fn should_answer_from_a_restarted_daemon_with_the_open_documents_when_the_daemon
 #[test]
 fn should_answer_from_the_disk_when_it_was_written_after_the_open_document() {
     // given: an open document the disk does not hold
-    let world = World::new();
+    // (the worktree spelled through a link above it, the open document and the request in that
+    // spelling: FND-17)
+    let world = World::through_link();
     let mut lsp = live(&world);
     lsp.send(&initialize()).unwrap();
     assert_eq!(lsp.next(DEADLINE).unwrap()["id"], 1);

@@ -708,8 +708,9 @@ fn should_answer_a_definition_from_the_views_with_an_honest_envelope_when_a_clie
 
     // then: `exact` only where proved (the declaration's own name), the unproved call `possible`
     // with its reason and never complete, the view naming the worktree's HEAD
-    let (Outcome::Result(call), Outcome::Result(own)) = (call.outcome, own.outcome) else {
-        panic!("not answered");
+    let (call, own) = match (call.outcome, own.outcome) {
+        (Outcome::Result(call), Outcome::Result(own)) => (call, own),
+        refused => panic!("not answered: {refused:?}"),
     };
     let wave = jfl_protocol::envelope::WireRange(
         jfl_domain::Range::new(
@@ -750,6 +751,202 @@ fn should_answer_a_definition_from_the_views_with_an_honest_envelope_when_a_clie
     assert!(
         matches!(past.outcome, Outcome::Error(e) if e.code == jfl_protocol::rpc::ErrorCode::PositionOutOfRange)
     );
+}
+
+#[test]
+fn should_answer_in_the_request_s_spelling_when_the_worktree_is_reached_through_a_link() {
+    // given: the LSP fixture worktree at `real/wt`, asked about as `via/wt` through a link to
+    // `real`: macOS's temporary directory is such a spelling (`/var` is a link to `/private/var`),
+    // and the repository probe names the worktree by its canonical root
+    use jfl_protocol::messages::{Definition, PositionParams};
+    let daemons = Daemons::new();
+    let base = fs::canonicalize(daemons.root()).unwrap();
+    let real = base.join("real").join("wt");
+    jfl_testkit::fixtures::git::Repo::init(
+        &real,
+        &[
+            (
+                "src/demo/Main.java",
+                include_bytes!("../../../fixtures/lsp/worktree/src/demo/Main.java"),
+            ),
+            (
+                "src/demo/greet/Greeter.java",
+                include_bytes!("../../../fixtures/lsp/worktree/src/demo/greet/Greeter.java"),
+            ),
+        ],
+    )
+    .unwrap();
+    std::os::unix::fs::symlink(base.join("real"), base.join("via")).unwrap();
+    let spelled = base.join("via").join("wt");
+    let uri = |file: &str| {
+        DocumentUri::from(
+            jfl_domain::FileUri::from_path(&spelled.join(file).to_string_lossy()).unwrap(),
+        )
+    };
+    let at = |file: &str, line, col| PositionParams {
+        uri: uri(file),
+        line,
+        col,
+        position_encoding: jfl_domain::PositionEncoding::Utf16,
+        clamp: false,
+    };
+    let mut proxy = daemons.proxy("link", None);
+
+    // when: the call the syntax cannot type, and the declaration's own name
+    let call = proxy
+        .call::<Definition>(at("src/demo/Main.java", 12, 68), BUDGET)
+        .unwrap();
+    let own = proxy
+        .call::<Definition>(at("src/demo/greet/Greeter.java", 10, 29), BUDGET)
+        .unwrap();
+
+    // then: answered, the view and every hit named as the request spelled the worktree
+    let (call, own) = match (call.outcome, own.outcome) {
+        (Outcome::Result(call), Outcome::Result(own)) => (call, own),
+        refused => panic!("not answered: {refused:?}"),
+    };
+    let greeter = uri("src/demo/greet/Greeter.java");
+    assert_eq!(
+        call.possible.iter().map(|p| &p.uri).collect::<Vec<_>>(),
+        [&greeter]
+    );
+    assert_eq!(
+        own.exact.iter().map(|l| &l.uri).collect::<Vec<_>>(),
+        [&greeter]
+    );
+    assert!(matches!(
+        own.target.map(|t| t.status),
+        Some(jfl_protocol::envelope::WireTargetStatus::Exact)
+    ));
+    let worktree =
+        DocumentUri::from(jfl_domain::FileUri::from_path(&spelled.to_string_lossy()).unwrap());
+    assert_eq!(call.view.worktree, worktree);
+    assert_eq!(own.view.worktree, worktree);
+}
+
+/// The worktrees and the modified document of the spelling tests (FND-17).
+#[cfg(test)]
+mod spelled {
+    use super::{BUDGET, Daemons, DocumentUri, Outcome};
+
+    /// The LSP fixture worktree (Main.java and Greeter.java), committed at `at`.
+    pub(crate) fn lsp_fixture(at: &std::path::Path) {
+        jfl_testkit::fixtures::git::Repo::init(
+            at,
+            &[
+                (
+                    "src/demo/Main.java",
+                    include_bytes!("../../../fixtures/lsp/worktree/src/demo/Main.java"),
+                ),
+                (
+                    "src/demo/greet/Greeter.java",
+                    include_bytes!("../../../fixtures/lsp/worktree/src/demo/greet/Greeter.java"),
+                ),
+            ],
+        )
+        .unwrap();
+    }
+
+    /// A definition asked from `main` (Main.java, on the call whose `possible` hit is in
+    /// Greeter.java) while the client holds `greeter` (Greeter.java) open with a line the disk does
+    /// not have: the outcome.
+    pub(crate) fn definition_with_greeter_modified(
+        daemons: &Daemons,
+        main: &std::path::Path,
+        greeter: &std::path::Path,
+    ) -> Outcome<jfl_protocol::WireEnvelope> {
+        use jfl_protocol::messages::{Definition, PositionParams};
+        let doc = |path: &std::path::Path| {
+            DocumentUri::from(jfl_domain::FileUri::from_path(&path.to_string_lossy()).unwrap())
+        };
+        let text = format!(
+            "// a line the disk does not have\n{}",
+            include_str!("../../../fixtures/lsp/worktree/src/demo/greet/Greeter.java")
+        );
+        let mut proxy = daemons.proxy("modified", None);
+        proxy.did_open(doc(greeter), 1, text);
+        let at = PositionParams {
+            uri: doc(main),
+            line: 12,
+            col: 68,
+            position_encoding: jfl_domain::PositionEncoding::Utf16,
+            clamp: false,
+        };
+        proxy.call::<Definition>(at, BUDGET).unwrap().outcome
+    }
+
+    pub(crate) fn content_modified(outcome: &Outcome<jfl_protocol::WireEnvelope>) -> bool {
+        matches!(outcome, Outcome::Error(e) if e.code == jfl_protocol::rpc::ErrorCode::ContentModified)
+    }
+}
+use spelled::{content_modified, definition_with_greeter_modified, lsp_fixture};
+
+#[test]
+fn should_refuse_a_hit_in_a_modified_document_when_it_was_opened_through_a_link() {
+    // given: the worktree at `real/wt`, the client spelling it `via/wt` (a link above it, as
+    // macOS's `/var`), Greeter.java open and modified in that spelling
+    let daemons = Daemons::new();
+    let base = fs::canonicalize(daemons.root()).unwrap();
+    lsp_fixture(&base.join("real/wt"));
+    std::os::unix::fs::symlink(base.join("real"), base.join("via")).unwrap();
+
+    // when
+    let outcome = definition_with_greeter_modified(
+        &daemons,
+        &base.join("via/wt/src/demo/Main.java"),
+        &base.join("via/wt/src/demo/greet/Greeter.java"),
+    );
+
+    // then: the hit in the modified document is refused, never placed in the disk's text
+    assert!(content_modified(&outcome), "{outcome:?}");
+}
+
+#[test]
+fn should_refuse_a_hit_in_a_modified_document_when_the_request_goes_through_a_link_inside_the_worktree()
+ {
+    // given: as above, and the request spelled through `alias`, a link inside the worktree to
+    // `src/demo`, so the request's path does not end with its file's path in the view
+    let daemons = Daemons::new();
+    let base = fs::canonicalize(daemons.root()).unwrap();
+    lsp_fixture(&base.join("real/wt"));
+    std::os::unix::fs::symlink(base.join("real"), base.join("via")).unwrap();
+    std::os::unix::fs::symlink(base.join("real/wt/src/demo"), base.join("real/wt/alias")).unwrap();
+
+    // when
+    let outcome = definition_with_greeter_modified(
+        &daemons,
+        &base.join("via/wt/alias/Main.java"),
+        &base.join("via/wt/src/demo/greet/Greeter.java"),
+    );
+
+    // then
+    assert!(content_modified(&outcome), "{outcome:?}");
+}
+
+#[test]
+fn should_refuse_a_hit_in_a_modified_document_when_a_link_leads_from_another_worktree() {
+    // given: the request spelled as the worktree's own path, and Greeter.java open and modified as
+    // spelled through `ln`, a link from another worktree into this one: no spelling of the
+    // request names the document's
+    let daemons = Daemons::new();
+    let base = fs::canonicalize(daemons.root()).unwrap();
+    lsp_fixture(&base.join("wt"));
+    jfl_testkit::fixtures::git::Repo::init(
+        &base.join("other"),
+        &[("Other.java", b"class Other {}\n")],
+    )
+    .unwrap();
+    std::os::unix::fs::symlink(base.join("wt"), base.join("other/ln")).unwrap();
+
+    // when
+    let outcome = definition_with_greeter_modified(
+        &daemons,
+        &base.join("wt/src/demo/Main.java"),
+        &base.join("other/ln/src/demo/greet/Greeter.java"),
+    );
+
+    // then
+    assert!(content_modified(&outcome), "{outcome:?}");
 }
 
 #[test]

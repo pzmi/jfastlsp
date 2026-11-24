@@ -45,6 +45,7 @@ CLI carrier), **SEM-07** (M4),
 | FND-14 | Keep the queue-full reason when hints fold into a pending rescan | FND-13 | standard | S |  | — |
 | FND-15 | Accept a rescan in place of an awaited hint, never a silent miss | FND-14 | standard | M |  | — |
 | FND-16 | Two daemon races from CI: a peer gone before its accept, an exit read before it happened | FND-15, IDX-12 | standard | M |  | — |
+| FND-17 | A request through a link to its worktree (macOS's `$TMPDIR`) was refused, never answered | FND-16, LSP-02 | standard | M |  | IDX-09e |
 | XT-01 | Scaffold `tools/xtask` and port the gate composition | FND-08, FND-09 | deep | M |  | FND-10, EVAL lane |
 | XT-02 | Tool pins: `tools/versions.toml`, `cargo xtask doctor`, `install-tools` | XT-01 | standard | M |  | EVAL lane |
 | XT-03 | Security and workflow stages into xtask | XT-02 | standard | M |  | EVAL lane |
@@ -650,6 +651,50 @@ foundation piece by piece (ADR 0035).
   - [ ] the `macos` nightly green on the landed commit (owner-run, not reproducible here)
 - **Impact:** `jfl-adapter-ipc` (a gone peer never fails the accept); tests (the SIGTERM test's
   wait, two new IPC tests, one new daemon test); plan §5.3; `doc/formal-models.md`.
+
+#### FND-17: A request through a link to its worktree (macOS's `$TMPDIR`) was refused, never answered
+- **Depends on:** FND-16, LSP-02. **Model:** standard. **Size:** M. **Parallel with:** IDX-09e.
+- **Cites:** plan §4.1, §2.3; ADR 0014; ver §2.
+- **The failure** (`macos` run of 8c17236, the first with LSP-02's daemon test):
+  `should_answer_a_definition_from_the_views_with_an_honest_envelope_when_a_client_asks` panicked
+  "not answered" after 0.245 s, every other test green. **Not a race, a product bug that is
+  deterministic on macOS**: the runner's temporary directory is `/var/folders/…`, and `/var` is a
+  link to `/private/var`. The repository probe names a worktree by its canonical root (links
+  resolved; IDX-05's `should_resolve_to_the_canonical_root_when_the_path_goes_through_a_link`), and
+  the view service took the file's path under that root as spelled, so a file spelled through a
+  link at or above its worktree was in no worktree: every `jfl/definition` and `jfl/hover` was
+  `NotInWorktree` (-32013). Linux's `/tmp` is no link, so no Linux run could see it; none of the
+  FSEvents candidates (a start-up rescan, a late cookie, the 300 ms deadline) was involved, since
+  each of those still answers, incomplete. The test was right; the jfl-cli LSP tests
+  (`lsp_transcripts`, `lsp_daemon`) would have failed the same way in `lsp-conformance`, which the
+  red run never reached. `pushed_diagnostics.rs` asks no view and reads files by the path sent.
+- **The fix:** the daemon binds a request by its file's canonical path, by the probe's own rule
+  (`jfl_adapter_git::resolve::canonical_path`, which the probe's walk now uses too), and answers
+  in the request's spelling of the root (`daemon::spelling::client_root`: the deepest directory of
+  the request's path whose canonical path is the root, a link inside the worktree or from another
+  worktree on the way or not): the view's worktree and every hit under it are respelled
+  (`Envelope::respelled`, ordered again). A spelling that would pass `MAX_PATH_LEN` leaves the
+  whole answer in the canonical spelling, never a mix. The refusal of a hit in a modified open
+  document does not rest on spellings: an open document is found by its spelling or else by its
+  canonical path (`spelling::OpenDocuments`), for the request's own file and for every hit. Plan
+  §4.1 says so. The panics of the daemon test now name the refusal.
+- **Cost:** one `realpath` of the request's directory per request; a linked spelling one more per
+  directory up to the root's spelling; with open documents, one per open document and per file
+  the hits name. libc `realpath` of a 15-component directory took 8 µs plain and 11 µs through a
+  link on the sandbox VM (Xeon 2.1 GHz, 4 vCPU; 100,000 calls from Python's ctypes, its call
+  overhead included): microseconds against the 300 ms deadline, so no benchmark suite was run.
+- **Reuse considered:** the probe's directory walk, exported rather than copied.
+- **Accept:**
+  - [ ] a definition asked through a link above the worktree is answered, the view and every hit in the request's spelling; before the fix both requests are `NotInWorktree`, every time (`tests/daemon.rs::should_answer_in_the_request_s_spelling_when_the_worktree_is_reached_through_a_link`)
+  - [ ] a hit in a modified document is refused (`ContentModified`) whatever the spellings: the document opened through a link above the worktree; the request through a link inside the worktree; the document through a link from another worktree (`tests/daemon.rs::should_refuse_a_hit_in_a_modified_document_*`, the last two answered with the hit before the review's fix)
+  - [ ] every LSP transcript runs with the worktree spelled as it is and through a link above it, and one `lsp_daemon` test through the link, one plain: through the link they fail before the fix (-32013) and pass after
+  - [ ] `spelling::tests` (the canonical path, the client's root, an open document by either spelling), `jfl-adapter-git` `tests/worktrees.rs::should_resolve_the_directory_and_keep_the_rest_when_a_path_goes_through_a_link`, and `Envelope::respelled`'s (a respelling too long is refused whole) and `FileUri::respelled`'s unit tests
+  - [ ] the affected tests repeated 50 times or more without a failure; `just check` green
+  - [ ] the `macos` job green on the landed commit (owner-run, not reproducible here)
+- **Impact:** `jfl-composition` (the daemon binds by canonical path, answers in the request's
+  spelling, finds open documents by canonical path); `jfl-adapter-git` (`resolve::canonical_path`,
+  public); `jfl-domain` (`FileUri::respelled`, `Envelope::respelled`); `jfl-testkit`
+  (`fixtures::symlink`); tests (four daemon tests, the jfl-cli world in both spellings); plan §4.1.
 
 ### Lane XT: port mayfly's `xtask`, piece by piece
 

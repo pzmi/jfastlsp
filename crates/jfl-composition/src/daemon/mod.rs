@@ -23,6 +23,7 @@ pub mod ports;
 pub mod proxy;
 pub mod run;
 pub mod service;
+pub mod spelling;
 pub mod stepped;
 mod timer;
 pub mod views;

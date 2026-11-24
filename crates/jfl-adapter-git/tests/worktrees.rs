@@ -119,6 +119,39 @@ fn should_resolve_to_the_canonical_root_when_the_path_goes_through_a_link() {
 }
 
 #[test]
+fn should_resolve_the_directory_and_keep_the_rest_when_a_path_goes_through_a_link() {
+    // given: a worktree `main`, `via` a link to it
+    let scratch = Scratch::new("canonical");
+    Repo::init(
+        &scratch.path().join("main"),
+        &[("src/A.java", b"class A {}\n")],
+    )
+    .unwrap();
+    symlink(scratch.path().join("main"), scratch.path().join("via")).unwrap();
+    let canonical =
+        |path: &str| jfl_adapter_git::resolve::canonical_path(&scratch.path().join(path)).unwrap();
+
+    // when
+    let file = canonical("via/src/A.java");
+    let missing = canonical("via/src/new/B.java");
+    let dir = canonical("via/src");
+    let root = scratch
+        .probe()
+        .resolve_blocking(&scratch.uri("via/src/new/B.java"))
+        .unwrap()
+        .unwrap()
+        .root;
+
+    // then: the directory's links resolved and the rest as written, under the root the probe
+    // resolves the same path to (the daemon binds a request by this path, FND-17)
+    assert_eq!(file, scratch.path().join("main/src/A.java"));
+    assert_eq!(missing, scratch.path().join("main/src/new/B.java"));
+    assert_eq!(dir, scratch.path().join("main/src"));
+    assert_eq!(root, scratch.uri("main"));
+    assert!(missing.starts_with(root.path()));
+}
+
+#[test]
 fn should_refuse_a_root_when_its_git_file_points_nowhere() {
     // given
     let scratch = Scratch::new("broken");

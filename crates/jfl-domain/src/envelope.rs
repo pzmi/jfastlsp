@@ -811,11 +811,7 @@ impl Envelope {
                 events: freshness.pending_events,
             });
         }
-        exact.sort_unstable();
-        exact.dedup();
-        possible.sort_unstable();
-        possible.dedup_by(|later, earlier| later.location == earlier.location);
-        possible.retain(|hit| exact.binary_search(&hit.location).is_err());
+        order(&mut exact, &mut possible);
         Self {
             view,
             target,
@@ -825,6 +821,63 @@ impl Envelope {
             freshness,
             position_encoding,
         }
+    }
+
+    /// The envelope with every URI at or below `from` (the view's worktree, every hit) spelled
+    /// below `to` instead, ordered again by the rule of [`Envelope::new`]; the completeness, the
+    /// target and every range are kept. The daemon binds a request by its file's canonical path
+    /// and answers in the request's spelling of the worktree (plan §4.1). `None` when one of them
+    /// cannot be spelled so (longer than [`crate::path::MAX_PATH_LEN`]): never a mix of the two
+    /// spellings, so the caller answers in `from`'s whole.
+    ///
+    /// Pinned by: `envelope::tests::should_respell_the_view_and_every_hit_under_the_root_when_respelled`
+    /// and `envelope::tests::should_refuse_to_respell_when_a_hit_would_be_too_long`.
+    #[must_use]
+    pub fn respelled(&self, from: &FileUri, to: &FileUri) -> Option<Self> {
+        let spell = |uri: &FileUri| {
+            if uri == from || uri.relative_to(from).is_some() {
+                uri.respelled(from, to)
+            } else {
+                Some(uri.clone())
+            }
+        };
+        let view = View {
+            worktree: spell(&self.view.worktree)?,
+            ..self.view.clone()
+        };
+        let mut exact = self
+            .exact
+            .iter()
+            .map(|l| {
+                Some(Location {
+                    uri: spell(&l.uri)?,
+                    range: l.range,
+                })
+            })
+            .collect::<Option<Vec<Location>>>()?;
+        let mut possible = self
+            .possible
+            .iter()
+            .map(|p| {
+                Some(PossibleHit {
+                    location: Location {
+                        uri: spell(&p.location.uri)?,
+                        range: p.location.range,
+                    },
+                    why: p.why.clone(),
+                })
+            })
+            .collect::<Option<Vec<PossibleHit>>>()?;
+        order(&mut exact, &mut possible);
+        Some(Self {
+            view,
+            target: self.target.clone(),
+            exact,
+            possible,
+            completeness: self.completeness.clone(),
+            freshness: self.freshness,
+            position_encoding: self.position_encoding,
+        })
     }
 
     /// The view and pinned generation.
@@ -874,6 +927,17 @@ impl Envelope {
     pub const fn position_encoding(&self) -> PositionEncoding {
         self.position_encoding
     }
+}
+
+/// The order of [`Envelope::new`]: `exact` and `possible` sorted by URI and range and
+/// deduplicated, a location in `exact` dropped from `possible`, and of two `possible` hits at one
+/// location the one whose [`Why`] sorts first kept.
+fn order(exact: &mut Vec<Location>, possible: &mut Vec<PossibleHit>) {
+    exact.sort_unstable();
+    exact.dedup();
+    possible.sort_unstable();
+    possible.dedup_by(|later, earlier| later.location == earlier.location);
+    possible.retain(|hit| exact.binary_search(&hit.location).is_err());
 }
 
 #[cfg(test)]
@@ -1195,6 +1259,86 @@ mod tests {
         );
         assert_eq!(ModuleName::new(""), Err(ModuleNameError::Invalid));
         assert_eq!(ModuleName::new(":a\nb"), Err(ModuleNameError::Invalid));
+    }
+
+    #[test]
+    fn should_respell_the_view_and_every_hit_under_the_root_when_respelled() {
+        // given: hits under the view's canonical root and one outside it, which sorts after them
+        let why = Why::new(Reason::NameAndArity);
+        let built = Envelope::new(EnvelopeParts {
+            view: View {
+                worktree: FileUri::from_path("/private/var/wt").unwrap(),
+                head: None,
+                generation: Generation(3),
+            },
+            target: None,
+            exact: vec![location("/private/var/wt/B.java", 1, 0)],
+            possible: vec![
+                PossibleHit {
+                    location: location("/private/var/wt/A.java", 2, 4),
+                    why: why.clone(),
+                },
+                PossibleHit {
+                    location: location("/somewhere/C.java", 0, 0),
+                    why: why.clone(),
+                },
+            ],
+            completeness: Completeness::because(IncompleteReason::IndexLoading),
+            freshness: Freshness {
+                synced_at: None,
+                pending_events: 2,
+            },
+            position_encoding: PositionEncoding::Utf16,
+        });
+        let reasons = built.incomplete_because().to_vec();
+
+        // when
+        let respelled = built
+            .respelled(
+                &FileUri::from_path("/private/var/wt").unwrap(),
+                &FileUri::from_path("/var/wt").unwrap(),
+            )
+            .unwrap();
+
+        // then: the root and the hits below it in the new spelling, ordered again (`/somewhere`
+        // now first); the rest kept
+        assert_eq!(respelled.view().worktree.path(), "/var/wt");
+        assert_eq!(respelled.view().generation, Generation(3));
+        assert_eq!(respelled.exact(), [location("/var/wt/B.java", 1, 0)]);
+        assert_eq!(
+            respelled.possible(),
+            [
+                PossibleHit {
+                    location: location("/somewhere/C.java", 0, 0),
+                    why: why.clone(),
+                },
+                PossibleHit {
+                    location: location("/var/wt/A.java", 2, 4),
+                    why,
+                },
+            ]
+        );
+        assert_eq!(respelled.incomplete_because(), reasons.as_slice());
+        assert_eq!(respelled.freshness().pending_events, 2);
+    }
+
+    #[test]
+    fn should_refuse_to_respell_when_a_hit_would_be_too_long() {
+        // given: a hit whose path below the root fits under the root's short spelling only
+        let from = FileUri::from_path("/a").unwrap();
+        let to = FileUri::from_path(&alloc::format!("/{}", "b".repeat(3000))).unwrap();
+        let long = location(&alloc::format!("/a/{}", "c".repeat(2000)), 0, 0);
+        let built = envelope(vec![long.clone()], vec![]);
+        let short = envelope(vec![location("/a/C.java", 0, 0)], vec![]);
+
+        // when
+        let refused = built.respelled(&from, &to);
+        let kept = short.respelled(&from, &to);
+
+        // then: no answer mixes the two spellings
+        assert_eq!(refused, None);
+        assert_eq!(built.exact(), [long]);
+        assert!(kept.is_some());
     }
 
     #[test]

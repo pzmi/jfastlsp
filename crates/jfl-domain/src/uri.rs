@@ -180,6 +180,18 @@ impl FileUri {
         joined.push_str(path.as_str());
         Ok(Self { path: joined })
     }
+
+    /// `self` spelled under `to` in place of `from`: `to` for `from` itself, `to/<path>` for a
+    /// path below `from`; `None` for any other path, or when the result is too long.
+    ///
+    /// Pinned by: `uri::tests::should_respell_a_uri_at_or_below_the_root_when_it_is_respelled`.
+    #[must_use]
+    pub fn respelled(&self, from: &Self, to: &Self) -> Option<Self> {
+        if self == from {
+            return Some(to.clone());
+        }
+        to.join(&self.relative_to(from)?).ok()
+    }
 }
 
 /// Prints `file://` and the path with every byte but the unreserved ones (RFC 3986 §2.3) and `/`
@@ -359,5 +371,25 @@ mod tests {
             "repo/wt/src/A.java"
         );
         assert_eq!(fs_root.join(&relative).unwrap().path(), "/src/A.java");
+    }
+
+    #[test]
+    fn should_respell_a_uri_at_or_below_the_root_when_it_is_respelled() {
+        // given: macOS's temporary directory, spelled through `/var` and as it is
+        let canonical = FileUri::from_path("/private/var/t/wt").unwrap();
+        let client = FileUri::from_path("/var/t/wt").unwrap();
+        let file = FileUri::from_path("/private/var/t/wt/src/A.java").unwrap();
+        let sibling = FileUri::from_path("/private/var/t/wt2/A.java").unwrap();
+
+        // when
+        let respelled = file.respelled(&canonical, &client);
+
+        // then
+        assert_eq!(respelled.unwrap().path(), "/var/t/wt/src/A.java");
+        assert_eq!(
+            canonical.respelled(&canonical, &client),
+            Some(client.clone())
+        );
+        assert_eq!(sibling.respelled(&canonical, &client), None);
     }
 }
