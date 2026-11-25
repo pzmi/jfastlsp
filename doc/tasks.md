@@ -101,12 +101,14 @@ CLI carrier), **SEM-07** (M4),
 | IDX-12b | Daemon and IPC follow-ups: a bounded wait for the spawn lock, the `endpoint` contract suite | IDX-12, FND-18, IDX-09e, LSP-02 | deep | M |  | LSP-03 |
 | IDX-16 | Other JVM languages' sources make answers incomplete | IDX-11 | deep | M |  | FND-18 |
 | IDX-17 | The language seam: a registry, an indexer per language, language-tagged summaries | IDX-16 | deep | L |  | — |
+| IDX-18 | Name tables per edit and parsed trees for the queries; the cold index profiled (before M1's bench gate) | IDX-09e, IDX-10, IDX-17 | deep | L |  | LSP-03 |
+| IDX-19 | Cold index to plan §1.7 (blocks M1's bench gate) | IDX-18 | deep | M |  | LSP-03 |
 | LSP-01 | LSP adapter on `lsp-server` and the LSP conformance harness | IDX-03; started before DEC-02 by the owner's delegation (2026-11-17); DEC-02 still gates work beyond the walking skeleton | deep | L |  | IDX-09, IDX-10 |
 | LSP-02 | `jfl lsp`: lifecycle, encodings, document sync, deadlines | LSP-01, IDX-12 | deep | L |  | IDX-11 |
 | LSP-03 | Navigation methods | LSP-02, IDX-11, DEC-06 | standard | L |  | LSP-04 |
 | LSP-04 | Syntax diagnostics and the coordinator (diagnostics driver) | LSP-02, FORMAL-05 | deep | L |  | LSP-03, LSP-05 |
 | LSP-05 | LSP plugin and `.lsp.json` | LSP-03 | standard | M |  | LSP-04 |
-| LSP-06 | M1 gate suite and the blocking bench gate | LSP-03, LSP-04, LSP-05 | deep | M | ⛳ | — |
+| LSP-06 | M1 gate suite and the blocking bench gate | LSP-03, LSP-04, LSP-05, IDX-19 | deep | M | ⛳ | — |
 | IDX-13 | `jfl` CLI: subcommands, output, `--json`, exit codes, `jfl impls` | LSP-06 | standard | M |  | — |
 | IDX-14 | CLI plugin, skill, `AGENTS.md` and cloud setup | IDX-13 | standard | M |  | — |
 | IDX-15 | M2 gate: the CLI carrier | IDX-14 | standard | M | ⛳ | — |
@@ -2152,7 +2154,7 @@ but follow in lane CLI (M2). Starts after the go decision.
   `dropEvent` of a cookie covers; `doc/formal-models.md`, "Not modelled yet"), model first;
   `FSEventStreamFlushSync` on macOS, which `notify` does not expose (a cookie there waits for the
   stream's latency, bounded by the deadline); **the full syntax index after a page-cache drop is
-  over plan §1.7's 2.5 s on medium** (2,742 ms against 2,207 ms warm). About 170 ms of the
+  over plan §1.7's 2.5 s on medium** (2,742 ms against 2,207 ms warm; **moved to IDX-19**). About 170 ms of the
   difference is before the first answer (the cold walk, the watch, `git`); about 300 ms is
   `settle`'s reads, which a larger pool (6 or 8 threads) did not hide. The rest of the gap is the
   parse (1.9 s on four threads, against E1's 1.04 s warm for its lighter extract): a faster
@@ -2608,7 +2610,7 @@ the loop is held p95 299–307 ms per slice (the whole 4.1–4.3 s settle before
   - **a JDK stage** runs `just javac-bindings check` (EVAL-07's `java-fixtures`); until it lands
     the recording is checked only when a person runs the recipe;
   - a cache of the last parsed trees by `SyntaxKey`, if the M1 definition rows need it
-    (definitions in one file reparse it each time);
+    (definitions in one file reparse it each time): **moved to IDX-18** (done there);
   - the daemon's part (IDX-12, LSP-02): keep one `QueryCache`; resolve `HEAD` for the view;
     fill `Freshness`; map hover to `HoverResult` (the status line, the first declaration, the
     reference summary once IDX-11 lands); pin a request for `workspace/symbol`, which names no
@@ -2619,7 +2621,8 @@ the loop is held p95 299–307 ms per slice (the whole 4.1–4.3 s settle before
     publish builds the generation's tables, 74–82 ms on medium (about 290 ms projected on large),
     more than the `jfl def` row's 50 ms p95 alone, and uninterruptible. Build them from the
     previous generation's for the files that did not change (or keep them per file and merge), and
-    measure the first query after an edit in `just bench-queries`;
+    measure the first query after an edit in `just bench-queries`: **moved to IDX-18** (done
+    there);
   - source sets and generated roots (PROJ): the same-package and on-demand steps answer `exact`
     again once the view knows them (Defined, above);
   - the large tier (DEC-03): the snapshot assumes every summary of the generation is in memory;
@@ -3161,10 +3164,130 @@ the loop is held p95 299–307 ms per slice (the whole 4.1–4.3 s settle before
     symbols prefix p50 9.5–12.7 ms before, 10.0–10.6 ms after. Every answer count is identical
     (definitions' exact/possible/unresolved split, 39371 and 9915 possible references). The
     request path adds one extension lookup per file read; re-measure on a quiet machine before
-    M1's bench gate takes these as a baseline
+    M1's bench gate takes these as a baseline (**moved to IDX-19**)
 - **Impact:** the `SyntaxIndexer` port (a `language()` method, the `SyntaxIndexers` set); the
   summary store's format (3); the summary goldens' format (a `language` line); no protocol, LSP
   or `--json` change; no change of any answer.
+
+#### IDX-18: Name tables per edit and parsed trees for the queries; the cold index profiled
+- **Depends on:** IDX-09e, IDX-10, IDX-17. **Model:** deep. **Size:** L. **Parallel with:** LSP-03.
+- **Cites:** plan §1.7, §4, §5.5; ADR 0007, ADR 0014, ADR 0031; gathered from IDX-09's "Left after
+  slice 2" (the cold full index over 2.5 s), IDX-10's "Left after IDX-10" (the name tables'
+  build after each publish; a cache of parsed trees) and IDX-17's last criterion (re-measure on a
+  quiet machine before the bench gate takes a baseline).
+- **Why:** LSP-06 makes plan §1.7 a blocking gate. Three known gaps stood against its rows on
+  medium: the full syntax index after a page-cache drop (2.74 s against 2.5 s); the first query
+  after each publish, which rebuilt the generation's name tables (74–82 ms on medium, about
+  260–290 ms projected on large, against the `jfl def` row's 50 ms p95 and the freshness row's
+  100 ms); and the definition's parse of the request's file on every definition and hover
+  (about 1 ms p50 and 8 ms p95 on medium, the same file parsed again for each site).
+- **Done (this card's commit):**
+  - **The name tables from the previous generation's** (`QueryCache`, `resolve::Snapshot::update`).
+    The snapshot of a new generation is made from the previous one when no query holds it: a merge
+    of the two path-ordered file lists moves every unchanged entry (same path and key), removes
+    the changed and deleted files' declarations from the names they touch, renumbers the kept
+    files' hits only when a file was added or removed before them (in place otherwise), and
+    merges the new files' declarations in, each name's list kept in path order. Past half the
+    files changed, or half the name slots empty, it builds afresh. The table holds each name once
+    with its declarations and its type declarations (the two hash maps and the copied scan table
+    became one map to a slot), so an update never moves another name, and a scan's order is the
+    slots' (it was a hash map's, which no answer depends on). No model change: a snapshot is a
+    cache over one pinned generation, and every answer still reads only that generation; nothing
+    of views or generations changed. Pinned by `resolve::tests::should_answer_as_a_fresh_build_when_a_snapshot_is_updated`
+    (a property: 256 worlds of up to 24 files, edits, creations and deletions; every lookup
+    equal to a fresh build's), `should_update_in_place_when_one_file_of_many_changes`,
+    `should_build_afresh_when_most_files_change`,
+    `should_move_a_file_s_declarations_when_it_is_renamed_with_the_same_key` (`git mv`),
+    `should_update_at_half_and_build_afresh_when_one_more_file_changes` (five of ten update, six
+    rebuild), `should_build_afresh_when_half_the_name_slots_are_empty`, and
+    `tests/queries.rs::should_answer_as_a_fresh_cache_when_the_tables_are_made_from_the_previous_generation`
+    (definitions, references and symbols across a copied, a deleted, a rewritten and a restored
+    file, equal to a fresh cache's; four updates). Mutants checked by hand, each failing a test:
+    no renumbering, no removal, a merge out of order, a changed file kept by path alone, the
+    per-file parent table not made again, the syntax-error count not adjusted.
+  - **A cache of parsed trees** (`jfl-adapter-java`'s `trees`): the indexer keeps the last
+    `TREE_CACHE_FILES` (16) trees of at most `TREE_CACHE_BYTES` (1 MiB) of text, least recently
+    asked let go first, keyed by the text itself (the port hands the indexer a text, not a key; a
+    changed file is another text). A kept tree gives a fresh parse's facts, the work budget
+    included: the parse's units are charged again before each walk. Definition, hover and
+    references go through it. Pinned by `trees::tests` (cached facts equal to fresh ones over
+    escapes and syntax errors too; one parse for equal texts; the bounds and the eviction order;
+    a zero bound keeps nothing) and `scopes::tests::should_prove_nothing_when_the_parse_kept_with_a_tree_spent_the_budget`;
+    the javac differential of `tests/definitions/main.rs` now runs through it.
+  - **`just bench-queries`** gained the first query after an edit, on a scratch repository of the
+    checkout's files under cargo's scratch directory, never the pinned corpus (ten files, each
+    rewritten and put back; updates and fresh builds counted apart), definitions repeated in one
+    file (twenty files, ten sites each, two passes), the process's RSS, and `--memory` (what the
+    name tables and a full tree cache add). The scratch repository costs 3.3–7.0 s to make and
+    3.5–3.9 s to settle on medium, outside the timed rows.
+- **Profiled, not closed: the cold full index** (carried by IDX-19, which has the profile). On
+  this VM under its neighbours the cold whole view measured 2.8–3.1 s before and after alike (the
+  indexing path is unchanged), so 2.74 s against 2.5 s cannot be told apart here.
+- **Measured** (`doc/bench/README.md`, "The speed gaps before M1's bench gate", 2026-11-25, the
+  4 vCPU VM, load 1.4 to 2.2; before = 47f1fce's library with the same bench, alternated,
+  medians of three, p50 / p95 on medium): the first query after an edit, definition alone,
+  104 / 137 ms before and 2.7 / 7.0 ms after (small 13.9 / 27.7 and 1.3 / 6.8), every one of
+  them an update; with its request (the reconcile and publish) 110 / 160 and 5.5 / 48 ms; hover
+  at a site just asked 1.49 / 10.9 and 0.43 / 2.4 ms; one file's sites asked again 0.55 / 3.2
+  and 0.21 / 1.5 ms; random definitions 1.52 / 11.5 and 1.39 / 9.0 ms; references and symbols
+  within noise (an earlier loaded series had symbols prefix 10.9 → 13.4 ms p95, this one
+  13.9 → 12.5); every definition tally unchanged. Memory: the name tables 20.2 MiB on medium
+  (20.5 before); a full tree cache of medium's largest files about 14 MiB, linear in the 1 MiB
+  text bound in the worst case.
+- **Left:**
+  - **the cold full index on medium: IDX-19** (orchestrator, 2026-11-25), which blocks LSP-06;
+  - the name tables' memory (about 20 MiB on medium, unchanged by this card; about 75 MiB
+    projected on large against the 250 MB syntax tier): the map's boxed keys duplicate the scan
+    table's text;
+  - concurrent first queries on a new generation (an editor's hover, highlight and code lens
+    after one edit) each miss while one updates, and build afresh; every answer is correct and
+    it is no worse than before, but a single flight per view would keep the update's cost under
+    concurrency;
+  - the end-to-end rows through `jfl lsp` (`just bench jfl-lsp`) were not re-run; LSP-06 takes
+    them on its runner.
+- **Accept:**
+  - [x] the first query after a publish makes the new generation's tables from the previous ones, touching only the changed files, with answers equal to a fresh build's (the tests above)
+  - [x] a bounded cache of parsed trees serves repeated sites of one file with the facts of a fresh parse (the tests above), its memory measured and bounded
+  - [x] the cold full index profiled, with the breakdown; closing it is IDX-19's
+  - [x] behaviour unchanged: every other test, golden and transcript as on IDX-17's commit; `just javac-bindings check` clean
+  - [x] measured before and after, small and medium, median of three, machine, date and load named (`doc/bench/README.md`)
+- **Impact:** none on the protocol, `--json` or LSP; `JavaIndexer::new` keeps the trees
+  (`JavaIndexer::with_trees` sets the bounds); `QueryCache::updates`; memory: at most 16 trees of
+  1 MiB of text more in the daemon.
+
+#### IDX-19: Cold index to plan §1.7
+- **Depends on:** IDX-18. **Model:** deep. **Size:** M. **Parallel with:** LSP-03. **Blocks:**
+  LSP-06's bench gate (orchestrator, 2026-11-25).
+- **Cites:** plan §1.7, §4, §7.1; ADR 0007, ADR 0031; IDX-09's slice 3 and IDX-18's profile.
+- **Why:** the full syntax index of medium after a page-cache drop measured 2,742 ms against
+  plan §1.7's 2.5 s (IDX-09, slice 3, a quiet VM), 2,207 ms with a warm page cache. The parse
+  and summary alone take 1.92 s on four threads; about 0.5 s goes to the cold reads.
+- **The profile so far** (IDX-18, `doc/bench/README.md`, medium, per cold open, load 3.6 to 4.7):
+  8.7 s of user and 3.2 s of system CPU across the pool, against 6.4–6.7 s of user time for the
+  parse and summary alone on one thread; about 63k voluntary and 30k involuntary context
+  switches (near seven a file); about 103 MiB read from the disk. Thin LTO with one codegen unit
+  gave nothing (the parse is tree-sitter's C). A pool of 6 or 8 threads gave 2.60–2.82 s, within
+  noise (IDX-09).
+- **Candidates, each measured before it is kept:**
+  - **fewer pool hand-offs per file:** the stat, the read and the parse are three round trips
+    (66 µs each on this VM) and the hash runs on the polling thread; a combined stat and read on
+    the fs port (`SourceTree`) is a port change, with its contract suite and fake;
+  - **read ahead of the parse:** start the reads of the next files while the pool parses, within
+    `ServiceConfig::read_budget`;
+  - **the listing's stat reused for a deferred file in `settle`** (about 50 ms): it changes which
+    stat proves a read fresh, so views.qnt and its driver first (ADR 0007);
+  - then the extraction's own share (about a third of the instructions, IDX-07's callgrind
+    table): the cursor walk, declarations, reference sites, interning.
+- **Measure** on a quiet machine or EVAL-05's runner: the sandbox VM under a neighbour cannot
+  tell 2.74 s from 2.5 s (IDX-18 measured 2.8–3.1 s before and after an unchanged path). Median
+  of three cold opens (`just bench-views medium cold`), warm and first answer beside; large
+  projected.
+- **Accept:**
+  - [ ] the full syntax index of medium after a page-cache drop within plan §1.7's 2.5 s on four cores, median of three on a quiet machine or EVAL-05's runner (`doc/bench/README.md`)
+  - [ ] every change measured alone, before and after; none that does not pay is kept
+  - [ ] a change to which stat proves a read fresh goes through views.qnt first (ADR 0007)
+  - [ ] behaviour unchanged: every test, golden and transcript
+- **Impact:** speed only; a port change if the combined stat and read is taken.
 
 ### Lane LSP: M1, the LSP carrier
 
@@ -3520,7 +3643,7 @@ plugin; LSP-06 is M1's gate and makes the bench gate blocking.
 - **Impact:** distribution.
 
 #### LSP-06: ⛳ M1 gate suite and the blocking bench gate
-- **Depends on:** LSP-03, LSP-04, LSP-05. **Model:** deep. **Size:** M. **Parallel with:** none.
+- **Depends on:** LSP-03, LSP-04, LSP-05, IDX-19 (the cold index, orchestrator 2026-11-25). **Model:** deep. **Size:** M. **Parallel with:** none.
 - **Cites:** plan §1.7, §10.1; ver §7.2, §10, §11; ADR 0014, ADR 0017, ADR 0031, ADR 0034.
 - The M1 gate as tests, through `jfl lsp` (ADR 0034): the envelope on 50 golden cases (protocol
   goldens, and their LSP mapping); the completeness mutation test adding a caller in each module

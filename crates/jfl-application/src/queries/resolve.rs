@@ -149,18 +149,21 @@ pub(crate) struct FileEntry {
 
 /// A pinned generation's summaries in path order, with every declaration by simple name (a
 /// constructor under its type's) and the type declarations apart: built once per generation and
-/// shared by its queries ([`super::QueryCache`]).
+/// shared by its queries ([`super::QueryCache`]), or made from the previous generation's by
+/// [`Snapshot::update`], which touches only the files that changed.
 #[derive(Debug)]
 pub(crate) struct Snapshot {
     files: Vec<FileEntry>,
-    types: HashMap<Box<str>, Vec<Hit>>,
-    names: HashMap<Box<str>, Vec<Hit>>,
+    /// Each distinct declaration name to its slot in `table`.
+    names: HashMap<Box<str>, u32>,
     table: NameTable,
     /// Per file, `(parent, child)` for every declaration with a parent, by parent: a type's
     /// members are a binary search away, so a lookup's cost does not grow with its file.
     children: Vec<Vec<(DeclId, DeclId)>>,
     /// Per file, whether its types may hold members its summary lacks ([`generates_members`]).
     generated: Vec<bool>,
+    /// Per file, whether it uses a known annotation processor ([`uses_processor`]).
+    processor: Vec<bool>,
     /// How many files use a known annotation processor ([`uses_processor`]).
     processors: u32,
     /// How many files had a syntax error when summarised ([`FileSummary::syntax_errors`]).
@@ -225,16 +228,84 @@ fn generates_members(summary: &FileSummary) -> bool {
             .any(|(_, d)| summary.list(d.annotations).any(lombok))
 }
 
+/// `(parent, child)` for every declaration of `f` with a parent, by parent.
+fn parent_pairs(f: &FileEntry) -> Vec<(DeclId, DeclId)> {
+    let mut pairs: Vec<(DeclId, DeclId)> = f
+        .summary
+        .declarations()
+        .filter_map(|(id, d)| Some((d.parent?, id)))
+        .collect();
+    pairs.sort_unstable();
+    pairs
+}
+
+/// The new index of old file `file`, if an update kept it (`kept`: old index to new).
+fn renumbered(kept: &[Option<u32>], file: u32) -> Option<u32> {
+    kept.get(usize::try_from(file).ok()?).copied().flatten()
+}
+
+/// `hits` with each file renumbered by `kept`; a hit of a file not kept is dropped (there is
+/// none: [`Snapshot::remove`] took them out first), never pointed at another file.
+fn renumber(hits: &mut Vec<Hit>, kept: &[Option<u32>]) {
+    hits.retain_mut(|hit| match renumbered(kept, hit.file) {
+        Some(file) => {
+            hit.file = file;
+            true
+        }
+        None => false,
+    });
+}
+
+/// `hits` and `more`, both in [`Hit`] order, merged in that order.
+fn merged(hits: &[Hit], more: impl Iterator<Item = Hit>) -> Vec<Hit> {
+    let mut out = Vec::with_capacity(hits.len());
+    let mut old = hits.iter().copied().peekable();
+    for hit in more {
+        while let Some(&first) = old.peek() {
+            if first > hit {
+                break;
+            }
+            out.push(first);
+            old.next();
+        }
+        out.push(hit);
+    }
+    out.extend(old);
+    out
+}
+
 /// The distinct declaration names laid out in one text, each with its declarations: what a
 /// workspace symbol scan reads front to back (a hash map's boxed keys cost a cache miss each:
-/// 8.7 ms against 2 ms on the medium corpus, `just bench-queries`).
+/// 8.7 ms against 2 ms on the medium corpus, `just bench-queries`). A name's slot stays when its
+/// last declaration goes (an empty slot, skipped by the scan and reused if the name comes back),
+/// so an update never moves another name; past [`MAX_EMPTY_SHARE`] empty slots the snapshot is
+/// built afresh.
 #[derive(Debug, Default)]
 struct NameTable {
     text: String,
-    /// Per name: its bytes in `text`, and its declarations in `hits`.
-    names: Vec<(u32, u32, u32, u32)>,
-    hits: Vec<Hit>,
+    /// Per slot: its name's bytes in `text`.
+    spans: Vec<(u32, u32)>,
+    /// Per slot: its declarations.
+    slots: Vec<Slot>,
+    /// How many slots hold no declaration.
+    empty: usize,
 }
+
+/// One name's declarations, each list in [`Hit`] order (path order, then declaration order).
+#[derive(Debug, Default)]
+struct Slot {
+    hits: Vec<Hit>,
+    /// The type declarations among `hits`.
+    types: Vec<Hit>,
+}
+
+/// The share of a table's slots that may be empty before an update builds the snapshot afresh.
+const MAX_EMPTY_SHARE: usize = 2;
+
+/// The share of the files that may change (removed and added counted apart) before an update
+/// builds the snapshot afresh: past it a fresh build costs no more (a branch switch, a settle's
+/// first slices).
+const MAX_CHANGED_SHARE: usize = 2;
 
 /// One query's resolution over a [`Snapshot`], with its own lookup budget.
 pub(crate) struct Resolver<'s> {
@@ -439,67 +510,289 @@ pub(crate) fn cursor(summary: &FileSummary, offset: u32) -> Option<Cursor> {
 impl Snapshot {
     /// A snapshot of `files`, in path order.
     pub(crate) fn new(files: Vec<FileEntry>) -> Self {
-        let mut types: HashMap<Box<str>, Vec<Hit>> = HashMap::new();
-        let mut names: HashMap<Box<str>, Vec<Hit>> = HashMap::new();
-        for (file, f) in (0_u32..).zip(&files) {
-            for (decl, d) in f.summary.declarations() {
-                let name = f.summary.str(d.name);
-                let hit = Hit { file, decl };
-                if let Some(hits) = names.get_mut(name) {
-                    hits.push(hit);
-                } else {
-                    names.insert(name.into(), vec![hit]);
-                }
-                if d.kind.is_type() {
-                    if let Some(hits) = types.get_mut(name) {
-                        hits.push(hit);
-                    } else {
-                        types.insert(name.into(), vec![hit]);
-                    }
-                }
-            }
-        }
-        let mut table = NameTable::default();
-        for (name, hits) in &names {
-            let (Ok(start), Ok(len), Ok(first), Ok(count)) = (
-                u32::try_from(table.text.len()),
-                u32::try_from(name.len()),
-                u32::try_from(table.hits.len()),
-                u32::try_from(hits.len()),
-            ) else {
-                break;
-            };
-            table.text.push_str(name);
-            table.hits.extend_from_slice(hits);
-            table.names.push((start, len, first, count));
-        }
-        let children = files
-            .iter()
-            .map(|f| {
-                let mut pairs: Vec<(DeclId, DeclId)> = f
-                    .summary
-                    .declarations()
-                    .filter_map(|(id, d)| Some((d.parent?, id)))
-                    .collect();
-                pairs.sort_unstable();
-                pairs
-            })
-            .collect();
+        let children = files.iter().map(parent_pairs).collect();
         let generated = files
             .iter()
             .map(|f| generates_members(&f.summary))
             .collect();
-        let processors = files.iter().filter(|f| uses_processor(&f.summary)).count();
-        let broken = files.iter().filter(|f| f.summary.syntax_errors()).count();
-        Self {
+        let processor = files.iter().map(|f| uses_processor(&f.summary)).collect();
+        let mut snapshot = Self {
             files,
-            types,
-            names,
-            table,
+            names: HashMap::new(),
+            table: NameTable::default(),
             children,
             generated,
-            processors: u32::try_from(processors).unwrap_or(u32::MAX),
-            broken: u32::try_from(broken).unwrap_or(u32::MAX),
+            processor,
+            processors: 0,
+            broken: 0,
+        };
+        let every: Vec<u32> = (0_u32..).take(snapshot.files.len()).collect();
+        snapshot.insert(&every);
+        snapshot.count();
+        snapshot
+    }
+
+    /// The snapshot of `files` (in path order), made from this one, which was the snapshot of an
+    /// earlier generation: only the files whose path or key differ are read; the rest keep their
+    /// declarations, renumbered when files were added or removed before them. Built afresh when
+    /// more than a `1 / MAX_CHANGED_SHARE` of the files changed, or when the table has too many
+    /// empty slots. Either way the result answers every lookup as [`Snapshot::new`] of `files`
+    /// would, a name scan's order aside (which no answer depends on). The second value says
+    /// whether it was updated rather than built afresh.
+    ///
+    /// Pinned by: `resolve::tests::should_answer_as_a_fresh_build_when_a_snapshot_is_updated`.
+    pub(crate) fn update<'e>(
+        mut self,
+        entries: impl IntoIterator<Item = (&'e RelPath, &'e SyntaxKey, &'e Arc<FileSummary>)>,
+    ) -> (Self, bool) {
+        // Old index to new for each file kept unchanged (its entry moved, not copied); the
+        // files gone or changed, with their old index; the new files read or changed.
+        let old_files = core::mem::take(&mut self.files);
+        let mut kept: Vec<Option<u32>> = vec![None; old_files.len()];
+        let mut old = (0_u32..).zip(old_files).peekable();
+        let mut gone: Vec<(u32, FileEntry)> = Vec::new();
+        let mut added: Vec<u32> = Vec::new();
+        let mut files: Vec<FileEntry> = Vec::with_capacity(kept.len());
+        for (path, key, summary) in entries {
+            while let Some(before) = old.next_if(|(_, f)| f.path < *path) {
+                gone.push(before);
+            }
+            let Ok(at) = u32::try_from(files.len()) else {
+                break;
+            };
+            match old.next_if(|(_, f)| f.path == *path) {
+                Some((i, mut f)) if f.key == *key => {
+                    if !Arc::ptr_eq(&f.summary, summary) {
+                        // Equal by key; hold the generation's copy, not a second one.
+                        f.summary = Arc::clone(summary);
+                    }
+                    if let Some(slot) = usize::try_from(i).ok().and_then(|i| kept.get_mut(i)) {
+                        *slot = Some(at);
+                    }
+                    files.push(f);
+                    continue;
+                }
+                Some(changed) => gone.push(changed),
+                None => {}
+            }
+            added.push(at);
+            files.push(FileEntry {
+                path: path.clone(),
+                key: *key,
+                summary: Arc::clone(summary),
+            });
+        }
+        gone.extend(old);
+        let limit = files.len().max(kept.len()) / MAX_CHANGED_SHARE;
+        if gone.len() > limit
+            || added.len() > limit
+            || self.table.empty.saturating_mul(MAX_EMPTY_SHARE) > self.table.slots.len()
+        {
+            return (Self::new(files), false);
+        }
+        self.remove(&gone, kept.len());
+        // Whether a kept file moved: then every hit and per-file entry is renumbered, else only
+        // the changed files' entries are made again in place (an edit's common case).
+        let moved = kept.len() != files.len()
+            || kept
+                .iter()
+                .enumerate()
+                .any(|(old, new)| new.is_some_and(|n| usize::try_from(n).ok() != Some(old)));
+        if moved {
+            for slot in &mut self.table.slots {
+                renumber(&mut slot.hits, &kept);
+                renumber(&mut slot.types, &kept);
+            }
+            let mut children: Vec<Vec<(DeclId, DeclId)>> = vec![Vec::new(); files.len()];
+            let mut generated = vec![false; files.len()];
+            let mut processor = vec![false; files.len()];
+            let mut old_children = core::mem::take(&mut self.children).into_iter();
+            for (old, new) in kept.iter().enumerate() {
+                let pairs = old_children.next().unwrap_or_default();
+                let Some(at) = new.and_then(|n| usize::try_from(n).ok()) else {
+                    continue;
+                };
+                if let Some(slot) = children.get_mut(at) {
+                    *slot = pairs;
+                }
+                if let (Some(slot), Some(&flag)) = (generated.get_mut(at), self.generated.get(old))
+                {
+                    *slot = flag;
+                }
+                if let (Some(slot), Some(&flag)) = (processor.get_mut(at), self.processor.get(old))
+                {
+                    *slot = flag;
+                }
+            }
+            self.children = children;
+            self.generated = generated;
+            self.processor = processor;
+        }
+        for &at in &added {
+            let at = usize::try_from(at).unwrap_or(usize::MAX);
+            let Some(f) = files.get(at) else {
+                continue;
+            };
+            if let Some(slot) = self.children.get_mut(at) {
+                *slot = parent_pairs(f);
+            }
+            if let Some(slot) = self.generated.get_mut(at) {
+                *slot = generates_members(&f.summary);
+            }
+            if let Some(slot) = self.processor.get_mut(at) {
+                *slot = uses_processor(&f.summary);
+            }
+        }
+        // Files with a syntax error, counted from the changed ones (a summary is a cache miss).
+        let lost = gone
+            .iter()
+            .filter(|(_, f)| f.summary.syntax_errors())
+            .count();
+        let found = added
+            .iter()
+            .filter_map(|&at| files.get(usize::try_from(at).ok()?))
+            .filter(|f| f.summary.syntax_errors())
+            .count();
+        self.files = files;
+        self.insert(&added);
+        let processors = self.processor.iter().filter(|&&p| p).count();
+        self.processors = u32::try_from(processors).unwrap_or(u32::MAX);
+        self.broken = self
+            .broken
+            .saturating_sub(u32::try_from(lost).unwrap_or(u32::MAX))
+            .saturating_add(u32::try_from(found).unwrap_or(u32::MAX));
+        (self, true)
+    }
+
+    /// Recounts the files that use a processor and those with a syntax error.
+    fn count(&mut self) {
+        let processors = self.processor.iter().filter(|&&p| p).count();
+        let broken = self
+            .files
+            .iter()
+            .filter(|f| f.summary.syntax_errors())
+            .count();
+        self.processors = u32::try_from(processors).unwrap_or(u32::MAX);
+        self.broken = u32::try_from(broken).unwrap_or(u32::MAX);
+    }
+
+    /// The slot of `name`, made (empty) when the table has none.
+    fn slot(&mut self, name: &str) -> Option<u32> {
+        if let Some(&slot) = self.names.get(name) {
+            return Some(slot);
+        }
+        let t = &mut self.table;
+        let (Ok(start), Ok(len), Ok(slot)) = (
+            u32::try_from(t.text.len()),
+            u32::try_from(name.len()),
+            u32::try_from(t.slots.len()),
+        ) else {
+            return None;
+        };
+        t.text.push_str(name);
+        t.spans.push((start, len));
+        t.slots.push(Slot::default());
+        t.empty = t.empty.saturating_add(1);
+        self.names.insert(name.into(), slot);
+        Some(slot)
+    }
+
+    /// Adds the declarations of `added` (indexes into `files`, ascending) to the table, each
+    /// list kept in [`Hit`] order: appended where it comes last (every file of a fresh build),
+    /// else merged in once per slot.
+    fn insert(&mut self, added: &[u32]) {
+        // Hits that sort before a slot's last: (slot, hit, is a type), in hit order.
+        let mut late: Vec<(u32, Hit, bool)> = Vec::new();
+        for &file in added {
+            let Some(summary) = self
+                .files
+                .get(usize::try_from(file).unwrap_or(usize::MAX))
+                .map(|f| Arc::clone(&f.summary))
+            else {
+                continue;
+            };
+            for (decl, d) in summary.declarations() {
+                let Some(slot) = self.slot(summary.str(d.name)) else {
+                    continue;
+                };
+                let hit = Hit { file, decl };
+                let is_type = d.kind.is_type();
+                let t = &mut self.table;
+                let Some(s) = t.slots.get_mut(usize::try_from(slot).unwrap_or(usize::MAX)) else {
+                    continue;
+                };
+                if s.hits.last().is_some_and(|&last| last > hit) {
+                    late.push((slot, hit, is_type));
+                    continue;
+                }
+                if s.hits.is_empty() {
+                    t.empty = t.empty.saturating_sub(1);
+                }
+                s.hits.push(hit);
+                if is_type {
+                    s.types.push(hit);
+                }
+            }
+        }
+        // Stable: each slot's late hits stay in hit order.
+        late.sort_by_key(|&(slot, _, _)| slot);
+        for run in late.chunk_by(|a, b| a.0 == b.0) {
+            let Some(&(slot, _, _)) = run.first() else {
+                continue;
+            };
+            let Some(s) = self
+                .table
+                .slots
+                .get_mut(usize::try_from(slot).unwrap_or(usize::MAX))
+            else {
+                continue;
+            };
+            s.hits = merged(&s.hits, run.iter().map(|&(_, hit, _)| hit));
+            s.types = merged(
+                &s.types,
+                run.iter().filter(|&&(_, _, t)| t).map(|&(_, hit, _)| hit),
+            );
+        }
+    }
+
+    /// Removes the declarations of `gone` (their indexes before an update, of `before` files)
+    /// from the table; a slot left with none stays, empty.
+    fn remove(&mut self, gone: &[(u32, FileEntry)], before: usize) {
+        if gone.is_empty() {
+            return;
+        }
+        let mut out = vec![false; before];
+        let mut touched: Vec<u32> = Vec::new();
+        for (file, f) in gone {
+            if let Some(flag) = usize::try_from(*file).ok().and_then(|at| out.get_mut(at)) {
+                *flag = true;
+            }
+            touched.extend(
+                f.summary
+                    .declarations()
+                    .filter_map(|(_, d)| self.names.get(f.summary.str(d.name)).copied()),
+            );
+        }
+        touched.sort_unstable();
+        touched.dedup();
+        let is_out = |hit: &Hit| {
+            usize::try_from(hit.file)
+                .ok()
+                .and_then(|f| out.get(f))
+                .copied()
+                .unwrap_or(false)
+        };
+        let t = &mut self.table;
+        for slot in touched {
+            let Some(s) = t.slots.get_mut(usize::try_from(slot).unwrap_or(usize::MAX)) else {
+                continue;
+            };
+            let had = !s.hits.is_empty();
+            s.hits.retain(|h| !is_out(h));
+            s.types.retain(|h| !is_out(h));
+            if had && s.hits.is_empty() {
+                t.empty = t.empty.saturating_add(1);
+            }
         }
     }
 
@@ -550,14 +843,21 @@ impl Snapshot {
     /// Every declaration of the view by simple name, each name once.
     pub(crate) fn names(&self) -> impl Iterator<Item = (&str, &[Hit])> {
         let t = &self.table;
-        t.names
+        t.spans
             .iter()
-            .filter_map(move |&(start, len, first, count)| {
+            .zip(&t.slots)
+            .filter(|(_, slot)| !slot.hits.is_empty())
+            .filter_map(move |(&(start, len), slot)| {
                 let at = |n: u32| usize::try_from(n).ok();
                 let name = t.text.get(at(start)?..at(start.checked_add(len)?)?)?;
-                let hits = t.hits.get(at(first)?..at(first.checked_add(count)?)?)?;
-                Some((name, hits))
+                Some((name, slot.hits.as_slice()))
             })
+    }
+
+    /// The slot of `name`, if the view declares it.
+    fn named(&self, name: &str) -> Option<&Slot> {
+        let slot = *self.names.get(name)?;
+        self.table.slots.get(usize::try_from(slot).ok()?)
     }
 
     /// The file of `hit`.
@@ -674,7 +974,7 @@ impl Snapshot {
 
     /// Every type declaration of the view named `name`.
     pub(crate) fn types_named(&self, name: &str) -> &[Hit] {
-        self.types.get(name).map_or(&[], Vec::as_slice)
+        self.named(name).map_or(&[], |s| s.types.as_slice())
     }
 
     /// The type declarations of a named package whose qualified name is `qualified` (a type of
@@ -1173,7 +1473,7 @@ impl Resolver<'_> {
         cap: usize,
     ) -> (Vec<Hit>, bool) {
         let mut hits = Vec::new();
-        for &hit in self.names.get(name).map_or(&[][..], Vec::as_slice) {
+        for &hit in self.named(name).map_or(&[][..], |s| s.hits.as_slice()) {
             let Some(d) = self.decl(hit) else {
                 continue;
             };
@@ -1627,6 +1927,7 @@ mod tests {
     use super::*;
     use jfl_domain::Language;
     use jfl_domain::{ByteOffset, DeclarationInput, Digest, SummaryBuilder, SyntaxInputs};
+    use std::collections::BTreeMap;
 
     struct Zero;
 
@@ -1934,5 +2235,343 @@ mod tests {
         ];
         // then
         assert_eq!(twice, [true, false, false, true]);
+    }
+
+    /// FNV-1a, for keys that differ when their inputs do (the queries' snapshot tells files
+    /// apart by key).
+    struct Fnv(u64);
+
+    impl jfl_domain::KeyHasher for Fnv {
+        fn update(&mut self, bytes: &[u8]) {
+            for &b in bytes {
+                self.0 = (self.0 ^ u64::from(b)).wrapping_mul(0x0100_0000_01b3);
+            }
+        }
+
+        fn finish(self) -> Digest {
+            let mut out = [0_u8; 32];
+            for (i, chunk) in out.chunks_mut(8).enumerate() {
+                chunk.copy_from_slice(
+                    &self
+                        .0
+                        .rotate_left(u32::try_from(i).unwrap().wrapping_mul(8))
+                        .to_le_bytes(),
+                );
+            }
+            Digest::from_bytes(out)
+        }
+    }
+
+    const POOL: [&str; 6] = ["A", "B", "Entry", "Map", "get", "run"];
+
+    /// The file at `slot` of a world (its path) in content `variant`: a package, maybe a
+    /// processor or Lombok import, a top-level type, maybe a member type and methods whose names
+    /// overlap the types', maybe a syntax error. Equal `(slot, variant)`, equal content and key.
+    fn world_file(slot: u8, variant: u8) -> FileEntry {
+        let name = |k: usize| POOL[k.checked_rem(POOL.len()).unwrap_or(0)];
+        let (s, v) = (usize::from(slot), usize::from(variant));
+        let mut builder = SummaryBuilder::new(Language::Java);
+        builder.package(["p", "q"][v % 2]).unwrap();
+        match v % 4 {
+            1 => {
+                builder
+                    .import("lombok.Data", false, false, range(0, 1))
+                    .unwrap();
+            }
+            2 => {
+                builder
+                    .import("org.mapstruct.Mapper", false, false, range(0, 1))
+                    .unwrap();
+            }
+            _ => {}
+        }
+        let decl = |builder: &mut SummaryBuilder, kind, parent, name, at: u32| {
+            builder
+                .declaration(&DeclarationInput {
+                    kind,
+                    modifiers: Modifiers::PUBLIC,
+                    parent,
+                    name,
+                    name_range: range(at, at.saturating_add(1)),
+                    range: range(at, at.saturating_add(9)),
+                    signature: name,
+                    params: &[],
+                    supertypes: &[],
+                    permits: &[],
+                    annotations: &[],
+                    javadoc: None,
+                })
+                .unwrap()
+        };
+        let top = decl(
+            &mut builder,
+            DeclKind::Class,
+            None,
+            name(s.wrapping_add(v)),
+            100,
+        );
+        if v % 3 != 0 {
+            let inner = decl(
+                &mut builder,
+                DeclKind::Class,
+                Some(top),
+                name(s.wrapping_mul(3).wrapping_add(v)),
+                110,
+            );
+            decl(&mut builder, DeclKind::Method, Some(inner), name(v), 120);
+        }
+        decl(
+            &mut builder,
+            DeclKind::Method,
+            Some(top),
+            name(s.wrapping_add(v.wrapping_mul(2))),
+            130,
+        );
+        let mut digest = [0_u8; 32];
+        digest[0] = slot;
+        digest[1] = variant;
+        let key = SyntaxKey::derive(
+            &SyntaxInputs {
+                file: Digest::from_bytes(digest),
+                grammar: "g",
+                grammar_version: "1",
+                summariser_version: 1,
+            },
+            Fnv(0xcbf2_9ce4_8422_2325),
+        );
+        FileEntry {
+            path: RelPath::new(&format!("src/F{slot:02}.java")).unwrap(),
+            key,
+            summary: Arc::new(builder.finish().with_syntax_errors(v == 7)),
+        }
+    }
+
+    /// The files of a world: each slot present with its variant, in path order.
+    fn world(slots: &[Option<u8>]) -> Vec<FileEntry> {
+        (0_u8..)
+            .zip(slots)
+            .filter_map(|(slot, variant)| variant.map(|v| world_file(slot, v)))
+            .collect()
+    }
+
+    /// Everything a lookup can read of a snapshot, the name scan's order aside.
+    #[derive(Debug, PartialEq)]
+    struct Observed {
+        files: Vec<(String, SyntaxKey)>,
+        names: BTreeMap<String, (Vec<Hit>, Vec<Hit>)>,
+        children: Vec<Vec<(DeclId, DeclId)>>,
+        generated: Vec<bool>,
+        counts: (u32, u32),
+    }
+
+    fn observed(snapshot: &Snapshot) -> Observed {
+        let files = snapshot
+            .files()
+            .iter()
+            .map(|f| (f.path.as_str().to_owned(), f.key))
+            .collect();
+        let mut names = BTreeMap::new();
+        for (name, hits) in snapshot.names() {
+            let before = names.insert(
+                name.to_owned(),
+                (hits.to_vec(), snapshot.types_named(name).to_vec()),
+            );
+            assert!(before.is_none(), "{name} scanned twice");
+        }
+        for name in POOL {
+            assert_eq!(
+                snapshot.named(name).map_or(&[][..], |s| s.hits.as_slice()),
+                names.get(name).map_or(&[][..], |(hits, _)| hits.as_slice()),
+            );
+        }
+        let generated = (0_u32..)
+            .take(snapshot.files().len())
+            .map(|file| snapshot.generated(file))
+            .collect();
+        Observed {
+            files,
+            names,
+            children: snapshot.children.clone(),
+            generated,
+            counts: (snapshot.processor_files(), snapshot.syntax_error_files()),
+        }
+    }
+
+    proptest::proptest! {
+        #![proptest_config(proptest::prelude::ProptestConfig {
+            cases: 256,
+            failure_persistence: None,
+            ..proptest::prelude::ProptestConfig::default()
+        })]
+
+        #[test]
+        fn should_answer_as_a_fresh_build_when_a_snapshot_is_updated(
+            start in proptest::collection::vec(proptest::option::of(0_u8..8), 24),
+            steps in proptest::collection::vec(
+                proptest::collection::vec((0_usize..24, proptest::option::of(0_u8..8)), 1..4),
+                1..6,
+            ),
+        ) {
+            // given: a world of up to 24 files and its snapshot
+            let mut slots = start;
+            let mut snapshot = Snapshot::new(world(&slots));
+            for changes in steps {
+                // when: a few files are edited, created or deleted, and the snapshot updated
+                for (at, variant) in changes {
+                    slots[at] = variant;
+                }
+                let files = world(&slots);
+                let (updated, _) = snapshot.update(files.iter().map(|f| (&f.path, &f.key, &f.summary)));
+                // then: it answers as a fresh build of the new world does
+                let fresh = Snapshot::new(world(&slots));
+                proptest::prop_assert_eq!(observed(&updated), observed(&fresh));
+                snapshot = updated;
+            }
+        }
+    }
+
+    #[test]
+    fn should_update_in_place_when_one_file_of_many_changes() {
+        // given: twelve files, then the fifth edited, a file created first and the last deleted
+        let mut slots: Vec<Option<u8>> = (0..12).map(|i| Some(i % 5)).collect();
+        slots.push(None);
+        let before = Snapshot::new(world(&slots));
+        slots[4] = Some(6);
+        slots[12] = Some(1);
+        slots[11] = None;
+        // when
+        let files = world(&slots);
+        let (after, updated) = before.update(files.iter().map(|f| (&f.path, &f.key, &f.summary)));
+        // then
+        assert!(updated);
+        assert_eq!(observed(&after), observed(&Snapshot::new(world(&slots))));
+    }
+
+    #[test]
+    fn should_move_a_file_s_declarations_when_it_is_renamed_with_the_same_key() {
+        // given: ten files, then the fourth renamed (`git mv`: the same bytes, so the same key)
+        let slots: Vec<Option<u8>> = (0..10).map(|i| Some(i % 5)).collect();
+        let before = world(&slots);
+        let mut after: Vec<FileEntry> = before.clone();
+        let mut moved = after.remove(3);
+        moved.path = RelPath::new("src/G03.java").unwrap();
+        after.push(moved);
+        let snapshot = Snapshot::new(before);
+        // when
+        let (updated, kept) = snapshot.update(after.iter().map(|f| (&f.path, &f.key, &f.summary)));
+        // then
+        assert!(kept);
+        assert_eq!(observed(&updated), observed(&Snapshot::new(after)));
+    }
+
+    #[test]
+    fn should_update_at_half_and_build_afresh_when_one_more_file_changes() {
+        // given: ten files; half of them edited, then one more
+        let slots: Vec<Option<u8>> = (0..10).map(|_| Some(0)).collect();
+        let edited = |n: usize| -> Vec<Option<u8>> {
+            (0..10).map(|i| Some(if i < n { 3 } else { 0 })).collect()
+        };
+        for (n, expected) in [(5, true), (6, false)] {
+            let files = world(&edited(n));
+            // when
+            let (after, updated) = Snapshot::new(world(&slots))
+                .update(files.iter().map(|f| (&f.path, &f.key, &f.summary)));
+            // then
+            assert_eq!(updated, expected, "{n} of 10 edited");
+            assert_eq!(observed(&after), observed(&Snapshot::new(files.clone())));
+        }
+    }
+
+    /// A file at `path` declaring a class for each of `names`, its key from `key`.
+    fn named_file(path: &str, names: &[String], key: u8) -> FileEntry {
+        let mut builder = SummaryBuilder::new(Language::Java);
+        builder.package("p").unwrap();
+        for (i, name) in (0_u32..).zip(names) {
+            let at = i.saturating_mul(10).saturating_add(100);
+            builder
+                .declaration(&DeclarationInput {
+                    kind: DeclKind::Class,
+                    modifiers: Modifiers::PUBLIC,
+                    parent: None,
+                    name,
+                    name_range: range(at, at.saturating_add(1)),
+                    range: range(at, at.saturating_add(9)),
+                    signature: name,
+                    params: &[],
+                    supertypes: &[],
+                    permits: &[],
+                    annotations: &[],
+                    javadoc: None,
+                })
+                .unwrap();
+        }
+        let mut digest = [0_u8; 32];
+        digest[0] = key;
+        FileEntry {
+            path: RelPath::new(path).unwrap(),
+            key: SyntaxKey::derive(
+                &SyntaxInputs {
+                    file: Digest::from_bytes(digest),
+                    grammar: "g",
+                    grammar_version: "1",
+                    summariser_version: 1,
+                },
+                Fnv(0xcbf2_9ce4_8422_2325),
+            ),
+            summary: Arc::new(builder.finish()),
+        }
+    }
+
+    #[test]
+    fn should_build_afresh_when_half_the_name_slots_are_empty() {
+        // given: four files, one of which declares ten names of its own on every edit
+        let names =
+            |round: u8| -> Vec<String> { (0..10).map(|i| format!("N{round}x{i}")).collect() };
+        let files = |round: u8| -> Vec<FileEntry> {
+            vec![
+                named_file("a/A.java", &names(round), round),
+                named_file("b/B.java", &["B".to_owned()], 200),
+                named_file("c/C.java", &["C".to_owned()], 201),
+                named_file("d/D.java", &["D".to_owned()], 202),
+            ]
+        };
+        let mut snapshot = Snapshot::new(files(0));
+        let mut rounds = Vec::new();
+        // when: each edit leaves its old ten names' slots empty
+        for round in 1..6 {
+            let next = files(round);
+            let (after, updated) =
+                snapshot.update(next.iter().map(|f| (&f.path, &f.key, &f.summary)));
+            assert_eq!(observed(&after), observed(&Snapshot::new(next)));
+            rounds.push((updated, after.table.empty, after.table.slots.len()));
+            snapshot = after;
+        }
+        // then: updated while at most half the slots were empty, afresh once more were
+        assert_eq!(
+            rounds,
+            [
+                (true, 10, 23),
+                (true, 20, 33),
+                (false, 0, 13),
+                (true, 10, 23),
+                (true, 20, 33)
+            ]
+        );
+    }
+
+    #[test]
+    fn should_build_afresh_when_most_files_change() {
+        // given: eight files, then six of them edited
+        let mut slots: Vec<Option<u8>> = (0..8).map(|_| Some(0)).collect();
+        let before = Snapshot::new(world(&slots));
+        for slot in slots.iter_mut().take(6) {
+            *slot = Some(3);
+        }
+        // when
+        let files = world(&slots);
+        let (after, updated) = before.update(files.iter().map(|f| (&f.path, &f.key, &f.summary)));
+        // then
+        assert!(!updated);
+        assert_eq!(observed(&after), observed(&Snapshot::new(world(&slots))));
     }
 }

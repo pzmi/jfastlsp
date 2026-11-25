@@ -11,7 +11,13 @@
 //!   inside the daemon); p50 and p95, and what the answers were (exact, ambiguous, possible only,
 //!   outside the index, unresolved, refused);
 //! - **the first query of a generation**, which builds its name tables (`QueryCache`): what the
-//!   first query after each publish pays;
+//!   first query after each publish paid before IDX-18, and what a fresh cache still pays;
+//! - **the first query after an edit** (IDX-18), on a scratch repository of the checkout's files:
+//!   a file rewritten (a comment appended), then a definition whose request reconciles and
+//!   publishes it and whose query makes the new generation's name tables from the previous ones;
+//!   then the file put back, the same again;
+//! - **definitions repeated in one file** (IDX-18): ten sites of each of twenty files in a row,
+//!   the file's first and the later ones apart (what the cache of parsed trees serves);
 //! - **the syntax facts** a definition proves `exact` from (IDX-10's syntax-tree resolver), for
 //!   every file of the view: the parse of the file alone, the parse and the walk from one site
 //!   (what each definition pays: the design taken, a parse at query time), and the walk from every
@@ -28,8 +34,10 @@
 //! Plan §1.7 measures `jfl def` and `jfl hover` end to end through the CLI (from M2) and through
 //! `jfl lsp` (from M1); this bench is the in-process share of those rows, the floor a carrier adds
 //! its framing and IPC to. Here, not in `jfl-application`, because timing needs the clock grant
-//! only composition holds (fnd §2.4). Reports, never gates. Writes nothing into the checkout but
-//! the cookie files, each removed at once.
+//! only composition holds (fnd §2.4). Reports, never gates; prints the process's peak and
+//! current RSS after the open and at the end. Writes nothing into the checkout but the cookie
+//! files, each removed at once: the edits go to a scratch repository under cargo's
+//! `CARGO_TARGET_TMPDIR`, removed after (and by the next run, if one is cut short).
 
 use std::future::Future;
 use std::io::Read as _;
@@ -351,6 +359,309 @@ fn syntax_facts(checkout: &Path, files: &[(RelPath, Vec<ByteRange>)]) -> Result<
     Ok(())
 }
 
+/// The definition at `offset` of `path`: the request (the reconcile and publish of what changed
+/// before it) and the query, and the query alone.
+fn timed_definition(
+    service: &mut Service,
+    root: &FileUri,
+    checkout: &Path,
+    (path, offset): (&RelPath, u32),
+    cache: &QueryCache,
+) -> Result<Option<(Duration, Duration)>, String> {
+    let config = QueryConfig::default();
+    let encoding = PositionEncoding::Utf16;
+    let uri = root.join(path).map_err(|e| e.to_string())?;
+    let bytes = std::fs::read(checkout.join(path.as_str())).map_err(|e| e.to_string())?;
+    let text =
+        String::from_utf8_lossy(jfl_application::syntax_indexer::strip_bom(&bytes)).into_owned();
+    let lines = LineIndex::new(&text).map_err(|e| e.to_string())?;
+    let Ok(position) = lines.position(ByteOffset::new(offset), encoding) else {
+        return Ok(None);
+    };
+    let whole = Instant::now();
+    let answer: Answer = block_on(service.request(&uri)).map_err(|e| e.to_string())?;
+    let pinned = Pinned {
+        answer: &answer,
+        head: None,
+        freshness: freshness(),
+    };
+    let alone = Instant::now();
+    let deadline = ClockDeadline::new(&SystemClock, config.definition_budget);
+    let _ = block_on(definition(
+        &pinned,
+        &service.sources(),
+        position,
+        encoding,
+        &config,
+        &deadline,
+        cache,
+    ));
+    let times = (whole.elapsed(), alone.elapsed());
+    service.finish(answer.id).map_err(|e| e.to_string())?;
+    Ok(Some(times))
+}
+
+/// The first query after an edit (IDX-18, plan §1.7's freshness and `jfl def` rows), on a
+/// scratch repository of the checkout's `.java` files made beside `store` (never the pinned
+/// corpus, which other runs read) and removed after: its view opened and settled on a service of
+/// its own, then a file rewritten with a comment appended (its key changes), then a definition
+/// at a picked site, whose request reconciles and publishes the edit and whose query makes the
+/// new generation's name tables; then the file put back, and the same again. [`EDIT_ROUNDS`]
+/// files, each rewritten and put back once. A run cut short leaves only the scratch directory,
+/// which the next run removes.
+fn edits_then_queries(
+    checkout: &Path,
+    files: &[RelPath],
+    store: &Path,
+    pool: &Pool,
+    chosen: &[(RelPath, u32)],
+) -> Result<(), String> {
+    let scratch = store.with_extension("edits");
+    let _ = std::fs::remove_dir_all(&scratch);
+    let made = Instant::now();
+    let mut copied = Vec::with_capacity(files.len());
+    for file in files {
+        let bytes = std::fs::read(checkout.join(file.as_str())).map_err(|e| e.to_string())?;
+        copied.push((file.as_str().to_owned(), bytes));
+    }
+    let borrowed: Vec<(&str, &[u8])> = copied
+        .iter()
+        .map(|(p, b)| (p.as_str(), b.as_slice()))
+        .collect();
+    let repo = jfl_testkit::fixtures::git::Repo::init(&scratch.join("main"), &borrowed)?;
+    drop(copied);
+    let made = made.elapsed();
+    let copy = repo.root().to_path_buf();
+    let root = FileUri::from_path(copy.to_str().ok_or("scratch path is not UTF-8")?)
+        .map_err(|e| e.to_string())?;
+    let opened = Instant::now();
+    let mut service = service(
+        &scratch.join("store"),
+        pool,
+        ServiceConfig::new(&format!("edits{}", std::process::id())),
+    )?;
+    let first = root
+        .join(files.first().ok_or("no .java file")?)
+        .map_err(|e| e.to_string())?;
+    let answer = block_on(service.request(&first)).map_err(|e| e.to_string())?;
+    service.finish(answer.id).map_err(|e| e.to_string())?;
+    while block_on(service.settle(usize::MAX)).map_err(|e| e.to_string())? {}
+    let opened = opened.elapsed();
+    println!(
+        "  edits: on a scratch repository of the {} files, made in {:.1} s, its view settled in {:.1} s",
+        files.len(),
+        made.as_secs_f64(),
+        opened.as_secs_f64()
+    );
+    let cache = QueryCache::new();
+    let mut sites = chosen.iter().cycle().skip(chosen.len() / 2);
+    // The tables of the settled generation, made before the first edit (not timed).
+    let (site, offset) = sites.next().ok_or("no site")?;
+    let _ = timed_definition(&mut service, &root, &copy, (site, *offset), &cache)?;
+    let (builds, updates) = (cache.builds(), cache.updates());
+    let mut whole = Vec::new();
+    let mut alone = Vec::new();
+    let mut edited: Vec<&RelPath> = chosen.iter().map(|(p, _)| p).collect();
+    edited.sort_unstable();
+    edited.dedup();
+    for (round, path) in edited.into_iter().take(EDIT_ROUNDS).enumerate() {
+        let file = copy.join(path.as_str());
+        let bytes = std::fs::read(&file).map_err(|e| e.to_string())?;
+        let mut changed = bytes.clone();
+        changed.extend_from_slice(format!("\n// jfl-bench edit {round}\n").as_bytes());
+        for content in [changed.as_slice(), bytes.as_slice()] {
+            std::fs::write(&file, content).map_err(|e| e.to_string())?;
+            let (site, offset) = sites.next().ok_or("no site")?;
+            if let Some((w, a)) =
+                timed_definition(&mut service, &root, &copy, (site, *offset), &cache)?
+            {
+                whole.push(w);
+                alone.push(a);
+            }
+        }
+    }
+    drop(service);
+    let _ = std::fs::remove_dir_all(&scratch);
+    println!(
+        "  {}",
+        line(
+            "after an edit: request (reconcile, publish) and definition",
+            &whole
+        )
+    );
+    let made = cache.builds().saturating_sub(builds);
+    let updated = cache.updates().saturating_sub(updates);
+    println!(
+        "  {}; name tables made {made} times: {updated} from the previous generation's, {} afresh",
+        line(
+            "after an edit: definition alone (the new generation's name tables)",
+            &alone
+        ),
+        made.saturating_sub(updated)
+    );
+    Ok(())
+}
+
+/// Definitions repeated in one file, as an agent or an editor asks them: [`REPEAT_FILES`] files
+/// with at least [`REPEAT_SITES`] reference sites, picked by seed, and that many sites of each in
+/// a row, twice (the query alone). The first pass parses the file at its first site that reads
+/// syntax facts, as before IDX-18, and walks a kept tree at the rest; the second pass finds every
+/// tree kept (without the cache both passes parse at every such site). What a cache of parsed
+/// trees serves, where the random sites above rarely ask one file twice.
+fn repeated_files(
+    service: &mut Service,
+    root: &FileUri,
+    checkout: &Path,
+    by_file: &[(RelPath, Vec<ByteRange>)],
+    cache: &QueryCache,
+) -> Result<(), String> {
+    let candidates: Vec<&(RelPath, Vec<ByteRange>)> = by_file
+        .iter()
+        .filter(|(_, sites)| sites.len() >= REPEAT_SITES)
+        .collect();
+    let mut picker = Picker(0x2545_F491_4F6C_DD1D);
+    let mut passes = [Vec::new(), Vec::new()];
+    for _ in 0..REPEAT_FILES {
+        let Some((path, sites)) = candidates.get(picker.below(candidates.len())) else {
+            break;
+        };
+        let step = sites.len() / REPEAT_SITES;
+        for pass in &mut passes {
+            for range in sites.iter().step_by(step.max(1)).take(REPEAT_SITES) {
+                let at = (path, range.start().get());
+                if let Some((_, alone)) = timed_definition(service, root, checkout, at, cache)? {
+                    pass.push(alone);
+                }
+            }
+        }
+    }
+    let [first, again] = passes;
+    println!(
+        "  {}",
+        line(
+            "same-file definitions: first pass over a file's sites, query alone",
+            &first
+        )
+    );
+    println!(
+        "  {}",
+        line(
+            "same-file definitions: the same sites again, query alone",
+            &again
+        )
+    );
+    Ok(())
+}
+
+/// The process's peak and current resident set (`/proc/self/status`).
+fn rss() -> String {
+    std::fs::read_to_string("/proc/self/status")
+        .unwrap_or_default()
+        .lines()
+        .filter(|l| l.starts_with("VmHWM") || l.starts_with("VmRSS"))
+        .map(|l| l.split_whitespace().collect::<Vec<_>>().join(" "))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// The process's resident set in KiB (`VmRSS`).
+fn rss_kib() -> u64 {
+    std::fs::read_to_string("/proc/self/status")
+        .unwrap_or_default()
+        .lines()
+        .find_map(|l| l.strip_prefix("VmRSS:"))
+        .and_then(|v| v.split_whitespace().next()?.parse().ok())
+        .unwrap_or(0)
+}
+
+/// `--memory` (IDX-18; a fresh process, nothing else measured): what the name tables of the
+/// settled view and a full cache of parsed trees add to the resident set. The trees are the
+/// view's largest files with sites, up to the cache's byte bound: the worst case it can hold.
+fn memory(
+    service: &mut Service,
+    first: &FileUri,
+    checkout: &Path,
+    by_file: &[(RelPath, Vec<ByteRange>)],
+) -> Result<(), String> {
+    let settled = rss_kib();
+    let answer = block_on(service.request(first)).map_err(|e| e.to_string())?;
+    let pinned = Pinned {
+        answer: &answer,
+        head: None,
+        freshness: freshness(),
+    };
+    let config = QueryConfig::default();
+    let cache = QueryCache::new();
+    let deadline = ClockDeadline::new(&SystemClock, config.symbols_budget);
+    let _ = block_on(workspace_symbols(
+        &pinned,
+        &service.sources(),
+        SymbolQuery {
+            text: "",
+            filter: None,
+            limit: Some(1),
+        },
+        PositionEncoding::Utf16,
+        &config,
+        &deadline,
+        &cache,
+    ));
+    let tables = rss_kib();
+    let (cache_files, cache_bytes) = TREE_CACHE;
+    let cache_bytes = u64::try_from(cache_bytes).unwrap_or(u64::MAX);
+    let mut sized: Vec<(u64, &RelPath, ByteRange)> = by_file
+        .iter()
+        .filter_map(|(path, sites)| {
+            let size = std::fs::metadata(checkout.join(path.as_str())).ok()?.len();
+            Some((size, path, *sites.first()?))
+        })
+        .filter(|(size, _, _)| *size <= cache_bytes)
+        .collect();
+    sized.sort_unstable_by_key(|s| std::cmp::Reverse(s.0));
+    let mut held = 0_u64;
+    let mut trees = 0_usize;
+    let sources = service.sources();
+    for (size, path, site) in sized {
+        if trees == cache_files || held.saturating_add(size) > cache_bytes {
+            continue;
+        }
+        let bytes = std::fs::read(checkout.join(path.as_str())).map_err(|e| e.to_string())?;
+        let text = String::from_utf8_lossy(jfl_application::syntax_indexer::strip_bom(&bytes))
+            .into_owned();
+        let Some(text) = jfl_application::FileText::new(jfl_domain::Language::Java, text) else {
+            continue;
+        };
+        let _ = block_on(jfl_application::Sources::site_syntax(
+            &sources,
+            &Arc::new(text),
+            site,
+        ));
+        held = held.saturating_add(size);
+        trees = trees.saturating_add(1);
+    }
+    let full = rss_kib();
+    service.finish(answer.id).map_err(|e| e.to_string())?;
+    println!(
+        "  memory: settled view {settled} KiB; the name tables add {} KiB; {trees} trees of the largest files ({} KiB of text) add {} KiB",
+        tables.saturating_sub(settled),
+        held / 1024,
+        full.saturating_sub(tables)
+    );
+    Ok(())
+}
+
+/// The indexer's bounds on the parsed trees it keeps: files, bytes of text.
+const TREE_CACHE: (usize, usize) = (
+    jfl_adapter_java::TREE_CACHE_FILES,
+    jfl_adapter_java::TREE_CACHE_BYTES,
+);
+/// Files rewritten and put back by [`edits_then_queries`].
+const EDIT_ROUNDS: usize = 10;
+/// Files of [`repeated_files`].
+const REPEAT_FILES: usize = 20;
+/// Definitions asked in each of them.
+const REPEAT_SITES: usize = 10;
+
 fn main() -> Result<(), String> {
     let mut input = Vec::new();
     std::io::stdin()
@@ -388,6 +699,7 @@ fn main() -> Result<(), String> {
         answer.generation.index.len(),
         answer.completeness.is_complete()
     );
+    println!("  memory after the open: {}", rss());
 
     // The sites and declaration names to query, picked by seed from the generation.
     let mut sites: Vec<(RelPath, u32)> = Vec::new();
@@ -433,6 +745,9 @@ fn main() -> Result<(), String> {
         }
     }
     service.finish(answer.id).map_err(|e| e.to_string())?;
+    if std::env::args().any(|a| a == "--memory") {
+        return memory(&mut service, &first, Path::new(checkout), &by_file);
+    }
     let picks = arg_after("--picks").unwrap_or(PICKS);
     let mut picker = Picker(0x9E37_79B9_7F4A_7C15);
     let chosen: Vec<(RelPath, u32)> = (0..picks)
@@ -524,6 +839,8 @@ fn main() -> Result<(), String> {
         "  definition answers: {tally:?}; name tables built {} times",
         cache.builds()
     );
+    edits_then_queries(Path::new(checkout), &files, &store, &pool, &chosen)?;
+    repeated_files(&mut service, &root, Path::new(checkout), &by_file, &cache)?;
     syntax_facts(Path::new(checkout), &by_file)?;
 
     let answer = block_on(service.request(&first)).map_err(|e| e.to_string())?;
@@ -675,6 +992,7 @@ fn main() -> Result<(), String> {
         );
         println!("  references, {label}, why incomplete: {reasons:?}");
     }
+    println!("  memory at the end: {}", rss());
     drop(service);
     let _ = std::fs::remove_dir_all(&store);
     Ok(())

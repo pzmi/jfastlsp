@@ -29,7 +29,7 @@
 
 use jfl_application::syntax_indexer::{Around, SiteForm, SiteSyntax};
 use jfl_domain::{ByteOffset, ByteRange};
-use tree_sitter::Node;
+use tree_sitter::{Node, Tree};
 
 use crate::extract::{Budget, Worker, parse};
 use crate::grammar::Grammar;
@@ -356,24 +356,63 @@ pub(crate) fn facts(
     text: &str,
     names: &[ByteRange],
 ) -> (Vec<Option<SiteSyntax>>, usize) {
-    let none = || (vec![None; names.len()], 0);
+    facts_of(&parse_for_facts(grammar, worker, text), text, names)
+}
+
+/// A file's parse as the facts read it: kept by the indexer's cache of trees ([`crate::trees`])
+/// and read again for each later site of the same text.
+pub(crate) struct Parsed {
+    /// The tree; `None` when the file gives no facts (another grammar, Unicode escapes, a parse
+    /// that spent the work budget, a syntax error).
+    tree: Option<Tree>,
+    /// The units of the file's work budget the parse spent: charged again before each walk, so
+    /// a walk over a kept tree runs out of budget exactly where it would after a fresh parse.
+    ///
+    /// Pinned by: `scopes::tests::should_prove_nothing_when_the_parse_kept_with_a_tree_spent_the_budget`.
+    parsed: usize,
+}
+
+/// Parses `text` with `grammar` on `worker` for [`facts_of`].
+pub(crate) fn parse_for_facts(grammar: &Grammar, worker: &mut Worker, text: &str) -> Parsed {
+    let nothing = Parsed {
+        tree: None,
+        parsed: 0,
+    };
     if grammar.id.name != "tree-sitter-java-orchard" {
-        return none();
+        return nothing;
     }
     let translated = Translated::new(text);
     if !translated.map.is_identity() {
-        return none();
+        return nothing;
     }
-    let src = translated.text.as_bytes();
     let budget = Budget::new(text.len());
-    let Ok(tree) = parse(grammar, worker, src, &budget) else {
-        return none();
+    let Ok(tree) = parse(grammar, worker, translated.text.as_bytes(), &budget) else {
+        return nothing;
     };
-    let root = tree.root_node();
-    if root.has_error() {
-        return none();
+    if tree.root_node().has_error() {
+        return nothing;
     }
-    let parsed = budget.used();
+    Parsed {
+        tree: Some(tree),
+        parsed: budget.used(),
+    }
+}
+
+/// The facts about each of `names` of `text`, read from its `parsed` tree, and the units of work
+/// the walks spent after the parse.
+pub(crate) fn facts_of(
+    parsed: &Parsed,
+    text: &str,
+    names: &[ByteRange],
+) -> (Vec<Option<SiteSyntax>>, usize) {
+    let Some(tree) = &parsed.tree else {
+        return (vec![None; names.len()], 0);
+    };
+    // The tree was parsed from `text` itself: only a text with no escape to translate has one.
+    let src = text.as_bytes();
+    let budget = Budget::new(text.len());
+    budget.charge(parsed.parsed);
+    let root = tree.root_node();
     let found = names
         .iter()
         .map(|&name| {
@@ -382,7 +421,7 @@ pub(crate) fn facts(
             facts.filter(|_| budget.check().is_ok())
         })
         .collect();
-    (found, budget.used().saturating_sub(parsed))
+    (found, budget.used().saturating_sub(parsed.parsed))
 }
 
 /// The path from `root` to the identifier at `start..end`, descending once (each level a
@@ -985,5 +1024,25 @@ mod tests {
         let found = [facts(escaped, "count", 1), facts(broken, "count", 1)];
         // then
         assert_eq!(found, [None, None]);
+    }
+
+    #[test]
+    fn should_prove_nothing_when_the_parse_kept_with_a_tree_spent_the_budget() {
+        // given: a file's kept parse, and the same parse recorded as having spent its budget
+        let grammar = Grammar::new(&GrammarSpec::orchard()).unwrap();
+        let text = "class A { int count; int f() { return count; } }";
+        let name = range_of(text, "count", 1);
+        let kept = parse_for_facts(&grammar, &mut Worker::new(), text);
+        let limit = jfl_application::syntax_indexer::work_budget(text.len()).saturating_mul(100);
+        let spent = Parsed {
+            tree: kept.tree.clone(),
+            parsed: limit,
+        };
+        // when
+        let fresh = facts_of(&kept, text, &[name]).0;
+        let over = facts_of(&spent, text, &[name]).0;
+        // then: a walk over a kept tree runs out where it would after the parse
+        assert!(fresh.first().is_some_and(Option::is_some));
+        assert_eq!(over, [None]);
     }
 }

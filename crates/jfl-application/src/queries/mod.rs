@@ -48,7 +48,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, PoisonError, Weak};
 
 use jfl_domain::{
-    ByteRange, Completeness, DeclKind, Envelope, EnvelopeParts, FileUri, Freshness,
+    ByteRange, Completeness, DeclKind, Envelope, EnvelopeParts, FileSummary, FileUri, Freshness,
     IncompleteReason, Language, LineIndex, Location, ModuleName, ObjectId, Position,
     PositionEncoding, PositionError, PossibleHit, Range, Reason, RefShape, ReferenceSite, RelPath,
     SymbolId, SyntaxKey, Target, TargetStatus, View, Why,
@@ -243,16 +243,20 @@ type Pinnable = Published<FileSeen, GitObserved, Summary>;
 /// snapshot.
 type Cached = (Weak<Pinnable>, Arc<Snapshot>);
 
-/// Each view's last queried generation and its [`Snapshot`]: the name tables are built once per
-/// generation (the first query after a publish pays for them), not once per query. Held by the
-/// daemon beside the view service; a generation no request holds any more is let go with the
-/// next one's snapshot.
+/// Each view's last queried generation and its [`Snapshot`]: the name tables are made once per
+/// generation (by the first query after a publish), not once per query, and made from the
+/// previous generation's when no query holds that one any more ([`Snapshot::update`]: only the
+/// files that changed are read, so an edit costs its files, not the view). Held by the daemon
+/// beside the view service; a generation no request holds any more is let go with the next
+/// one's snapshot.
 ///
-/// Pinned by: `tests/queries.rs::should_build_the_name_tables_once_when_a_generation_is_queried_again`.
+/// Pinned by: `tests/queries.rs::should_build_the_name_tables_once_when_a_generation_is_queried_again`
+/// and `tests/queries.rs::should_answer_as_a_fresh_cache_when_the_tables_are_made_from_the_previous_generation`.
 #[derive(Debug, Default)]
 pub struct QueryCache {
     views: Mutex<BTreeMap<FileUri, Cached>>,
     builds: AtomicUsize,
+    updates: AtomicUsize,
 }
 
 impl QueryCache {
@@ -262,44 +266,96 @@ impl QueryCache {
         Self::default()
     }
 
-    /// How many snapshots it built.
+    /// How many snapshots it made, afresh or from the previous generation's.
     #[must_use]
     pub fn builds(&self) -> usize {
         self.builds.load(Ordering::Relaxed)
     }
 
-    /// The snapshot of `answer`'s pinned generation; `None` when `deadline` passed while it was
-    /// built (nothing is kept then).
+    /// How many of [`QueryCache::builds`] were made from the previous generation's snapshot.
+    #[must_use]
+    pub fn updates(&self) -> usize {
+        self.updates.load(Ordering::Relaxed)
+    }
+
+    /// The snapshot of `answer`'s pinned generation; `None` when `deadline` passed while the
+    /// files of a fresh build were gathered (a previous snapshot is kept then). An update from
+    /// the previous snapshot reads no deadline, nor does its fresh fallback past half the files
+    /// changed: an update costs the generation's diff, and the fallback is the same
+    /// uninterruptible build a fresh cache makes once its files are gathered.
     fn snapshot<D: Deadline>(&self, answer: &Answer, deadline: &D) -> Option<Arc<Snapshot>> {
         let generation = Arc::downgrade(&answer.generation);
-        {
-            let views = self.views.lock().unwrap_or_else(PoisonError::into_inner);
+        let previous = {
+            let mut views = self.views.lock().unwrap_or_else(PoisonError::into_inner);
             if let Some((held, snapshot)) = views.get(&answer.view)
                 && held.ptr_eq(&generation)
             {
                 return Some(Arc::clone(snapshot));
             }
-        }
-        let mut files = Vec::with_capacity(answer.generation.index.len());
-        for (i, (path, entry)) in answer.generation.index.iter().enumerate() {
-            if i % 1024 == 1023 && deadline.passed() {
-                return None;
-            }
-            if let Some(Summary::Indexed { key, summary }) = &entry.summary {
-                files.push(FileEntry {
-                    path: path.clone(),
-                    key: *key,
-                    summary: Arc::clone(summary),
+            views.remove(&answer.view)
+        };
+        let indexed =
+            answer
+                .generation
+                .index
+                .iter()
+                .filter_map(|(path, entry)| match &entry.summary {
+                    Some(Summary::Indexed { key, summary }) => Some((path, key, summary)),
+                    _ => None,
                 });
-            }
-        }
-        let snapshot = Arc::new(Snapshot::new(files));
+        // The previous snapshot is changed in place only when nothing else holds it: a query
+        // still running on that generation keeps its own, and this one is built afresh.
+        let (snapshot, updated) = match previous {
+            Some((held, snapshot)) => match Arc::try_unwrap(snapshot) {
+                Ok(previous) => previous.update(indexed),
+                Err(shared) => {
+                    let Some(files) = Self::files(indexed, deadline) else {
+                        self.keep(&answer.view, (held, shared));
+                        return None;
+                    };
+                    (Snapshot::new(files), false)
+                }
+            },
+            None => (Snapshot::new(Self::files(indexed, deadline)?), false),
+        };
+        let snapshot = Arc::new(snapshot);
         self.builds.fetch_add(1, Ordering::Relaxed);
+        if updated {
+            self.updates.fetch_add(1, Ordering::Relaxed);
+        }
         self.views
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .insert(answer.view.clone(), (generation, Arc::clone(&snapshot)));
         Some(snapshot)
+    }
+
+    /// The entries of a fresh build; `None` once `deadline` passes (read every 1,024 files).
+    fn files<'e, D: Deadline>(
+        indexed: impl Iterator<Item = (&'e RelPath, &'e SyntaxKey, &'e Arc<FileSummary>)>,
+        deadline: &D,
+    ) -> Option<Vec<FileEntry>> {
+        let mut files = Vec::new();
+        for (i, (path, key, summary)) in indexed.enumerate() {
+            if i % 1024 == 1023 && deadline.passed() {
+                return None;
+            }
+            files.push(FileEntry {
+                path: path.clone(),
+                key: *key,
+                summary: Arc::clone(summary),
+            });
+        }
+        Some(files)
+    }
+
+    /// Puts `cached` back for `view`, unless a newer one was kept meanwhile.
+    fn keep(&self, view: &FileUri, cached: Cached) {
+        self.views
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .entry(view.clone())
+            .or_insert(cached);
     }
 }
 

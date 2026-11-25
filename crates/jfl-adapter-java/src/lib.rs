@@ -58,6 +58,7 @@ pub mod indexer;
 mod extract;
 mod scopes;
 mod source;
+mod trees;
 
 pub use extract::Work;
 pub use grammar::{
@@ -65,3 +66,4 @@ pub use grammar::{
     UPSTREAM_LOCALS, UPSTREAM_TAGS,
 };
 pub use indexer::{JavaIndexer, SUMMARISER_VERSION};
+pub use trees::{TREE_CACHE_BYTES, TREE_CACHE_FILES};

@@ -1061,6 +1061,119 @@ fn should_build_the_name_tables_once_when_a_generation_is_queried_again() {
     assert!(after.generation.generation > shop.generation.generation);
 }
 
+#[test]
+fn should_answer_as_a_fresh_cache_when_the_tables_are_made_from_the_previous_generation() {
+    // given: a cache kept across generations, and the edits a view sees: a file copied in (a
+    // second `Billing`), one deleted, one rewritten with another's text, the deleted one back
+    let world = World::new();
+    let mut service = world.service();
+    let bytes = |file: &str| {
+        let path = format!("{SRC}/{file}");
+        world
+            .files
+            .iter()
+            .find(|(p, _)| *p == path)
+            .unwrap()
+            .1
+            .clone()
+    };
+    let edits: [(&str, Option<Vec<u8>>); 4] = [
+        ("shop/Billing.java", Some(bytes("billing/Billing.java"))),
+        ("money/Money.java", None),
+        ("refs/Note.java", Some(bytes("refs/Kind.java"))),
+        ("money/Money.java", Some(bytes("money/Money.java"))),
+    ];
+    let sites = [
+        world.at("shop/Shop.java", "Billing.standard", 0, 0),
+        world.at("shop/Shop.java", "standard", 0, 2),
+        world.at("shop/Shop.java", "charge", 0, 1),
+        world.at("shop/Shop.java", "audit(receipt)", 0, 1),
+        world.at("shop/Shop.java", "size();", 0, 1),
+        world.at("shop/Shop.java", "Money amount", 0, 1),
+        world.at("shop/Shop.java", "count++", 0, 1),
+    ];
+    let declarations = [
+        world.at("shop/Shop.java", "int size", 0, 5),
+        world.at("shop/Shop.java", "Receipt checkout", 0, 9),
+    ];
+    let clock = still();
+    let config = QueryConfig::default();
+    let kept = QueryCache::new();
+    let answers = |service: &Service, answer: &Answer, cache: &QueryCache| {
+        let deadline = ClockDeadline::new(&clock, config.symbols_budget);
+        let mut out = Vec::new();
+        for at in sites.iter().chain(&declarations) {
+            out.push(format!(
+                "{:?}",
+                block_on(definition(
+                    &pinned(answer),
+                    &service.sources(),
+                    *at,
+                    UTF16,
+                    &config,
+                    &deadline,
+                    cache,
+                ))
+            ));
+        }
+        for at in declarations {
+            out.push(format!(
+                "{:?}",
+                block_on(references(
+                    &pinned(answer),
+                    &service.sources(),
+                    ReferencesQuery {
+                        position: at,
+                        ..ReferencesQuery::default()
+                    },
+                    UTF16,
+                    &config,
+                    &deadline,
+                    cache,
+                ))
+            ));
+        }
+        for text in ["", "B", "Rec", "Shop", "Money", "NPE"] {
+            out.push(format!(
+                "{:?}",
+                block_on(workspace_symbols(
+                    &pinned(answer),
+                    &service.sources(),
+                    SymbolQuery {
+                        text,
+                        filter: None,
+                        limit: None,
+                    },
+                    UTF16,
+                    &config,
+                    &deadline,
+                    cache,
+                ))
+            ));
+        }
+        out
+    };
+    let first = ask(&mut service, "shop/Shop.java");
+    let _ = answers(&service, &first, &kept);
+    service.finish(first.id).unwrap();
+    for (file, edit) in edits {
+        // when
+        let path = format!("m/{SRC}/{file}");
+        match edit {
+            Some(bytes) => world.tree.write(&path, &bytes).unwrap(),
+            None => world.tree.remove(&path).unwrap(),
+        }
+        let after = ask(&mut service, "shop/Shop.java");
+        let updated = answers(&service, &after, &kept);
+        let fresh = answers(&service, &after, &QueryCache::new());
+        service.finish(after.id).unwrap();
+        // then
+        assert_eq!(updated, fresh, "after {file}");
+    }
+    assert_eq!(kept.builds(), 5);
+    assert_eq!(kept.updates(), 4);
+}
+
 /// One probe of the reviews (2026-11-19, two rounds): a site, and where javac 21 binds it (read
 /// with `javap -c`, `-s` or `-v` from the compiled fixture). The oracle check: `definition` is
 /// `exact` only on javac's declaration; until the syntax-tree resolver, a resolved name is never
