@@ -6,7 +6,7 @@
 //! probe, the Java indexer and the on-disk summary store in a scratch directory, every port bound
 //! to one pool of four threads (what composition's bounded blocking pool does; the bench has no
 //! runtime). `--parallelism N` and `--open-whole N` override `ServiceConfig`'s, `--pool N` the
-//! pool's threads.
+//! pool's threads, `--runs N` the cold opens.
 //!
 //! - **Stages:** each step of a cold open alone over the adapters' blocking calls, on 1 and 4
 //!   threads (the listing, stat, read, hash, parse, encode, store write, store miss) and one
@@ -90,6 +90,102 @@ fn arg_after(flag: &str) -> Option<usize> {
     args.get(at.checked_add(1)?)?.parse().ok()
 }
 
+/// This process's CPU and scheduling so far (Linux `/proc`; zero elsewhere): user and system
+/// CPU in clock ticks summed over its threads, voluntary and involuntary context switches summed
+/// over its live threads, bytes read from the disk, and the machine's steal time (CPU a
+/// hypervisor gave another guest: a noisy neighbour). Differences of two give a stage's cost.
+#[derive(Debug, Clone, Copy, Default)]
+struct Usage {
+    steal: u64,
+    user: u64,
+    system: u64,
+    voluntary: u64,
+    involuntary: u64,
+    disk_read: u64,
+}
+
+impl Usage {
+    fn now() -> Self {
+        let mut usage = Self::default();
+        if let Ok(stat) = std::fs::read_to_string("/proc/self/stat")
+            && let Some((_, rest)) = stat.rsplit_once(')')
+        {
+            let fields: Vec<&str> = rest.split_whitespace().collect();
+            // Fields 14 and 15 of proc(5), counted after the command's closing parenthesis.
+            usage.user = fields.get(11).and_then(|f| f.parse().ok()).unwrap_or(0);
+            usage.system = fields.get(12).and_then(|f| f.parse().ok()).unwrap_or(0);
+        }
+        if let Ok(tasks) = std::fs::read_dir("/proc/self/task") {
+            for task in tasks.flatten() {
+                let Ok(status) = std::fs::read_to_string(task.path().join("status")) else {
+                    continue;
+                };
+                for line in status.lines() {
+                    let count = |l: &str| l.split_whitespace().last()?.parse::<u64>().ok();
+                    if line.starts_with("voluntary_ctxt_switches") {
+                        usage.voluntary = usage.voluntary.saturating_add(count(line).unwrap_or(0));
+                    } else if line.starts_with("nonvoluntary_ctxt_switches") {
+                        usage.involuntary =
+                            usage.involuntary.saturating_add(count(line).unwrap_or(0));
+                    }
+                }
+            }
+        }
+        if let Ok(stat) = std::fs::read_to_string("/proc/stat")
+            && let Some(cpu) = stat.lines().next()
+        {
+            // The eighth number after `cpu` (proc(5)).
+            usage.steal = cpu
+                .split_whitespace()
+                .nth(8)
+                .and_then(|f| f.parse().ok())
+                .unwrap_or(0);
+        }
+        if let Ok(io) = std::fs::read_to_string("/proc/self/io") {
+            usage.disk_read = io
+                .lines()
+                .find_map(|l| l.strip_prefix("read_bytes: "))
+                .and_then(|v| v.trim().parse().ok())
+                .unwrap_or(0);
+        }
+        usage
+    }
+
+    /// What `self`, read later, adds to `before`, as one line (ticks are 10 ms on Linux).
+    fn since(self, before: Self) -> String {
+        format!(
+            "user {} ms, system {} ms, {} voluntary and {} involuntary switches, {:.1} MiB read, machine steal {} ms",
+            self.user.saturating_sub(before.user).saturating_mul(10),
+            self.system.saturating_sub(before.system).saturating_mul(10),
+            self.voluntary.saturating_sub(before.voluntary),
+            self.involuntary.saturating_sub(before.involuntary),
+            mib(self.disk_read.saturating_sub(before.disk_read)),
+            self.steal.saturating_sub(before.steal).saturating_mul(10),
+        )
+    }
+}
+
+/// The process's resident memory now and at its peak (`VmRSS`, `VmHWM`; Linux `/proc`).
+fn memory() -> String {
+    let status = std::fs::read_to_string("/proc/self/status").unwrap_or_default();
+    let field = |name: &str| {
+        status
+            .lines()
+            .find_map(|l| l.strip_prefix(name))
+            .and_then(|v| v.split_whitespace().next()?.parse::<u64>().ok())
+            .unwrap_or(0)
+    };
+    format!(
+        "{:.0} MiB, peak {:.0} MiB",
+        mib(field("VmRSS:").saturating_mul(1024)),
+        mib(field("VmHWM:").saturating_mul(1024))
+    )
+}
+
+fn mib(bytes: u64) -> f64 {
+    f64::from(u32::try_from(bytes / 1024).unwrap_or(u32::MAX)) / 1024.0
+}
+
 /// One view open: the first answer, then the rest of the view, then the store's writes.
 struct Opened {
     service: Service,
@@ -109,6 +205,9 @@ struct Opened {
     between: Vec<Duration>,
     /// How many of those answers were incomplete (the view still settling).
     between_incomplete: usize,
+    /// The process's CPU, switches and disk reads up to the first answer, then the settle, then
+    /// the write-back ([`Usage::since`]).
+    usage: [String; 3],
 }
 
 impl Opened {
@@ -123,6 +222,15 @@ impl Opened {
             self.files,
             self.complete,
             ms(self.written)
+        )
+    }
+
+    /// What each part of the open cost the process (IDX-19's profile).
+    fn costs(&self) -> String {
+        let [first, settle, write] = &self.usage;
+        format!(
+            "to the first answer: {first}; settle: {settle}; write-back: {write}; then RSS {}",
+            memory()
         )
     }
 
@@ -155,9 +263,11 @@ fn open(
     slice: usize,
 ) -> Result<Opened, String> {
     let started = Instant::now();
+    let at_start = Usage::now();
     let mut service = service(store, pool, config.clone())?;
     let answer = block_on(service.request(first)).map_err(|e| e.to_string())?;
     let first_answer = started.elapsed();
+    let at_first = Usage::now();
     let first_files = answer.generation.index.len();
     let first_indexed = answer
         .generation
@@ -189,6 +299,7 @@ fn open(
     }
     // The full index's time leaves out the requests asked between the slices.
     let settled = started.elapsed().saturating_sub(asking);
+    let at_settled = Usage::now();
     let mut writes = Vec::new();
     loop {
         let step = Instant::now();
@@ -199,6 +310,11 @@ fn open(
         }
     }
     let written = started.elapsed().saturating_sub(asking);
+    let usage = [
+        at_first.since(at_start),
+        at_settled.since(at_first),
+        Usage::now().since(at_settled),
+    ];
     let answer = block_on(service.request(first)).map_err(|e| e.to_string())?;
     let files = answer.generation.index.len();
     let complete = answer.completeness.is_complete();
@@ -217,6 +333,7 @@ fn open(
         writes,
         between,
         between_incomplete,
+        usage,
     })
 }
 
@@ -753,7 +870,7 @@ fn main() -> Result<(), String> {
     );
 
     if cold {
-        for _ in 0..COLD_RUNS {
+        for _ in 0..arg_after("--runs").unwrap_or(COLD_RUNS) {
             let _ = std::fs::remove_dir_all(&store);
             if !drop_caches() {
                 return Err("dropping the page cache needs root on Linux".to_owned());
@@ -764,6 +881,7 @@ fn main() -> Result<(), String> {
                 opened.line()
             );
             println!("    {}", opened.holds());
+            println!("    {}", opened.costs());
         }
         let _ = std::fs::remove_dir_all(&store);
         return Ok(());
@@ -774,11 +892,17 @@ fn main() -> Result<(), String> {
         opened.line()
     );
     println!("    {}", opened.holds());
+    println!("    {}", opened.costs());
     let mut warm_runs = Vec::new();
     let mut warm = None;
     for _ in 0..3 {
         let opened = open(&store, &pool, &config, &first, slice)?;
-        warm_runs.push(format!("{}\n    {}", opened.line(), opened.holds()));
+        warm_runs.push(format!(
+            "{}\n    {}\n    {}",
+            opened.line(),
+            opened.holds(),
+            opened.costs()
+        ));
         warm = Some(opened.service);
     }
     for line in warm_runs {

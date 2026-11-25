@@ -622,6 +622,35 @@ async fn first<A: Future, B: Future>(a: A, b: B) -> Either<A::Output, B::Output>
     .await
 }
 
+/// The outputs of `a` and `b`, polled together.
+async fn both<A: Future, B: Future>(a: A, b: B) -> (A::Output, B::Output) {
+    let mut a = pin!(a);
+    let mut b = pin!(b);
+    let mut left = None;
+    let mut right = None;
+    core::future::poll_fn(|cx| {
+        if left.is_none()
+            && let Poll::Ready(out) = a.as_mut().poll(cx)
+        {
+            left = Some(out);
+        }
+        if right.is_none()
+            && let Poll::Ready(out) = b.as_mut().poll(cx)
+        {
+            right = Some(out);
+        }
+        match (left.take(), right.take()) {
+            (Some(l), Some(r)) => Poll::Ready((l, r)),
+            (l, r) => {
+                left = l;
+                right = r;
+                Poll::Pending
+            }
+        }
+    })
+    .await
+}
+
 /// Whether `path` is `dir` or below it.
 fn under(path: &RelPath, dir: &RelPath) -> bool {
     path.as_str()
@@ -975,17 +1004,21 @@ where
 
     /// Summarises `files` (each with a stat taken before, when there is one),
     /// [`ServiceConfig::parallelism`] at a time: each stat, read, store lookup and parse runs on
-    /// the ports' blocking pool, so a cold open uses every core the pool has. The summaries the
-    /// indexer made wait in [`ViewService::write_back`]'s queue.
+    /// the ports' blocking pool, so a cold open uses every core the pool has. Meanwhile the source
+    /// tree is asked to start reading `ahead` ([`SourceTree::prefetch`], a hint: nothing here
+    /// waits on it but the call's end), so a read finds its file on its way from the disk rather
+    /// than holding a pool thread for the whole wait (IDX-19). The summaries the indexer made
+    /// wait in [`ViewService::write_back`]'s queue.
     async fn summarise_all(
         &mut self,
         root: &FileUri,
         files: Vec<(RelPath, Option<FileSeen>)>,
+        ahead: &[RelPath],
     ) -> Vec<Summarised> {
         let budget = ReadBudget::new(self.config.read_budget);
         let done = {
             let reader = &self.reader(&budget);
-            bounded(self.config.parallelism, files, |(path, known)| async move {
+            let summarised = bounded(self.config.parallelism, files, |(path, known)| async move {
                 let (seen, summary, fresh) = reader.summarise(root, &path, known).await;
                 Summarised {
                     path,
@@ -993,8 +1026,15 @@ where
                     summary,
                     fresh,
                 }
-            })
-            .await
+            });
+            if ahead.is_empty() {
+                summarised.await
+            } else {
+                let limit = MAX_SOURCE_BYTES.saturating_add(4);
+                both(self.tree.prefetch(root, ahead, limit), summarised)
+                    .await
+                    .1
+            }
         };
         for file in &done {
             if let (true, Summary::Indexed { key, summary }) = (file.fresh, &file.summary)
@@ -1154,7 +1194,7 @@ where
             }
         }
         let files: Vec<(RelPath, FileSeen, Summary)> = self
-            .summarise_all(&root, now)
+            .summarise_all(&root, now, &[])
             .await
             .into_iter()
             .filter(|f| !matches!(f.summary, Summary::Absent))
@@ -1456,7 +1496,7 @@ where
                     .collect()
             };
             take.extend(needed);
-            return self.reconcile_part(root, take).await;
+            return self.reconcile_part(root, take, &[]).await;
         }
         let dirty: Vec<RelPath> = view.dirty.iter().cloned().collect();
         let indexed: Vec<RelPath> = if rescan {
@@ -1530,7 +1570,7 @@ where
                 (path, known)
             })
             .collect();
-        for file in self.summarise_all(root, files).await {
+        for file in self.summarise_all(root, files, &[]).await {
             let stamp = self.tick();
             self.registry
                 .summarised(root, &file.path, file.seen, file.summary, stamp)?;
@@ -1730,6 +1770,7 @@ where
         &mut self,
         root: &FileUri,
         mut take: BTreeSet<RelPath>,
+        ahead: &[RelPath],
     ) -> Result<bool, ServiceError> {
         if let Some(view) = self.registry.view(root) {
             take.retain(|p| view.dirty.contains(p));
@@ -1749,7 +1790,7 @@ where
             todo.remove(path);
         }
         let files = todo.into_iter().map(|path| (path, None)).collect();
-        for file in self.summarise_all(root, files).await {
+        for file in self.summarise_all(root, files, ahead).await {
             let stamp = self.tick();
             self.registry
                 .summarised(root, &file.path, file.seen, file.summary, stamp)?;
@@ -1770,10 +1811,12 @@ where
     /// requests, so its loop is held for one slice at a time; until the last slice publishes,
     /// every answer of the view is incomplete (the deferred files are delivered and unpublished,
     /// and partly indexed). A rescan due runs in the step instead and leaves the deferred files to
-    /// the next steps (IDX-09e, [`ViewService::reconcile`]).
+    /// the next steps (IDX-09e, [`ViewService::reconcile`]). While a slice is read, its files and
+    /// the next slice's are prefetched ([`SourceTree::prefetch`]), which changes no answer.
     ///
-    /// Pinned by: `tests/view_service.rs::should_answer_partly_indexed_and_then_complete_when_the_open_defers_the_rest`
-    /// and `tests/view_service.rs::should_publish_a_generation_per_slice_and_answer_between_them_when_settled_in_slices`.
+    /// Pinned by: `tests/view_service.rs::should_answer_partly_indexed_and_then_complete_when_the_open_defers_the_rest`,
+    /// `tests/view_service.rs::should_publish_a_generation_per_slice_and_answer_between_them_when_settled_in_slices`
+    /// and `tests/view_service.rs::should_prefetch_the_slice_and_the_next_when_settling`.
     pub async fn settle(&mut self, slice: usize) -> Result<bool, ServiceError> {
         self.drain().await?;
         let roots: Vec<FileUri> = self.views.keys().cloned().collect();
@@ -1793,6 +1836,14 @@ where
             };
             let take: BTreeSet<RelPath> =
                 opened.deferred.iter().take(slice.max(1)).cloned().collect();
+            // This slice's files and the next one's are prefetched: the disk reads ahead of the
+            // parse, and the next slice's first reads find their files on the way (IDX-19).
+            let ahead: Vec<RelPath> = opened
+                .deferred
+                .iter()
+                .take(slice.max(1).saturating_mul(2))
+                .cloned()
+                .collect();
             let dirty = self.registry.view(&root).map(|v| &v.dirty);
             let missing: Vec<RelPath> = take
                 .iter()
@@ -1816,7 +1867,7 @@ where
             if part {
                 let mut take = take;
                 take.extend(needed);
-                self.reconcile_part(&root, take).await?;
+                self.reconcile_part(&root, take, &ahead).await?;
             } else {
                 self.reconcile(&root).await?;
             }

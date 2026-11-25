@@ -69,6 +69,7 @@ deny = [
   { crate = "gen-lsp-types", wrappers = ["jfl-adapter-lsp"], reason = "LSP types are the LSP adapter's (ADR 0020)" },
   { crate = "notify", wrappers = ["jfl-adapter-fs"], reason = "watcher hints are the fs adapter's (plan §6.1, IDX-06)" },
   { crate = "ignore", wrappers = ["jfl-adapter-fs", "jfl-bench"], reason = "the walk is the fs adapter's (plan §6.1, IDX-06); the bench harness walks the corpus on its own (ADR 0031)" },
+  { crate = "mimalloc", wrappers = ["jfl-composition"], reason = "the process's allocator is chosen once, by the wiring root, on Linux only (IDX-19)" },
   { crate = "anyhow", wrappers = ["jfl-cli", "jfl-architecture", "jfl-oracle", "jfl-eval", "jfl-bench"], reason = "anyhow only in binaries and tools (ARCH-anyhow-in-library)" },
   { crate = "lsp-types", use-instead = "gen-lsp-types", reason = "stalled since 2024 (plan §16.3)" },
   { crate = "tower-lsp", use-instead = "lsp-server", reason = "unmaintained (plan §16.3)" },
@@ -88,8 +89,8 @@ features = [
 [bans.build]
 # Only the crates named here may run a build script (fnd §2.2 rule 5), workspace crates included
 # (cargo-deny skips them by default). Production crates reach C only through the bypass list
-# below: since IDX-07 the tree-sitter runtime and the orchard grammar (jfl-adapter-java), and since
-# IDX-08 blake3 (jfl-adapter-store). IDX-08 took no rusqlite, so bundled SQLite is not here; the task
+# below: since IDX-07 the tree-sitter runtime and the orchard grammar (jfl-adapter-java), since
+# IDX-08 blake3 (jfl-adapter-store), and since IDX-19 mimalloc (jfl-composition's allocator). IDX-08 took no rusqlite, so bundled SQLite is not here; the task
 # that adds it adds its script by name, with the reason. Pinned by tools/jfl-architecture/tests/gate_negative_cases.rs
 # ::should_fail_deny_bans_when_a_workspace_crate_has_a_build_script.
 include-workspace = true
@@ -171,6 +172,12 @@ bypass = [
   # ADR 0006's targets), asks pkg-config for libinotify's directory and links it; on our targets
   # it prints nothing.
   { crate = "inotify-sys", build-script = "8070368f4661803c760dc05c9946f654af5ca54a0b224abc3c10f01e5e295a3a" },
+  # IDX-19: jfl-composition's global allocator on Linux (mimalloc 0.1.52, MIT) brings one more, read at the
+  # version pinned in Cargo.lock. libmimalloc-sys: compiles its vendored mimalloc (v3) static.c with
+  # `cc`, with defines from its features (override, no_thp) and the target, and links libatomic on
+  # 32-bit ARM and system libraries on Windows; it writes only into OUT_DIR (a C++ wrapper on MSVC);
+  # no network, nothing outside the crate directory.
+  { crate = "libmimalloc-sys", build-script = "4917ec3e9a59e216b1b568ce37ea5cb97ba0ba1b9c50789a29d1cd429de9119f" },
 ]
 
 [sources]

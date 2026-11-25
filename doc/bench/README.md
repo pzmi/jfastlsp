@@ -544,6 +544,84 @@ An earlier series the same morning, under the other lane's gate (load 2.8 to 5.0
 
 Where a cold open's time goes (`/usr/bin/time` over three cold opens of medium, load 3.6 to 4.7): 26.0 s of user and 9.6 s of system CPU, 8.7 s and 3.2 s an open, against 6.4 to 6.7 s of user time for the parse and summary alone on one thread (`just bench-syntax`); 188k voluntary and 90k involuntary context switches (about 63k and 30k an open, near seven per file: the stat, read and parse hand-offs to the pool and their wake-ups, and the store's writes after the publish); 165 major page faults; 309 MiB read from the disk (about 103 MiB an open: the sources, their directories and inodes, and the binary's pages). Thin LTO with one codegen unit (`--profile bench-tool`), which E1 found 6 to 11 % faster, gave no gain on `just bench-syntax medium`, alternated twice: one thread 6,500 and 6,680 ms against 6,411 and 6,534 ms; the parse is tree-sitter's C, which Rust's LTO does not reach. What remains is on IDX-19's card.
 
+#### The cold full index (IDX-19)
+
+`just bench-views SIZE cold` now prints, under each open, what each part cost the process: user and
+system CPU, voluntary and involuntary context switches and bytes read from the disk up to the
+first answer, in the settle and in the write-back, the machine's steal time (a neighbour's CPU),
+and the RSS after the open (`/proc`). `--runs N` sets the number of cold opens (three by default).
+
+**The profile** (medium, 4 vCPU Xeon @ 2.10 GHz VM, 2026-11-25, 4 pool threads, per cold open):
+
+| part of the open | wall | user CPU | system CPU | switches (voluntary / involuntary) | read |
+|:--|--:|--:|--:|--:|--:|
+| to the first answer | 370 ms | 0.1 s | 0.23 s | 9k / 0 | 31 MiB |
+| settle (the full index) | 2.45 s | 7.3–7.9 s | 0.8–1.0 s | 36k / 20k | 71 MiB |
+| write-back (after the publish, outside the row) | 0.6–2 s | 0.4–0.6 s | 1.7–4.7 s | 21k / 2k | 0–2 MiB |
+
+IDX-18's 3.2 s of system CPU an open was mostly the write-back, which the row leaves out. The
+first answer is waits on the disk (the watch's walk of 2,800 directories on one thread, then the
+listing's `lstat`s); the settle is the parse with the CPUs idle while a pool thread waits on a cold
+read. Per file the settle made a `stat` and a read hand-off and a parse hand-off (about three
+context switches); callgrind over 400 medium files (glibc) gave the parse 67 % of the instructions,
+the cursor walk 12 %, `malloc` and `free` about 6 %, declarations 4 % and reference sites 3 %.
+
+**What changed, each measured alone against the one before it** (alternated, three opens each, the
+same machine state; the load average was 1 to 3.5 and the steal 0.1–0.2 s an open throughout, so
+read each pair, not the absolute values across pairs):
+
+| change | whole view (medium, cold) | first answer | kept |
+|:--|--:|--:|:--|
+| before (2ed1547) | 2,700–2,860 ms | 330–410 ms | |
+| prefetch: each settle slice asks the kernel to read its files and the next slice's (`posix_fadvise(WILLNEED)`, `SourceTree::prefetch`, a hint) | −150 to −220 ms (four pairs: 2,900 → 2,720, 2,780 → 2,560, 2,700 → 2,560, 2,720 → 2,490) | same | yes |
+| mimalloc as the global allocator, `override` (tree-sitter's C too); Linux only | −90 to −240 ms (five pairs, e.g. 2,560 → 2,390, 2,490 → 2,260); settle user CPU 7.3 → 6.4 s | same | yes |
+| the watch's directory walk on `ignore`'s parallel walker | −110 to −120 ms (2,290 → 2,190, 2,350 → 2,230) | −100 to −120 ms (about 370 → 255) | yes |
+| one hand-off for the stat and the read (a `stat_then_read` port call) | none (2,300 against 2,300; switches −10 %) | none | **no** |
+| 32 files in flight instead of 16, with the prefetch | none | none | no |
+| settle slices of 4,096 instead of 512 | none | none | no |
+| glibc's `malloc` replaced by jemalloc (`LD_PRELOAD`) | −200 ms, like mimalloc | same | mimalloc instead (MIT, maintained, builds with `cc`) |
+
+The prefetch asks for at most the read limit of each file (`posix_fadvise` over `MAX_SOURCE_BYTES` + 4
+bytes, never a larger file's whole length), two settle slices at a time; it fills the page cache,
+not the process, so `read_budget` does not govern it. mimalloc is the allocator on Linux only: every
+measurement here is Linux's, and macOS keeps its system allocator until a `macos.yml` run measures
+it. mimalloc with transparent huge pages (its default) held 50–70 MiB more resident memory for the
+same speed, so `no_thp` is set; with `MIMALLOC_PURGE_DELAY=0` it gave its memory back at once and
+lost the gain (2.6–2.7 s).
+
+**Before and after** (2026-11-25, load 1.7 to 2.5, steal 0.2–0.4 s per three opens; before =
+2ed1547's library with this bench, alternated three times, three cold opens each, median of the
+nine; each run's value in brackets):
+
+| corpus, page cache dropped, empty store | before | after |
+|:--|--:|--:|
+| medium, whole view published (plan §1.7: ≤ 2.5 s) | **2,800 ms** (2,846, 2,800, 2,756, 2,791, 2,848, 2,816, 2,743, 2,883, 2,774) | **2,289 ms** (2,192, 2,233, 2,413, 2,289, 2,300, 2,323, 2,296, 2,260, 2,270) |
+| medium, first answer | 372 ms | 273 ms |
+| medium, settle CPU (user + system) | 7.3–7.7 + 0.8–1.2 s | 6.4–6.9 + 0.7–0.8 s |
+| medium, RSS after the open | 84–94 MiB | 110–115 MiB |
+| small, whole view published (median of six) | 525 ms | 440 ms |
+| small, first answer | 123 ms | 102 ms |
+| small, RSS after the open | 27–31 MiB | 34–43 MiB |
+
+The warm rows, one run each, the same session (`just bench-views medium`): empty store with a
+warm page cache 2,386 → 2,165 ms whole, first answer 224 → 213 ms; a warm store's whole view
+713–790 → 519–573 ms and its first answer 287–337 → 212–253 ms; the cookie round trip 0.079 /
+0.141 → 0.079 / 0.193 ms (p50 / p95) and the whole request 0.296 / 0.450 → 0.287 / 0.396 ms;
+the rescan with listing 116 → 90 ms; the rescans during a settle 2.2–2.9 → 2.0–2.8 s. The bench
+process's RSS over that whole run (four views opened, the store written, 200 requests) was
+lower with mimalloc: 201 MiB after the first open and 313 MiB at the end before, 136 and 281 MiB
+after (peak 298). A single cold open's process holds 25 MiB more; a longer one, less.
+
+Against plan §1.7 on this VM: the full syntax index of medium, cold, on four cores, is within
+2.5 s with about 8 % to spare (2.19–2.41 s over nine opens). Where the rest goes: about 270 ms to
+the first answer (the watch's inotify registrations, one round trip to `notify`'s thread each,
+about 100 ms; the listing; `git`), and a settle of 6.4–6.9 s of user CPU over four cores, two
+thirds of it tree-sitter's own parse. Large is not measured here (the corpus is not fetched in this sandbox): E1's medium-to-large ratio
+(6.1×) projects about 14 s against the large row's 13 s, by files (3.6×) about 8.4 s; it is open
+(LSP-06's card). What would take more: the extraction's share (the cursor
+walk, a third of the instructions with declarations and reference sites), and batching the
+inotify registrations (`notify` 8 adds each watch through its event loop).
+
 #### Other JVM languages (IDX-16)
 
 The listing now records other JVM languages' sources and Gradle build scripts by name (no stat, no read), the tracked ones are unioned in from the same `ls-files` call (more pathspecs), and references, definition, hover and workspace symbols withdraw `complete` for them. Measured 2026-11-24 on the same VM with another lane building beside it, `just bench-views medium` and `just bench-queries medium` on main (73f88eb, load about 6 on 4 vCPUs) and then with the change (load 2 to 3 for the last run): the listing with stats 29 → 23 and 30 ms, the rescan with listing (median, which runs the `ls-files`) 125.8 → 98.7 and 118.7 ms, a warm-store open to the whole view 754–760 → 619–735 ms, the whole request p50 0.251 → 0.250 ms; references alone, common names, p50 25.1 → 31.6, 31.4 and 22.9 ms over three runs (p95 91 → 115, 134 and 99 ms), rare names 10.5 → 8.1, 7.6 and 6.3 ms: noise in both directions, since the queries add one path lookup per answer. Re-measure the common names on a quiet machine, interleaved with main's, before M1's bench gate takes them as a baseline. What changed is what they answer: spring-framework holds 436 such files (396 `.kt`, 17 `.groovy`, 13 `.aj`, 6 `.bsh`, 4 `.jsp`; its 34 `.gradle` scripts count for build logic only), and each of its 100 references answers adds `436 files in other JVM languages not indexed`, as do its workspace symbols (exact names: 7 incomplete before, 50 of 50 after); its definitions, proved ones included, all withdraw `complete` too, since its 13 aspects (in `spring-aspects`, not build logic) can see every file. junit-framework holds 164 (154 `.kt`, 6 `.jte`, 4 `.groovy`; 79 `.gradle.kts` scripts scoped), so its 40 complete common-name and 39 complete rare-name references answers are now incomplete, which they should have been.

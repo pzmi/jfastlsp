@@ -178,8 +178,12 @@ jfl-adapter-ipc = { lsp-server = [], rustix = ["event", "process", "std"], serde
 # tick and the daemon's handshake and write deadlines, all in daemon/timer.rs), SIGTERM (signal), select! (macros) and bounded channels
 # (sync) for the daemon host; rustix (process, std) for setsid, the daemon's first act; serde (derive)
 # for the typed results it serializes; serde_json
-# for the requests' params; thiserror for the typed errors. In the graph already.
-jfl-composition = { rustix = ["process", "std"], serde = ["default", "derive"], serde_json = ["default"], thiserror = ["default"], tokio = ["macros", "net", "rt", "signal", "sync", "time"] }
+# for the requests' params; thiserror for the typed errors. In the graph already. mimalloc (IDX-19;
+# MIT, its vendored C built by libmimalloc-sys, reviewed in deny.toml) as the global allocator, a
+# Linux-only target dependency, without default features: `override` so tree-sitter's C allocates
+# through it too, `no_thp` so it holds no transparent huge pages (doc/bench/README.md has the
+# measurements); macOS keeps its system allocator until a macos.yml run measures it.
+jfl-composition = { mimalloc = ["no_thp", "override"], rustix = ["process", "std"], serde = ["default", "derive"], serde_json = ["default"], thiserror = ["default"], tokio = ["macros", "net", "rt", "signal", "sync", "time"] }
 
 [external.dev]
 # xtask (XT-02): toml reads tools/versions.toml, mise.toml and mise.lock in tests/versions.rs, an

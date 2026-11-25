@@ -109,6 +109,7 @@ impl<P: BlockingPool> FsSourceTree<P> {
         watch::watch(
             &root_dir(root)?,
             self.config.hint_capacity,
+            self.config.walk_threads,
             self.pool.clone(),
         )
     }
@@ -147,12 +148,24 @@ impl<P: BlockingPool + Clone> SourceTree for FsSourceTree<P> {
             .await?
     }
 
+    async fn prefetch(&self, root: &FileUri, paths: &[RelPath], limit: usize) {
+        let (root, paths) = (root.clone(), paths.to_vec());
+        let _ = self
+            .pool
+            .run(move || {
+                if let Ok(root) = root_dir(&root) {
+                    file::prefetch(&root, &paths, limit);
+                }
+            })
+            .await;
+    }
+
     async fn watch(&self, root: &FileUri) -> Result<FsWatch<P>, SourceTreeError> {
         let root = root.clone();
-        let capacity = self.config.hint_capacity;
+        let (capacity, threads) = (self.config.hint_capacity, self.config.walk_threads);
         let pool = self.pool.clone();
         self.pool
-            .run(move || watch::watch(&root_dir(&root)?, capacity, pool))
+            .run(move || watch::watch(&root_dir(&root)?, capacity, threads, pool))
             .await?
     }
 

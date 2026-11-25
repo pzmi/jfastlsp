@@ -168,7 +168,7 @@ fn main() {
         println!("bench_fs cold runs skipped: the page cache cannot be dropped here (Linux, root)");
     }
     let root = Path::new(tree.root.path());
-    let (watched, _) = jfl_adapter_fs::walk::watched_dirs(root, root);
+    let (watched, _) = jfl_adapter_fs::walk::watched_dirs(root, root, 0);
     println!(
         "bench_fs root: {} files, {} watched directories",
         tree.files,

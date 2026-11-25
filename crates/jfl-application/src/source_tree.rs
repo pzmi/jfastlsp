@@ -705,6 +705,23 @@ pub trait SourceTree: Send + Sync {
         path: &RelPath,
     ) -> impl Future<Output = Result<FileStat, SourceTreeError>> + Send;
 
+    /// Asks the operating system to start reading at most the first `limit` bytes of each regular
+    /// file `root/paths` (the limit of the [`SourceTree::read`]s to come) ahead of those reads,
+    /// without waiting for the disk: a hint, never a fact. It returns nothing, and no stat, read or answer depends on it; a path that
+    /// is missing, not a regular file or unreadable is passed over. The default does nothing.
+    /// Cancel-safe.
+    ///
+    /// Pinned by the `source_tree` contract suite (`prefetch_is_only_a_hint`).
+    fn prefetch(
+        &self,
+        root: &FileUri,
+        paths: &[RelPath],
+        limit: usize,
+    ) -> impl Future<Output = ()> + Send {
+        let _ = (root, paths, limit);
+        core::future::ready(())
+    }
+
     /// Starts watching `root`: what the watch covers is established when the future resolves, so
     /// a caller watches first and lists second. Later changes are hinted, except those
     /// [`hint_excluded`] leaves out; a new directory's hint is handed out only once it is watched;

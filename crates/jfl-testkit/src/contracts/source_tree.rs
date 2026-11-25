@@ -1,8 +1,9 @@
 //! The `source_tree` contract (ver §5, plan §6.4): listing honours the exclusions of plan §4.2
 //! and never follows a link (plan §11), a gap is reported and never dropped, stat reflects writes,
-//! reads are bounded, and a watch hints changes and reports overflow. Checked the same way against
-//! [`crate::fakes::source_tree::FakeSourceTree`] (`contracts::source_tree::tests` here) and against
-//! `jfl-adapter-fs` in `crates/jfl-adapter-fs/tests/contract.rs`.
+//! reads are bounded, a prefetch is only a hint, and a watch hints changes and reports overflow.
+//! Checked the same way against [`crate::fakes::source_tree::FakeSourceTree`]
+//! (`contracts::source_tree::tests` here) and against `jfl-adapter-fs` in
+//! `crates/jfl-adapter-fs/tests/contract.rs`.
 //!
 //! Each case asks the [`Factory`] for a fresh, empty tree ([`Fixture`]), builds what it needs
 //! through the fixture's own vocabulary (paths are `/`-separated, under the root), and drives the
@@ -94,7 +95,7 @@ pub fn check<F: Factory>(factory: &F) -> Vec<Violation> {
 
 /// Runs every case, waiting at most `hint_deadline` for each awaited hint.
 pub fn check_with<F: Factory>(factory: &F, hint_deadline: Duration) -> Vec<Violation> {
-    let cases: [(&'static str, Case<F>); 24] = [
+    let cases: [(&'static str, Case<F>); 25] = [
         ("lists_java_files_once", lists_java_files_once),
         ("counts_other_jvm_sources", counts_other_jvm_sources),
         ("lists_with_stat", lists_with_stat),
@@ -116,6 +117,7 @@ pub fn check_with<F: Factory>(factory: &F, hint_deadline: Duration) -> Vec<Viola
             "read_refuses_what_is_not_a_file",
             read_refuses_what_is_not_a_file,
         ),
+        ("prefetch_is_only_a_hint", prefetch_is_only_a_hint),
         ("watch_hints_a_write", watch_hints_a_write),
         ("watch_reports_queue_full", watch_reports_queue_full),
         (
@@ -500,6 +502,42 @@ fn read_refuses_what_is_not_a_file<F: Factory>(factory: &F, _: Duration) -> Resu
     ];
     if got != want {
         return Err(format!("refusals {got:?}, want {want:?}"));
+    }
+    Ok(())
+}
+
+/// A prefetch (IDX-19) changes nothing a stat, a read or a listing shows, and passes over what is
+/// missing or not a regular file.
+fn prefetch_is_only_a_hint<F: Factory>(factory: &F, _: Duration) -> Result<(), String> {
+    let fx = factory.fixture(ROOMY)?;
+    fx.write("p/A.java", b"class A {}")?;
+    fx.write("B.java", b"class B {}")?;
+    fx.mkdir("dir")?;
+    let a = rel("p/A.java")?;
+    let before = block_on(fx.tree().stat(fx.root(), &a)).map_err(|e| format!("stat: {e}"))?;
+    let listed = list(&fx, ListMode::PathsAndStat)?;
+    let asked = [
+        a.clone(),
+        rel("missing.java")?,
+        rel("dir")?,
+        rel("B.java")?,
+        a.clone(),
+    ];
+    block_on(fx.tree().prefetch(fx.root(), &asked, ROOMY));
+    let after = block_on(fx.tree().stat(fx.root(), &a)).map_err(|e| format!("stat: {e}"))?;
+    let read = block_on(fx.tree().read(fx.root(), &a, ROOMY)).map_err(|e| format!("read: {e}"))?;
+    let missing = block_on(fx.tree().stat(fx.root(), &rel("missing.java")?));
+    let relisted = list(&fx, ListMode::PathsAndStat)?;
+    if after != before || read.bytes != b"class A {}" || read.truncated {
+        return Err(format!(
+            "after a prefetch: stat {after:?} (was {before:?}), read {read:?}"
+        ));
+    }
+    if missing != Err(SourceTreeError::NotFound) || relisted.files != listed.files {
+        return Err(format!(
+            "after a prefetch: missing.java {missing:?}, listing {:?} (was {:?})",
+            relisted.files, listed.files
+        ));
     }
     Ok(())
 }
@@ -1035,6 +1073,19 @@ mod tests {
         }
     });
 
+    // Prefetches by writing: each file asked for is rewritten empty.
+    broken!(PrefetchWrites {
+        delegate!(list);
+        delegate!(read);
+        delegate!(stat);
+        delegate!(watch);
+        async fn prefetch(&self, _root: &FileUri, paths: &[RelPath], _limit: usize) {
+            for path in paths {
+                let _ = self.0.write(path.as_str(), b"");
+            }
+        }
+    });
+
     /// Caches the first stat of each path.
     struct StaleStat(FakeSourceTree, Mutex<HashMap<String, FileStat>>);
 
@@ -1493,6 +1544,18 @@ mod tests {
 
         // then
         assert_eq!(failed, ["read_bounded"]);
+    }
+
+    #[test]
+    fn should_fail_prefetch_is_only_a_hint_when_a_prefetch_writes() {
+        // given
+        let suite_on_broken = || run::<PrefetchWrites>();
+
+        // when
+        let failed = suite_on_broken();
+
+        // then
+        assert_eq!(failed, ["prefetch_is_only_a_hint"]);
     }
 
     #[test]

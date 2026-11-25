@@ -120,11 +120,13 @@ fn vanished(error: &notify::Error) -> bool {
 }
 
 /// Watches what `pending` names: the directories the rules accept at and below each pending
-/// directory, or below the root. Returns every failure; the caller reports them.
+/// directory, or below the root, the whole tree on `walk_threads` threads
+/// ([`walk::watched_dirs`]). Returns every failure; the caller reports them.
 fn settle(
     watcher: &Mutex<RecommendedWatcher>,
     root: &Path,
     pending: Pending,
+    walk_threads: usize,
 ) -> Vec<WatchErrorKind> {
     let starts: Vec<PathBuf> = if pending.everything {
         vec![root.to_path_buf()]
@@ -133,7 +135,7 @@ fn settle(
     };
     let mut failures = Vec::new();
     for start in starts {
-        let (dirs, unreadable) = walk::watched_dirs(root, &start);
+        let (dirs, unreadable) = walk::watched_dirs(root, &start, walk_threads);
         failures.extend(read_failures(&unreadable));
         let mut watcher = lock(watcher);
         for dir in dirs {
@@ -254,6 +256,7 @@ pub struct FsWatch<P> {
     pending: Arc<Mutex<Pending>>,
     watcher: Arc<Mutex<RecommendedWatcher>>,
     root: Arc<PathBuf>,
+    walk_threads: usize,
     pool: P,
 }
 
@@ -301,7 +304,7 @@ impl<P: BlockingPool + Clone> Hints for FsWatch<P> {
         let mut cx = std::task::Context::from_waker(waker);
         loop {
             if let Some(pending) = self.take_pending() {
-                let failures = settle(&self.watcher, &self.root, pending);
+                let failures = settle(&self.watcher, &self.root, pending, self.walk_threads);
                 self.report(&failures);
                 continue;
             }
@@ -317,9 +320,10 @@ impl<P: BlockingPool + Clone> Hints for FsWatch<P> {
         loop {
             if let Some(pending) = self.take_pending() {
                 let (watcher, root) = (Arc::clone(&self.watcher), Arc::clone(&self.root));
+                let walk_threads = self.walk_threads;
                 let failures = self
                     .pool
-                    .run(move || settle(&watcher, &root, pending))
+                    .run(move || settle(&watcher, &root, pending, walk_threads))
                     .await
                     .unwrap_or_else(|_| vec![WatchErrorKind::Other]);
                 self.report(&failures);
@@ -333,14 +337,20 @@ impl<P: BlockingPool + Clone> Hints for FsWatch<P> {
     }
 }
 
-/// Starts watching `root`, a directory, with a hint queue of `capacity`. Every directory the rules
+/// Starts watching `root`, a directory, with a hint queue of `capacity`, walking the whole tree on
+/// `walk_threads` threads (`FsConfig::walk_threads`, as the listing does). Every directory the rules
 /// accept is watched before this returns; reaching the system's watch limit is a refusal, any
 /// other directory that cannot be watched a `Rescan(WatcherError)` waiting in the queue.
 ///
 /// Pinned by the `source_tree` contract suite (`watch_hints_a_write`, `watch_reports_queue_full`,
 /// `watch_leaves_out_agent_worktrees`, `watch_watches_a_new_directory_before_its_hint`, the
 /// dotted-directory cases).
-pub fn watch<P>(root: &Path, capacity: usize, pool: P) -> Result<FsWatch<P>, SourceTreeError> {
+pub fn watch<P>(
+    root: &Path,
+    capacity: usize,
+    walk_threads: usize,
+    pool: P,
+) -> Result<FsWatch<P>, SourceTreeError> {
     let (sink, queue) = hint_queue(capacity);
     let pending: Arc<Mutex<Pending>> = Arc::default();
     let handler = Handler {
@@ -361,6 +371,7 @@ pub fn watch<P>(root: &Path, capacity: usize, pool: P) -> Result<FsWatch<P>, Sou
                 everything: true,
                 ..Pending::default()
             },
+            walk_threads,
         );
         let watcher = watcher.into_inner().unwrap_or_else(PoisonError::into_inner);
         (failures, watcher)
@@ -370,7 +381,7 @@ pub fn watch<P>(root: &Path, capacity: usize, pool: P) -> Result<FsWatch<P>, Sou
             .map_err(|e| SourceTreeError::WatchFailed(kind(&e)))?;
         // The recursive stream reports no directory it cannot read: walk, after watching, the
         // directories the per-directory branch would have watched, for their read failures.
-        let (_, unreadable) = walk::watched_dirs(root, root);
+        let (_, unreadable) = walk::watched_dirs(root, root, walk_threads);
         (read_failures(&unreadable).collect(), watcher)
     };
     let (failures, watcher) = failures;
@@ -383,6 +394,7 @@ pub fn watch<P>(root: &Path, capacity: usize, pool: P) -> Result<FsWatch<P>, Sou
         pending,
         watcher: Arc::new(Mutex::new(watcher)),
         root: Arc::new(root.to_path_buf()),
+        walk_threads,
         pool,
     };
     watch.report(&failures);

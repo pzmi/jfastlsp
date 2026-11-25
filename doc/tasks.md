@@ -3282,12 +3282,65 @@ the loop is held p95 299–307 ms per slice (the whole 4.1–4.3 s settle before
   tell 2.74 s from 2.5 s (IDX-18 measured 2.8–3.1 s before and after an unchanged path). Median
   of three cold opens (`just bench-views medium cold`), warm and first answer beside; large
   projected.
+- **Reuse considered:** the kernel's own read-ahead (`posix_fadvise`, through `rustix`, already a
+  dependency) rather than reader threads of our own; `ignore`'s parallel walker, which the listing
+  already uses, for the watch's directory walk; mimalloc (MIT, Microsoft's, maintained, vendored C
+  built with `cc`) against jemalloc (measured the same through `LD_PRELOAD`; `tikv-jemallocator`
+  carries BSD-2-Clause C from an upstream archived in 2025) and glibc's `malloc` with tunables (set
+  only by the environment).
+- **Done** (2026-11-25; `doc/bench/README.md`, "The cold full index (IDX-19)", has the profile and
+  every measurement):
+  - **the profile:** per cold open of medium, 370 ms to the first answer (0.1 s user, 0.23 s
+    system, waits on the disk: the watch's one-thread walk of 2,800 directories, then the
+    listing's `lstat`s) and a 2.45 s settle (7.3–7.9 s user, 0.8–1.0 s system, 36k voluntary and
+    20k involuntary switches, 71 MiB read); IDX-18's 3.2 s of system CPU was mostly the
+    write-back after the publish, outside the row. The CPUs idled while a pool thread waited on a
+    cold read; `malloc` and `free` were about 6 % of the instructions (callgrind, glibc).
+  - **kept, each measured alone against the one before it:** a prefetch of each settle slice's
+    files and the next slice's (`SourceTree::prefetch`, a hint: `posix_fadvise(WILLNEED)` in
+    `jfl-adapter-fs`, nothing in the fake; −150 to −220 ms); mimalloc as the global allocator in
+    `jfl-composition`, `override` and `no_thp`, on Linux only (−90 to −240 ms; the settle's user
+    CPU 7.3 → 6.4 s; about 25 MiB more RSS after one cold open of medium, less over a longer run);
+    the watch's directory walk on `ignore`'s parallel walker, with `FsConfig::walk_threads` as the
+    listing (−110 to −120 ms, the first answer about 370 → 255 ms).
+  - **mimalloc is Linux-only** (review, 2026-11-25): every measurement was made on Linux, and on
+    macOS `override` would replace the default malloc zone with nothing testing it before landing
+    (`macos.yml` runs nightly). macOS keeps its system allocator; it can opt in after a `macos.yml`
+    run on a branch that enables it.
+  - **the prefetch and `read_budget`:** the budget bounds the bytes the process holds between a
+    read and the end of its parse; a prefetch holds none. It asks the kernel to fill the page cache
+    (reclaimable, outside the process's RSS), and nothing consumes its result, so the budget does
+    not govern it. It is bounded on our side: at most two slices of files (1,024 in the daemon) a
+    settle step, and each over at most the read limit (`MAX_SOURCE_BYTES` + 4, the length passed
+    to `posix_fadvise`), never the whole of a larger file.
+  - **measured and not kept:** one hand-off for the stat and the read (a `stat_then_read` port
+    call, with the read budget held from before the stat: 10 % fewer switches, no change in time,
+    so the port keeps its two calls); 32 files in flight; slices of 4,096; mimalloc's transparent
+    huge pages (50–70 MiB more for no speed). Not taken: the listing's stat reused in `settle`
+    (model first): the hand-off it would save measured nothing above.
+  - **result:** medium after a page-cache drop, four pool threads, median of nine alternated
+    opens: **2,800 ms before, 2,289 ms after** (2,192–2,413); the first answer 372 → 273 ms;
+    small 525 → 440 ms; warm store's whole view 713–790 → 519–573 ms; rescan 116 → 90 ms. The VM
+    was as quiet as this sandbox gets (the other lanes idle; load 1.7–2.5, the bench's own, and
+    0.1–0.2 s of steal an open); EVAL-05's runner confirms.
+  - **no model change:** the prefetch reads nothing the service uses and proves nothing fresh;
+    every watch is still added before `watch` returns, so watch-then-list holds.
+- **Large, projected (not measured):** the elasticsearch corpus is not fetched in this sandbox.
+  By E1's medium-to-large ratio (1.42 → 8.7 s cold, 6.1×, about the bytes' 6.2×) medium's
+  2,289 ms projects to about 14 s against the large row's 13 s; by files (3.6×) to about 8.4 s.
+  The parse scales with bytes, so the large row is open and likely over: EVAL-05 and LSP-06 measure
+  it.
+- **Left:** the large row (above); the extraction's share (the cursor walk, declarations and reference sites, a third of
+  the instructions); the watch's inotify registrations, one round trip to `notify`'s thread each
+  (about 100 ms on medium); the `jfl lsp` end-to-end rows, LSP-06's.
 - **Accept:**
-  - [ ] the full syntax index of medium after a page-cache drop within plan §1.7's 2.5 s on four cores, median of three on a quiet machine or EVAL-05's runner (`doc/bench/README.md`)
-  - [ ] every change measured alone, before and after; none that does not pay is kept
-  - [ ] a change to which stat proves a read fresh goes through views.qnt first (ADR 0007)
-  - [ ] behaviour unchanged: every test, golden and transcript
-- **Impact:** speed only; a port change if the combined stat and read is taken.
+  - [x] the full syntax index of medium after a page-cache drop within plan §1.7's 2.5 s on four cores, median of three on a quiet machine or EVAL-05's runner (`doc/bench/README.md`): 2,289 ms, median of nine on this VM with the other lanes idle; EVAL-05's runner to confirm
+  - [x] every change measured alone, before and after; none that does not pay is kept
+  - [x] a change to which stat proves a read fresh goes through views.qnt first (ADR 0007): none was made
+  - [x] behaviour unchanged: every test, golden and transcript
+- **Impact:** speed; a new product dependency (`mimalloc`, the process's allocator on Linux, plan §16.2)
+  and about 25 MiB more RSS after a cold open of medium; `SourceTree::prefetch` added to the
+  port with a no-op default (the contract's `prefetch_is_only_a_hint`).
 
 ### Lane LSP: M1, the LSP carrier
 
@@ -3660,6 +3713,7 @@ plugin; LSP-06 is M1's gate and makes the bench gate blocking.
 - **Accept:**
   - [ ] every automatable gate item has a passing test named in `doc/eval/m1.md`
   - [ ] `bench-gate` blocks on `main` and fails a planted 20 % regression that reproduces; the M1 rows of plan §1.7 measured, with the reference-machine run (owner) where the sandbox differs
+  - [ ] the full syntax index after a page-cache drop on the bench runner: medium within 2.5 s, confirming IDX-19's sandbox median (2,289 ms, 8 % headroom), and large measured against its 13 s (IDX-19 projects 8.4 to 14 s)
   - [ ] (owner) a real Claude Code smoke test with shell edits across 3 worktrees using the LSP plugin
   - [ ] (owner) the E0 task subset rerun with the LSP plugin; aggregates in `doc/eval/m1.md`
   - [ ] runs on the bench corpus (small at least, `just bench`) and reports the metrics it affects; its correctness tests also run against the real-corpus cases that apply (BENCH-05)

@@ -1,5 +1,5 @@
 //! Reads and stats refuse a FIFO without blocking on it (a FIFO opened for reading waits for a
-//! writer unless it is opened non-blocking); a stale cookie is swept and nothing else; an
+//! writer unless it is opened non-blocking), and a prefetch passes over one; a stale cookie is swept and nothing else; an
 //! existing cookie name is left alone; a directory on another device is a gap, not walked.
 
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -32,6 +32,27 @@ fn should_refuse_a_fifo_without_blocking_when_it_is_read_or_stated() {
     // then
     assert_eq!(read, Err(SourceTreeError::NotAFile));
     assert_eq!(stat, Err(SourceTreeError::NotAFile));
+}
+
+#[test]
+fn should_pass_over_a_fifo_without_blocking_when_it_is_prefetched() {
+    // given
+    let scratch = Scratch::new("fifo-prefetch");
+    let root = scratch.path().join("root");
+    write(&root, "A.java", b"class A {}").unwrap();
+    fifo(&root.join("Pipe.java")).unwrap();
+    let adapter = FsSourceTree::new(InlinePool, FsConfig::default());
+    let paths = [
+        RelPath::new("Pipe.java").unwrap(),
+        RelPath::new("A.java").unwrap(),
+    ];
+
+    // when
+    block_on(adapter.prefetch(&uri(&root), &paths, 1024));
+    let read = block_on(adapter.read(&uri(&root), &paths[1], 1024));
+
+    // then
+    assert_eq!(read.map(|r| r.bytes), Ok(b"class A {}".to_vec()));
 }
 
 #[cfg(test)]

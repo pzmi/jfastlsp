@@ -178,9 +178,19 @@ fn dir_exclusion(root: &Path, dir: &Path) -> Option<Exclusion> {
 /// a directory, or excluded. The second value is each directory that could not be read (`NotFound`
 /// left out: a directory removed meanwhile is hinted by its parent's watch).
 ///
+/// The whole tree (`start` is `root`, a watch's start) is walked by `ignore`'s parallel walker on
+/// `threads` threads (`FsConfig::walk_threads`; 0 lets `ignore` choose), as the listing is: after a page-cache drop each of medium's 2,800 directories is a wait on the
+/// disk, and one thread waiting on each in turn took about 100 ms of the first answer
+/// (`doc/bench/README.md`, IDX-19). A directory below the root (a new one, from a hint) is walked
+/// on the calling thread.
+///
 /// Pinned by: `tests/watch.rs::should_watch_only_what_the_rules_accept_when_a_tree_is_walked`.
 #[must_use]
-pub fn watched_dirs(root: &Path, start: &Path) -> (Vec<PathBuf>, Vec<std::io::ErrorKind>) {
+pub fn watched_dirs(
+    root: &Path,
+    start: &Path,
+    threads: usize,
+) -> (Vec<PathBuf>, Vec<std::io::ErrorKind>) {
     if start != root {
         let is_dir = fs::symlink_metadata(start).is_ok_and(|m| m.is_dir());
         if !is_dir || dir_exclusion(root, start).is_some() || inside_excluded(root, start) {
@@ -199,21 +209,31 @@ pub fn watched_dirs(root: &Path, start: &Path) -> (Vec<PathBuf>, Vec<std::io::Er
             && !entry.file_name().to_str().is_some_and(is_git_metadata)
             && dir_exclusion(&filter_root, entry.path()).is_none()
     });
-    let mut dirs = Vec::new();
-    let mut errors = Vec::new();
-    for entry in builder.build() {
+    let found: Mutex<(Vec<PathBuf>, Vec<std::io::ErrorKind>)> = Mutex::default();
+    let take = |entry: Result<DirEntry, ignore::Error>| {
+        let mut found = found.lock().unwrap_or_else(PoisonError::into_inner);
         match entry {
             Ok(entry) if entry.file_type().is_some_and(|t| t.is_dir()) => {
-                dirs.push(entry.into_path());
+                found.0.push(entry.into_path());
             }
             Ok(_) => {}
             Err(error) => match error.io_error().map(std::io::Error::kind) {
                 Some(std::io::ErrorKind::NotFound) | None => {}
-                Some(kind) => errors.push(kind),
+                Some(kind) => found.1.push(kind),
             },
         }
+    };
+    if start == root {
+        builder.threads(threads).build_parallel().run(|| {
+            Box::new(|entry| {
+                take(entry);
+                WalkState::Continue
+            })
+        });
+    } else {
+        builder.build().for_each(take);
     }
-    (dirs, errors)
+    found.into_inner().unwrap_or_else(PoisonError::into_inner)
 }
 
 /// Whether `dir` lies under `.git` or `.claude/worktrees/` below `root`.

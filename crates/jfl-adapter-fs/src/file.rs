@@ -57,6 +57,36 @@ pub fn stat(root: &Path, path: &RelPath) -> Result<FileStat, SourceTreeError> {
     Ok(file_stat(&meta))
 }
 
+/// Starts the kernel reading the first `limit` bytes of each regular file `root/path` into the
+/// page cache (`posix_fadvise(WILLNEED)` over that range, which queues the reads and returns
+/// before they finish), so a later [`read`] of at most `limit` bytes finds its pages there or on
+/// their way rather than waiting on the disk alone. The bound is ours, not the kernel's: nothing
+/// past what a read would take is asked for.
+/// Opened as [`read`] opens (non-blocking, so a FIFO cannot block it) and closed at once;
+/// anything that is not a regular file, or cannot be opened, is passed over. Elsewhere than
+/// Linux it does nothing.
+///
+/// Pinned by the `source_tree` contract suite (`prefetch_is_only_a_hint`) and
+/// `tests/files.rs::should_pass_over_a_fifo_without_blocking_when_it_is_prefetched`.
+pub fn prefetch(root: &Path, paths: &[RelPath], limit: usize) {
+    #[cfg(target_os = "linux")]
+    for path in paths {
+        let Ok(file) = OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_NONBLOCK)
+            .open(root.join(path.as_str()))
+        else {
+            continue;
+        };
+        let length = core::num::NonZeroU64::new(u64::try_from(limit).unwrap_or(u64::MAX));
+        if length.is_some() && file.metadata().is_ok_and(|meta| meta.is_file()) {
+            let _ = rustix::fs::fadvise(&file, 0, length, rustix::fs::Advice::WillNeed);
+        }
+    }
+    #[cfg(not(target_os = "linux"))]
+    let _ = (root, paths, limit);
+}
+
 /// Reads at most `limit` bytes of the regular file `root/path`. The buffer grows to the smaller
 /// of the file's size and the limit, never to a size the caller did not allow.
 ///

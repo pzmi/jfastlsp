@@ -50,10 +50,10 @@ fn should_watch_only_what_the_rules_accept_when_a_tree_is_walked() {
     tree(&root, &scratch.path().join("outside")).unwrap();
 
     // when
-    let (all, errors) = watched_dirs(&root, &root);
-    let (below_a, _) = watched_dirs(&root, &root.join("a"));
-    let (nested, _) = watched_dirs(&root, &root.join("nested"));
-    let (agents, _) = watched_dirs(&root, &root.join(".claude/worktrees/agent"));
+    let (all, errors) = watched_dirs(&root, &root, 0);
+    let (below_a, _) = watched_dirs(&root, &root.join("a"), 0);
+    let (nested, _) = watched_dirs(&root, &root.join("nested"), 0);
+    let (agents, _) = watched_dirs(&root, &root.join(".claude/worktrees/agent"), 0);
 
     // then
     assert_eq!(errors, []);

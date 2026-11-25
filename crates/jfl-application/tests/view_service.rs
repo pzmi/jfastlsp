@@ -1,8 +1,8 @@
 //! Component tests of the view service (IDX-09): the shell over the registry, driven over the
 //! testkit's fakes (a fake tree, a scripted repository, an in-memory store, a fake wall clock).
 
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 use std::task::Poll;
 use std::time::Duration;
 
@@ -260,6 +260,51 @@ mod given {
         }
     }
 
+    /// The fake tree, recording the paths of every prefetch it is asked for, in order.
+    pub(crate) struct Prefetches(
+        pub(crate) FakeSourceTree,
+        pub(crate) Arc<Mutex<Vec<Vec<String>>>>,
+    );
+
+    impl SourceTree for Prefetches {
+        type Watch = FakeWatch;
+
+        async fn list(&self, root: &FileUri, mode: ListMode) -> Result<Listing, SourceTreeError> {
+            self.0.list(root, mode).await
+        }
+        async fn read(
+            &self,
+            root: &FileUri,
+            path: &RelPath,
+            limit: usize,
+        ) -> Result<ReadBytes, SourceTreeError> {
+            self.0.read(root, path, limit).await
+        }
+        async fn stat(&self, root: &FileUri, path: &RelPath) -> Result<FileStat, SourceTreeError> {
+            self.0.stat(root, path).await
+        }
+        async fn prefetch(&self, root: &FileUri, paths: &[RelPath], limit: usize) {
+            self.1
+                .lock()
+                .unwrap()
+                .push(paths.iter().map(|p| p.as_str().to_owned()).collect());
+            self.0.prefetch(root, paths, limit).await;
+        }
+        async fn watch(&self, root: &FileUri) -> Result<FakeWatch, SourceTreeError> {
+            self.0.watch(root).await
+        }
+        async fn filesystem(&self, root: &FileUri) -> Result<FsKind, SourceTreeError> {
+            self.0.filesystem(root).await
+        }
+        async fn write_cookie(
+            &self,
+            root: &FileUri,
+            name: &RelPath,
+        ) -> Result<(), SourceTreeError> {
+            self.0.write_cookie(root, name).await
+        }
+    }
+
     /// The fake wall clock, counting the deadlines that were waited out: each resolves at its
     /// first poll, as the fake's do, and counts it.
     #[derive(Debug, Clone)]
@@ -320,8 +365,8 @@ mod given {
     }
 }
 use given::{
-    DeadlinesCounted, LateWriter, MAIN, NESTED, RescanAtCookie, World, ask, indexed, paths,
-    reasons, rel, summary_of, uri,
+    DeadlinesCounted, LateWriter, MAIN, NESTED, Prefetches, RescanAtCookie, World, ask, indexed,
+    paths, reasons, rel, summary_of, uri,
 };
 
 #[test]
@@ -769,6 +814,51 @@ fn should_publish_a_generation_per_slice_and_answer_between_them_when_settled_in
     assert!(!more_after);
     assert_eq!(indexed(&world), 4);
     assert!(after.completeness.is_complete(), "{:?}", reasons(&after));
+}
+
+#[test]
+fn should_prefetch_the_slice_and_the_next_when_settling() {
+    // given: a view whose open read `p/` and deferred `q/C.java`, `q/D.java` and `q/E.java`
+    let world = World::new(&[
+        ("p/A.java", b"class A {}"),
+        ("q/C.java", b"class C {}"),
+        ("q/D.java", b"class D {}"),
+        ("q/E.java", b"class E {}"),
+    ]);
+    let asked = Arc::new(Mutex::new(Vec::new()));
+    let mut config = ServiceConfig::new("t1");
+    config.open_whole = 0;
+    let mut service =
+        world.service_with(Prefetches(world.tree.clone(), Arc::clone(&asked)), config);
+    let first = block_on(service.request(&uri("/w/m/p/A.java"))).unwrap();
+    service.finish(first.id).unwrap();
+    let at_open = asked.lock().unwrap().clone();
+
+    // when: the settle in slices of one file
+    let mut steps = 0;
+    while block_on(service.settle(1)).unwrap() {
+        steps += 1;
+    }
+    let settled = block_on(service.request(&uri("/w/m/p/A.java"))).unwrap();
+
+    // then: nothing was prefetched for the open's own reads; each slice prefetched its file and
+    // the next slice's, and the view settled complete, every file indexed once
+    assert!(at_open.is_empty(), "{at_open:?}");
+    assert_eq!(steps, 2);
+    assert_eq!(
+        *asked.lock().unwrap(),
+        [
+            vec!["q/C.java", "q/D.java"],
+            vec!["q/D.java", "q/E.java"],
+            vec!["q/E.java"],
+        ]
+    );
+    assert!(
+        settled.completeness.is_complete(),
+        "{:?}",
+        reasons(&settled)
+    );
+    assert_eq!(indexed(&world), 4);
 }
 
 #[test]

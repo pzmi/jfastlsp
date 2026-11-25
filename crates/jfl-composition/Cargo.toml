@@ -29,6 +29,11 @@ serde_json = "1.0.154"
 thiserror = "2"
 serde = { version = "1.0.229", features = ["derive"] }
 
+# The process's allocator (IDX-19), on Linux only: every measurement was made there, and on macOS
+# `override` would replace the default malloc zone with nothing testing it (macos.yml first).
+[target.'cfg(target_os = "linux")'.dependencies]
+mimalloc = { version = "0.1.52", default-features = false, features = ["override", "no_thp"] }
+
 [lints]
 workspace = true
 
