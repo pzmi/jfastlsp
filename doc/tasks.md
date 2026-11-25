@@ -47,6 +47,7 @@ CLI carrier), **SEM-07** (M4),
 | FND-16 | Two daemon races from CI: a peer gone before its accept, an exit read before it happened | FND-15, IDX-12 | standard | M |  | — |
 | FND-17 | A request through a link to its worktree (macOS's `$TMPDIR`) was refused, never answered | FND-16, LSP-02 | standard | M |  | IDX-09e |
 | FND-18 | Two test races on main: a spawn doomed by a stopping daemon's lock, a publication read early | FND-17 | standard | M |  | IDX-09e |
+| FND-19 | The endpoint contract hangs on macOS | IDX-12b | standard | M |  | — |
 | XT-01 | Scaffold `tools/xtask` and port the gate composition | FND-08, FND-09 | deep | M |  | FND-10, EVAL lane |
 | XT-02 | Tool pins: `tools/versions.toml`, `cargo xtask doctor`, `install-tools` | XT-01 | standard | M |  | EVAL lane |
 | XT-03 | Security and workflow stages into xtask | XT-02 | standard | M |  | EVAL lane |
@@ -794,6 +795,59 @@ foundation piece by piece (ADR 0035).
   `spawnLockWaitExpires`); `formal/daemon.qnt`, the five daemon regression traces, the manifest's
   daemon entry; tests (four daemon tests, one unit test, the pushed diagnostics test rewritten,
   one new); plan §5.2, §7.2; `doc/formal-models.md`.
+
+#### FND-19: The endpoint contract hangs on macOS
+- **Depends on:** IDX-12b. **Model:** standard. **Size:** M. **Parallel with:** —.
+- **Cites:** plan §5.3; ver §2, §5; ADR 0007; the IDX-12b card (the `endpoint` contract).
+- **Why:** the manual `macos.yml` run 45546585441 (macos-15, arm64) on ea6bc4f failed in
+  `just platform-tests`, stage integration-tests: `jfl-adapter-ipc::contract
+  should_pass_every_case_of_the_endpoint_contract_when_the_carrier_is_the_unix_socket`, the
+  suite's first run on macOS, was killed by nextest at 120 s with no panic; the other 634 tests
+  passed and Linux CI is green. One test for ten cases said nothing of which one hung.
+- **The cause, a test-harness bug, not the product's:** `EndpointUnderTest::open` promises "a
+  client connected and the server's accept of it", but the real carrier
+  (`crates/jfl-adapter-ipc/tests/contract.rs`) returned once the client connected, and its server
+  thread accepted whenever it was scheduled. `clean_end_is_final` and
+  `truncated_frame_is_not_clean` write and close their client at once, so the accept usually came
+  after the close. On macOS the listener skips a peer that is gone by its accept (Tokio's
+  `peer_cred` asks XNU for `LOCAL_PEEREPID`, answered only for a live peer: `server.rs`'s
+  `accept_with`, documented and pinned by IDX-12's
+  `server::tests::should_accept_the_next_peer_when_the_credentials_of_a_gone_peer_fail`) and
+  waits for the next peer, which never comes; the suite's `server_next` was a `blocking_recv`
+  with no bound, so the test waited for ever. Linux keeps a gone peer's credentials and serves it,
+  so it never showed there. **Not a product bug:** the daemon answers nothing before a peer's
+  handshake, a call the proxy awaits, so a peer gone before its accept could never take an answer
+  and dropping it loses nothing observable; the uid check (the backstop of the `0700` directory)
+  stays as it is, and no daemon, socket or lock decision changes (ADR 0007: no model change).
+  **Ruled out by reading and by test:** the socket buffers (macOS's 8 KiB): the server reads ahead
+  on its own thread in every case, keeps reading after an oversized frame, and the whole suite
+  passed on Linux with both ends' buffers set to 2 KiB (the kernel's floor, 4608 bytes; measured
+  once, by hand, on a scratch change not kept); the
+  close and EOF paths of `server_close_is_eof` and `lost_framing_ends` end the server thread
+  before its join.
+- **The fix (tests only):** `open` lets the server accept and waits for the accept before a case
+  runs; the harness answers the uid lookup as XNU does on every platform (a peer hung up at its
+  accept, `POLLHUP` on a poll of no events, is skipped); every wait is bounded at 20 s without a
+  clock or a sleep (each one `poll(2)` on the socket, or on a `Bell` the server thread rings with
+  every event it posts: the server's reads, the client's sends, receives and raw writes, the
+  accept, the join); and each case is a test of its own, `<case>::should_pass_when_the_carrier_is_the_unix_socket`, through
+  `jfl_testkit::contracts::endpoint::check_case` and `case_names` (a list that drifts from the
+  suite fails `should_run_every_case_of_the_endpoint_contract_when_the_carrier_is_the_unix_socket`).
+  The fake and the eleven broken carriers keep running every case through `check`.
+- **Reuse considered:** the crate's `Bell` and `poll(2)`; no new dependency.
+- **Left (the review's LOW not taken):** a DEBUG `peer_skipped` event (its error kind a field)
+  where `Listener::accept` skips a peer whose credentials cannot be read: no crate of the
+  workspace depends on `tracing` yet, and the first such dependency (with its `architecture.toml`
+  and `deny.toml` entries and the subscriber IDX-12b left to come) is a change of its own.
+- **Speed:** no bench metric applies (ADR 0031): tests only.
+- **Accept:**
+  - [x] the macOS order forced on Linux: with the accept after the case's first steps and the XNU lookup, `clean_end_is_final` and `truncated_frame_is_not_clean` lose everything their client sent, every time, and fail at once naming their case (`tests/contract.rs::should_lose_the_cases_that_close_first_when_the_accept_comes_after_them`, Linux only: the `AtTheFirstRead` order is a cfg item, so no other target builds it); the old order (the accept not awaited) with the XNU lookup failed both in 9 runs of 10 (measured once, by hand, on a scratch change not kept)
+  - [x] each case a test of its own against the socket, the list checked against the suite's; the fake runs each case by name (`contracts::endpoint::tests`)
+  - [x] the affected tests repeated under load (4 CPU hogs): `tests/contract.rs` 50 runs, no failure; `just check` green
+  - [ ] (owner) `macos.yml` green after landing
+- **Impact:** `jfl-testkit` (`contracts::endpoint::check_case`, `case_names`, `open`'s doc);
+  `jfl-adapter-ipc`'s tests (`tests/contract.rs` rewritten around bounded waits, `plenty` moved
+  to `tests/endpoint.rs`, its only user).
 
 ### Lane XT: port mayfly's `xtask`, piece by piece
 

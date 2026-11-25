@@ -19,7 +19,12 @@ use jfl_adapter_ipc::{
 };
 use jfl_protocol::rpc::RequestId;
 use rustix::io::FdFlags;
-use support::{Scratch, plenty, runtime};
+use support::{Scratch, runtime};
+
+/// Ten seconds left, always: the tests' deadline for a wait that must end at once.
+fn plenty() -> impl FnMut() -> Option<std::time::Duration> {
+    || Some(std::time::Duration::from_secs(10))
+}
 
 #[cfg(test)]
 mod given {

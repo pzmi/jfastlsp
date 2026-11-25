@@ -113,7 +113,10 @@ pub trait Connection {
 
 /// A carrier under test: it opens connections.
 pub trait EndpointUnderTest {
-    /// Opens one connection: a client connected and the server's accept of it.
+    /// Opens one connection: a client connected and the server's accept of it, done before this
+    /// returns. A case may close its client at once, and a server may skip a peer that is gone
+    /// by its accept (macOS's listener does: `jfl-adapter-ipc`'s `server` module), so a carrier
+    /// that returned before its accept would lose the case's frames (FND-19).
     fn open(&mut self) -> Result<Box<dyn Connection>, String>;
 }
 
@@ -133,31 +136,58 @@ type Case = fn(&mut dyn Connection) -> Result<(), String>;
 /// connection.
 const PLENTY: Duration = Duration::from_secs(20);
 
+/// Every case, by name, in the order [`check`] runs them.
+const CASES: [(&str, Case); 10] = [
+    ("frames_in_order", frames_in_order),
+    ("large_frames_whole", large_frames_whole),
+    ("malformed_keeps_framing", malformed_keeps_framing),
+    ("oversized_skipped", oversized_skipped),
+    ("client_refuses_oversized", client_refuses_oversized),
+    ("clean_end_is_final", clean_end_is_final),
+    ("server_close_is_eof", server_close_is_eof),
+    ("timed_out_read_loses_nothing", timed_out_read_loses_nothing),
+    ("truncated_frame_is_not_clean", truncated_frame_is_not_clean),
+    ("lost_framing_ends", lost_framing_ends),
+];
+
+/// The names of every case, for a carrier that runs each as a test of its own (so a case that
+/// hangs is named by the test that hangs, FND-19).
+#[must_use]
+pub fn case_names() -> Vec<&'static str> {
+    CASES.iter().map(|(case, _)| *case).collect()
+}
+
 /// Runs every case, each on a connection of its own, and returns the violations; an empty list
 /// is a pass.
 pub fn check(endpoint: &mut impl EndpointUnderTest) -> Vec<Violation> {
-    let cases: [(&'static str, Case); 10] = [
-        ("frames_in_order", frames_in_order),
-        ("large_frames_whole", large_frames_whole),
-        ("malformed_keeps_framing", malformed_keeps_framing),
-        ("oversized_skipped", oversized_skipped),
-        ("client_refuses_oversized", client_refuses_oversized),
-        ("clean_end_is_final", clean_end_is_final),
-        ("server_close_is_eof", server_close_is_eof),
-        ("timed_out_read_loses_nothing", timed_out_read_loses_nothing),
-        ("truncated_frame_is_not_clean", truncated_frame_is_not_clean),
-        ("lost_framing_ends", lost_framing_ends),
-    ];
-    cases
-        .into_iter()
-        .filter_map(|(case, run)| {
-            let outcome = endpoint
-                .open()
-                .map_err(|e| format!("could not open a connection: {e}"))
-                .and_then(|mut conn| run(conn.as_mut()));
-            outcome.err().map(|detail| Violation { case, detail })
-        })
+    CASES
+        .iter()
+        .filter_map(|(case, run)| run_case(endpoint, case, *run).err())
         .collect()
+}
+
+/// Runs the case named `case` on a connection of its own. A name that is no case is a violation
+/// of its own, so a carrier's list of tests cannot drift from [`case_names`] silently.
+pub fn check_case(endpoint: &mut impl EndpointUnderTest, case: &str) -> Result<(), Violation> {
+    match CASES.iter().find(|(name, _)| *name == case) {
+        Some((name, run)) => run_case(endpoint, name, *run),
+        None => Err(Violation {
+            case: "unknown",
+            detail: format!("no case is named {case:?}"),
+        }),
+    }
+}
+
+fn run_case(
+    endpoint: &mut impl EndpointUnderTest,
+    case: &'static str,
+    run: Case,
+) -> Result<(), Violation> {
+    endpoint
+        .open()
+        .map_err(|e| format!("could not open a connection: {e}"))
+        .and_then(|mut conn| run(conn.as_mut()))
+        .map_err(|detail| Violation { case, detail })
 }
 
 fn request(id: &RequestId, method: &str, params: &Value) -> Vec<u8> {
@@ -710,6 +740,48 @@ mod tests {
 
         // then
         assert_eq!(violations, []);
+    }
+
+    #[test]
+    fn should_pass_each_case_by_name_when_the_carrier_is_the_in_memory_duplex() {
+        // given
+        let names = case_names();
+
+        // when
+        let outcomes: Vec<Result<(), Violation>> = names
+            .iter()
+            .map(|case| check_case(&mut DuplexEndpoint, case))
+            .collect();
+
+        // then
+        assert_eq!(names.len(), 10);
+        assert!(outcomes.iter().all(Result::is_ok), "{outcomes:?}");
+    }
+
+    #[test]
+    fn should_name_the_case_it_failed_when_run_by_name() {
+        // given
+        let fault = Fault::NoEofOnClose;
+
+        // when
+        let failed = check_case(&mut BrokenEndpoint(fault), "server_close_is_eof");
+        let other = check_case(&mut BrokenEndpoint(fault), "frames_in_order");
+
+        // then
+        assert_eq!(failed.map_err(|v| v.case), Err("server_close_is_eof"));
+        assert_eq!(other, Ok(()));
+    }
+
+    #[test]
+    fn should_report_a_violation_when_no_case_has_the_name() {
+        // given
+        let name = "no_such_case";
+
+        // when
+        let outcome = check_case(&mut DuplexEndpoint, name);
+
+        // then
+        assert_eq!(outcome.map_err(|v| v.case), Err("unknown"));
     }
 
     #[test]

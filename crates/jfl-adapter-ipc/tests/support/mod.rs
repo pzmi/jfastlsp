@@ -46,8 +46,3 @@ pub(crate) fn runtime() -> tokio::runtime::Runtime {
         .build()
         .unwrap()
 }
-
-/// Ten seconds left, always: the tests' deadline for a wait that must end at once.
-pub(crate) fn plenty() -> impl FnMut() -> Option<std::time::Duration> {
-    || Some(std::time::Duration::from_secs(10))
-}
